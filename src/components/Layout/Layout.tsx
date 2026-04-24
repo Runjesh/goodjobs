@@ -4,7 +4,7 @@ import {
   LayoutDashboard, HeartHandshake, Users, Wallet, ClipboardList,
   Building2, CalendarCheck, ShieldCheck, Search, Bell, Settings,
   Cpu, Lock, Menu, X, Wallet as Finance,
-  Wallet as WalletIcon, Moon, Sun, Sparkles
+  Wallet as WalletIcon, Moon, Sun, Sparkles, CheckSquare
 } from 'lucide-react';
 import CommandPalette from '../CommandPalette/CommandPalette';
 import IntentBar from './IntentBar';
@@ -14,11 +14,14 @@ import NotificationCenter from '../Notifications/NotificationCenter';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
+import { apiFetch } from '../../api/client';
+import { useStore } from '../../store/useStore';
 import './Layout.css';
 
 // ── Navigation Config ────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   { path: '/',            icon: LayoutDashboard, label: 'Dashboard',         module: 'dashboard',   section: 'main'    },
+  { path: '/tasks',       icon: CheckSquare,     label: 'Tasks',             module: 'tasks',       section: 'main'    },
   { path: '/agent-hq',   icon: Cpu,             label: 'SevaSuite Copilot', module: 'agent-hq',   section: 'main', accent: '#8b5cf6' },
   { path: '/fundraising', icon: HeartHandshake,  label: 'Fundraising Cloud', module: 'fundraising', section: 'main'    },
   { path: '/crm',         icon: Users,           label: 'Donor CRM',         module: 'crm',         section: 'main'    },
@@ -30,17 +33,16 @@ const NAV_ITEMS = [
   { path: '/settings',    icon: Settings,        label: 'Settings',          module: 'settings',    section: 'system'  },
 ];
 
-const MORE_ITEMS = NAV_ITEMS.slice(4); // Finance onwards in the "More" sheet
-
 // ── Component ────────────────────────────────────────────────────────────────
 const Layout: React.FC = () => {
   const [isPaletteOpen,  setIsPaletteOpen]  = useState(false);
   const [isSidebarOpen,  setIsSidebarOpen]  = useState(false);
-  const [isMoreOpen,     setIsMoreOpen]     = useState(false);
   const [isNotifOpen,    setIsNotifOpen]    = useState(false);
   const [isDarkMode,     setIsDarkMode]     = useState(false);
   const { user, can }  = useAuth();
   const { t, lang, setLanguage } = useTranslation();
+  const { setDonors, setTransactions, setCampaigns, setCsrCards } = useStore();
+  const { setVolunteers, setBeneficiaries } = useStore();
   const navigate       = useNavigate();
   const location       = useLocation();
   const meta           = user ? ROLE_META[user.role] : null;
@@ -48,7 +50,6 @@ const Layout: React.FC = () => {
   // Close sidebar & more on route change
   useEffect(() => {
     setIsSidebarOpen(false);
-    setIsMoreOpen(false);
   }, [location.pathname]);
 
   // ⌘K shortcut
@@ -60,12 +61,90 @@ const Layout: React.FC = () => {
       }
       if (e.key === 'Escape') {
         setIsSidebarOpen(false);
-        setIsMoreOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Hydrate CRM + transactions from backend (DB or memory mode)
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const [dRes, tRes] = await Promise.all([
+          apiFetch('/crm/donors'),
+          apiFetch('/finance/transactions'),
+        ]);
+        if (!dRes.ok || !tRes.ok) return;
+        const dData = await dRes.json();
+        const tData = await tRes.json();
+        if (cancelled) return;
+        if (Array.isArray(dData.donors)) setDonors(dData.donors);
+        if (Array.isArray(tData.transactions)) setTransactions(tData.transactions);
+      } catch {
+        // keep local demo data
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [setDonors, setTransactions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const res = await apiFetch('/fundraising/campaigns');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (Array.isArray(data.campaigns)) setCampaigns(data.campaigns);
+      } catch {
+        // keep local demo data
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [setCampaigns]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const res = await apiFetch('/csr/cards');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (Array.isArray(data.cards)) setCsrCards(data.cards as any);
+      } catch {
+        // keep local demo data
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [setCsrCards]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const [vRes, bRes] = await Promise.all([
+          apiFetch('/volunteers/roster'),
+          apiFetch('/programs/beneficiaries'),
+        ]);
+        if (!vRes.ok || !bRes.ok) return;
+        const vData = await vRes.json();
+        const bData = await bRes.json();
+        if (cancelled) return;
+        if (Array.isArray(vData.volunteers)) setVolunteers(vData.volunteers);
+        if (Array.isArray(bData.beneficiaries)) setBeneficiaries(bData.beneficiaries);
+      } catch {
+        // keep local demo data
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [setVolunteers, setBeneficiaries]);
 
   // Dark mode init
   useEffect(() => {
@@ -84,9 +163,9 @@ const Layout: React.FC = () => {
 
   // Prevent body scroll when drawer open
   useEffect(() => {
-    document.body.style.overflow = (isSidebarOpen || isMoreOpen) ? 'hidden' : '';
+    document.body.style.overflow = isSidebarOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
-  }, [isSidebarOpen, isMoreOpen]);
+  }, [isSidebarOpen]);
 
   const handleNavClick = useCallback((e: React.MouseEvent, module: string, label: string) => {
     const hasAccess = can(module, 'canView');
@@ -246,47 +325,7 @@ const Layout: React.FC = () => {
       </main>
 
       {/* ── Bottom Navigation (mobile) ───────────────────── */}
-      <BottomNav onMoreClick={() => setIsMoreOpen(true)} />
-
-      {/* ── "More" Bottom Sheet (mobile) ─────────────────── */}
-      <div
-        className={`more-sheet-overlay ${isMoreOpen ? 'open' : ''}`}
-        onClick={() => setIsMoreOpen(false)}
-        aria-hidden="true"
-      />
-      {isMoreOpen && (
-        <div className="more-sheet" role="dialog" aria-label="More navigation options">
-          <div className="more-sheet-handle" />
-          <div className="more-sheet-title">More Modules</div>
-          <div className="more-sheet-grid">
-            {MORE_ITEMS.map(item => {
-              const Icon = item.icon;
-              const hasAccess = can(item.module, 'canView');
-              return (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) =>
-                    `more-sheet-item ${isActive ? 'active' : ''} ${!hasAccess ? 'locked' : ''}`
-                  }
-                  onClick={e => {
-                    if (!hasAccess) {
-                      e.preventDefault();
-                      toast(`🔒 ${item.label} is restricted.`, { duration: 2000 });
-                    }
-                    setIsMoreOpen(false);
-                  }}
-                >
-                  <div className="more-sheet-icon">
-                    <Icon size={20} color={hasAccess ? 'var(--color-primary)' : 'var(--color-text-tertiary)'} />
-                  </div>
-                  {item.label.split(' ')[0]}
-                </NavLink>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <BottomNav />
 
       {/* Command Palette */}
       <CommandPalette

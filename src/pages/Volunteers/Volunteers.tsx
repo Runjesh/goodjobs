@@ -1,32 +1,81 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Clock, Users, MapPin, UserPlus, Send, CheckCircle2, ShieldAlert, X, Bell, Calendar } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import './Volunteers.css';
 import { apiFetch } from '../../api/client';
 
-const shifts = [
-  { id: 1, title: 'Weekend Teaching Assistant', date: 'Sat, Nov 12 • 09:00 AM', location: 'Govt School, Block B', filled: 4, total: 5, role: 'Education' },
-  { id: 2, title: 'Health Camp Registration Desk', date: 'Sun, Nov 13 • 08:30 AM', location: 'Community Hall, Pune', filled: 8, total: 10, role: 'Admin' },
-  { id: 3, title: 'Tree Plantation Drive', date: 'Sat, Nov 19 • 07:00 AM', location: 'City Park Outskirts', filled: 25, total: 50, role: 'Environment' },
-];
+type Shift = { id: number; title: string; date: string; location: string; filled: number; total: number; role: string };
+type Signup = { id: string; shiftId: number; volunteerName: string; createdAt?: string };
 
 const Volunteers: React.FC = () => {
   const { volunteers, addVolunteer } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
-  const [selectedShift, setSelectedShift] = useState(shifts[0]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [signups, setSignups] = useState<Signup[]>([]);
+  const [shiftsLoading, setShiftsLoading] = useState(false);
+  const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
   const [reminderConfig, setReminderConfig] = useState({ timing: '24h', channel: 'whatsapp', message: '' });
   const [form, setForm] = useState({ name: '', skills: '', verified: false });
+  const [showSignupModal, setShowSignupModal] = useState(false);
+  const [signupShift, setSignupShift] = useState<Shift | null>(null);
+  const [signupName, setSignupName] = useState('');
+
+  const refresh = async () => {
+    setShiftsLoading(true);
+    try {
+      const [sRes, suRes] = await Promise.all([
+        apiFetch('/volunteers/shifts'),
+        apiFetch('/volunteers/signups'),
+      ]);
+      if (sRes.ok) {
+        const sData = await sRes.json();
+        const list = Array.isArray(sData.shifts) ? sData.shifts : [];
+        setShifts(list);
+        setSelectedShift((prev) => prev ?? list[0] ?? null);
+      }
+      if (suRes.ok) {
+        const suData = await suRes.json();
+        setSignups(Array.isArray(suData.signups) ? suData.signups : []);
+      }
+    } catch {
+      // keep empty; page still usable for roster + broadcast
+    } finally {
+      setShiftsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
 
   const handleAddVolunteer = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
+    const skills = form.skills.split(',').map(s => s.trim()).filter(Boolean);
+    // optimistic local add
     addVolunteer({
       name: form.name,
-      skills: form.skills.split(',').map(s => s.trim()).filter(Boolean),
+      skills,
       verified: form.verified,
     });
+    // persist to backend roster (best-effort)
+    apiFetch('/volunteers/roster', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: form.name, skills, verified: form.verified }),
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        // refresh roster from backend so IDs match
+        const r = await apiFetch('/volunteers/roster');
+        if (r.ok) {
+          const data = await r.json();
+          if (Array.isArray(data.volunteers)) useStore.getState().setVolunteers(data.volunteers);
+        }
+      })
+      .catch(() => {});
     toast.success(`${form.name} added to volunteer roster!`);
     setForm({ name: '', skills: '', verified: false });
     setShowModal(false);
@@ -51,12 +100,13 @@ const Volunteers: React.FC = () => {
   };
 
   const handleManageShift = (title: string) => {
-    const shift = shifts.find(s => s.title === title) || shifts[0];
+    const shift = shifts.find(s => s.title === title) || shifts[0] || null;
     setSelectedShift(shift);
     setShowReminderModal(true);
   };
 
   const handleSendReminder = async () => {
+    if (!selectedShift) return;
     try {
       const res = await apiFetch('/volunteers/reminder', {
         method: 'POST',
@@ -79,6 +129,38 @@ const Volunteers: React.FC = () => {
     }
   };
 
+  const shiftSignupCounts = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const s of signups) m.set(s.shiftId, (m.get(s.shiftId) || 0) + 1);
+    return m;
+  }, [signups]);
+
+  const handleSignup = async (shiftId: number) => {
+    const shift = shifts.find(s => s.id === shiftId) || null;
+    setSignupShift(shift);
+    setSignupName('');
+    setShowSignupModal(true);
+  };
+
+  const submitSignup = async () => {
+    if (!signupShift) return;
+    const name = signupName.trim();
+    if (!name) return;
+    try {
+      const res = await apiFetch(`/volunteers/shifts/${encodeURIComponent(String(signupShift.id))}/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ volunteer_name: name }),
+      });
+      if (!res.ok) throw new Error('signup');
+      toast.success('Signed up.');
+      setShowSignupModal(false);
+      refresh();
+    } catch {
+      toast.error('Failed to sign up.');
+    }
+  };
+
   return (
     <div className="volunteers-container">
       <div className="page-header">
@@ -90,7 +172,7 @@ const Volunteers: React.FC = () => {
           <button className="btn btn-secondary" onClick={handleBroadcast}>
             <Send size={16} /> Broadcast WhatsApp
           </button>
-          <button className="btn btn-secondary" onClick={() => { setSelectedShift(shifts[0]); setShowReminderModal(true); }}>
+          <button className="btn btn-secondary" onClick={() => { setSelectedShift(shifts[0] || null); setShowReminderModal(true); }}>
             <Bell size={16} /> Schedule Reminder
           </button>
           <button className="btn btn-primary" onClick={() => setShowModal(true)}>
@@ -124,7 +206,10 @@ const Volunteers: React.FC = () => {
             <div className="card-header flex justify-between items-center">
               <h3 className="card-title">Shift Scheduling</h3>
               <div className="flex gap-2">
-                <span className="badge badge-outline">List View</span>
+                <span className="badge badge-outline">{shiftsLoading ? 'Loading…' : 'List View'}</span>
+                <button className="btn btn-secondary" style={{ padding: '0.125rem 0.5rem', fontSize: '0.7rem' }} onClick={refresh} disabled={shiftsLoading}>
+                  Refresh
+                </button>
               </div>
             </div>
             <div className="card-body">
@@ -144,12 +229,28 @@ const Volunteers: React.FC = () => {
                       <div className="progress-bar-sm">
                         <div className="progress-fill-sm" style={{ width: `${(shift.filled / shift.total) * 100}%` }}></div>
                       </div>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.125rem 0.5rem', fontSize: '0.7rem' }}
+                        onClick={() => handleSignup(shift.id)}
+                        disabled={shift.filled >= shift.total}
+                      >
+                        Join
+                      </button>
                       <button className="btn btn-secondary" style={{ padding: '0.125rem 0.5rem', fontSize: '0.7rem' }} onClick={() => handleManageShift(shift.title)}>
                         Manage
                       </button>
                     </div>
+                    <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                      Signups logged: {shiftSignupCounts.get(shift.id) || 0}
+                    </div>
                   </div>
                 ))}
+                {!shiftsLoading && shifts.length === 0 && (
+                  <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>
+                    No shifts found.
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -213,7 +314,7 @@ const Volunteers: React.FC = () => {
 
             <div className="input-group" style={{ marginBottom: '1rem' }}>
               <label className="input-label">Shift</label>
-              <select className="input-field" value={selectedShift.id} onChange={e => setSelectedShift(shifts.find(s => s.id === Number(e.target.value)) || shifts[0])}>
+              <select className="input-field" value={selectedShift?.id || ''} onChange={e => setSelectedShift(shifts.find(s => s.id === Number(e.target.value)) || shifts[0] || null)}>
                 {shifts.map(s => <option key={s.id} value={s.id}>{s.title} — {s.date}</option>)}
               </select>
             </div>
@@ -240,11 +341,11 @@ const Volunteers: React.FC = () => {
             </div>
             <div className="input-group" style={{ marginBottom: '1rem' }}>
               <label className="input-label">Custom Message (optional)</label>
-              <textarea className="input-field" rows={3} placeholder={`Namaste! Reminder: Your volunteer shift "${selectedShift.title}" is ${reminderConfig.timing} away. Location: ${selectedShift.location}. Thank you for your seva! 🙏`}
+              <textarea className="input-field" rows={3} placeholder={selectedShift ? `Namaste! Reminder: Your volunteer shift "${selectedShift.title}" is ${reminderConfig.timing} away. Location: ${selectedShift.location}. Thank you for your seva! 🙏` : 'Select a shift first.'}
                 value={reminderConfig.message} onChange={e => setReminderConfig({ ...reminderConfig, message: e.target.value })} />
             </div>
             <div style={{ padding: '0.75rem', background: '#f0fdf4', borderRadius: 'var(--radius-md)', fontSize: '0.8rem', marginBottom: '1rem', color: '#166534' }}>
-              ✅ Will send to <strong>{selectedShift.filled} confirmed volunteers</strong> for "{selectedShift.title}" at {selectedShift.location}
+              ✅ Will send to <strong>{selectedShift?.filled || 0} confirmed volunteers</strong> for "{selectedShift?.title || '—'}" at {selectedShift?.location || '—'}
             </div>
             <div className="flex gap-3">
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => toast('Reminder draft saved!', { icon: '💾' })}>Save Draft</button>
@@ -274,6 +375,44 @@ const Volunteers: React.FC = () => {
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Add to Roster</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showSignupModal && signupShift && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '440px', padding: '1.5rem', position: 'relative' }}>
+            <button onClick={() => setShowSignupModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
+            <h2 style={{ marginBottom: '0.5rem' }}>Join shift</h2>
+            <p style={{ marginBottom: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
+              {signupShift.title} • {signupShift.date} • {signupShift.location}
+            </p>
+
+            <div className="input-group" style={{ marginBottom: '1rem' }}>
+              <label className="input-label">Volunteer</label>
+              <select
+                className="input-field"
+                value={signupName}
+                onChange={(e) => setSignupName(e.target.value)}
+              >
+                <option value="">Select from roster…</option>
+                {volunteers.map(v => (
+                  <option key={v.id} value={v.name}>{v.name}</option>
+                ))}
+              </select>
+              <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                Not in roster? Add them first with “Add Volunteer”.
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowSignupModal(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" style={{ flex: 2 }} onClick={submitSignup} disabled={!signupName}>
+                Confirm signup
+              </button>
+            </div>
           </div>
         </div>
       )}

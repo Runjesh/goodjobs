@@ -85,11 +85,22 @@ interface AppState {
   volunteers: Volunteer[];
   complianceDocs: ComplianceDocument[];
 
+  setDonors: (donors: Donor[]) => void;
+  setTransactions: (txs: Transaction[]) => void;
+  setCampaigns: (campaigns: Campaign[]) => void;
+  setCsrCards: (cards: CSRCard[]) => void;
+  setVolunteers: (volunteers: Volunteer[]) => void;
+  setBeneficiaries: (beneficiaries: Beneficiary[]) => void;
+
   addCampaign: (campaign: Omit<Campaign, 'id' | 'raised' | 'donorsCount'>) => void;
+  addCampaignWithId: (campaign: Campaign) => void;
   addDonor: (donor: Omit<Donor, 'id' | 'totalGiven' | 'lastGift' | 'initial'>) => void;
+  addDonorWithId: (donor: Donor) => void;
   addTransaction: (transaction: Omit<Transaction, 'id' | 'timestamp'>) => void;
+  addTransactionWithId: (transaction: Transaction) => void;
   moveCSRCard: (cardId: number, newCol: string) => void;
   addCSRCard: (card: Omit<CSRCard, 'id'>) => void;
+  addCSRCardWithId: (card: CSRCard) => void;
   addBeneficiary: (b: Omit<Beneficiary, 'id'>) => void;
   addVolunteer: (v: Omit<Volunteer, 'id' | 'hours'>) => void;
   addComplianceDoc: (doc: Omit<ComplianceDocument, 'id' | 'uploadedAt'>) => void;
@@ -155,12 +166,27 @@ export const useStore = create<AppState>((set) => ({
   volunteers: initialVolunteers,
   complianceDocs: initialComplianceDocs,
 
+  setDonors: (donors) => set(() => ({ donors })),
+  setTransactions: (transactions) => set(() => ({ transactions })),
+  setCampaigns: (campaigns) => set(() => ({ campaigns })),
+  setCsrCards: (csrCards) => set(() => ({ csrCards })),
+  setVolunteers: (volunteers) => set(() => ({ volunteers })),
+  setBeneficiaries: (beneficiaries) => set(() => ({ beneficiaries })),
+
   addCampaign: (campaign) => set((state) => ({
     campaigns: [...state.campaigns, { ...campaign, id: `c${Date.now()}`, raised: 0, donorsCount: 0 }]
   })),
 
+  addCampaignWithId: (campaign) => set((state) => ({
+    campaigns: [campaign, ...state.campaigns.filter(c => c.id !== campaign.id)]
+  })),
+
   addDonor: (donor) => set((state) => ({
     donors: [...state.donors, { ...donor, id: `${Date.now()}`, totalGiven: 0, lastGift: 'N/A', initial: donor.name.charAt(0).toUpperCase() }]
+  })),
+
+  addDonorWithId: (donor) => set((state) => ({
+    donors: [donor, ...state.donors.filter(d => d.id !== donor.id)]
   })),
 
   addTransaction: (transaction) => set((state) => {
@@ -180,12 +206,32 @@ export const useStore = create<AppState>((set) => ({
     return { transactions: [newTx, ...state.transactions], campaigns: updatedCampaigns, donors: updatedDonors };
   }),
 
+  addTransactionWithId: (transaction) => set((state) => {
+    const newTx: Transaction = { ...transaction, timestamp: transaction.timestamp || Date.now() };
+    const updatedCampaigns = state.campaigns.map(c => {
+      if (c.id === newTx.campaignId) {
+        const isExisting = state.transactions.some(t => t.campaignId === c.id && t.donorId === newTx.donorId);
+        return { ...c, raised: c.raised + newTx.amount, donorsCount: isExisting ? c.donorsCount : c.donorsCount + 1 };
+      }
+      return c;
+    });
+    const updatedDonors = state.donors.map(d => {
+      if (d.id === newTx.donorId) return { ...d, totalGiven: d.totalGiven + newTx.amount, lastGift: new Date().toISOString().split('T')[0] };
+      return d;
+    });
+    return { transactions: [newTx, ...state.transactions.filter(t => t.id !== newTx.id)], campaigns: updatedCampaigns, donors: updatedDonors };
+  }),
+
   moveCSRCard: (cardId, newCol) => set((state) => ({
     csrCards: state.csrCards.map(c => c.id === cardId ? { ...c, col: newCol } : c)
   })),
 
   addCSRCard: (card) => set((state) => ({
     csrCards: [...state.csrCards, { ...card, id: Date.now() }]
+  })),
+
+  addCSRCardWithId: (card) => set((state) => ({
+    csrCards: [card, ...state.csrCards.filter(c => String(c.id) !== String(card.id))]
   })),
 
   addBeneficiary: (b) => set((state) => ({

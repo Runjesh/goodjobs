@@ -44,28 +44,62 @@ const CSR: React.FC = () => {
 
   const handleDragStart = (id: number) => setDragId(id);
 
-  const handleDrop = (col: string) => {
+  const handleDrop = async (col: string) => {
     if (dragId !== null) {
       const card = csrCards.find(c => c.id === dragId);
       if (card && card.col !== col) {
         moveCSRCard(dragId, col);
+        try {
+          await apiFetch(`/csr/cards/${encodeURIComponent(String(dragId))}/move`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ col }),
+          });
+        } catch {
+          // best-effort; UI already updated
+        }
         toast.success(`Moved "${card.company}" to ${columns.find(c => c.id === col)?.title}`);
       }
       setDragId(null);
     }
   };
 
-  const handleAddProposal = (e: React.FormEvent) => {
+  const handleAddProposal = async (e: React.FormEvent) => {
     e.preventDefault();
+    const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
+    // optimistic
     addCSRCard({
       company: form.company,
       amount: Number(form.amount),
       project: form.project,
-      tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
+      tags,
       agent: 'AD',
       col: form.col,
       date: 'Just added'
     });
+    try {
+      const res = await apiFetch('/csr/cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company: form.company,
+          amount: Number(form.amount),
+          project: form.project,
+          tags,
+          agent: 'AD',
+          col: form.col,
+          date: 'Just added',
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.card?.id) {
+          useStore.getState().addCSRCardWithId(data.card);
+        }
+      }
+    } catch {
+      // ignore
+    }
     toast.success(`New proposal for ${form.company} added to pipeline!`);
     setForm({ company: '', amount: 1000000, project: '', tags: '', col: 'prospecting' });
     setShowModal(false);

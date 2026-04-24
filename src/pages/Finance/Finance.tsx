@@ -13,6 +13,14 @@ const initialGrants = [
 const Finance: React.FC = () => {
   const [grants, setGrants] = useState(initialGrants);
   const [showEntryModal, setShowEntryModal] = useState(false);
+  const [showGrantModal, setShowGrantModal] = useState(false);
+  const [editingGrantId, setEditingGrantId] = useState<string | null>(null);
+  const [grantForm, setGrantForm] = useState<{ name: string; total: number; spent: number; status: string }>({
+    name: '',
+    total: 1000000,
+    spent: 0,
+    status: 'On Track',
+  });
   const [entry, setEntry] = useState({ description: '', amount: 1000, type: 'Expense', fund: 'General' });
   const [classification, setClassification] = useState<{category: string, confidence: number} | null>(null);
   const [isClassifying, setIsClassifying] = useState(false);
@@ -112,6 +120,54 @@ const Finance: React.FC = () => {
 
   const handleGenerateUC = () => {
     toast.success('Generating Utilization Certificate (CSR-1) PDF...', { icon: '📄' });
+  };
+
+  const openCreateGrant = () => {
+    setEditingGrantId(null);
+    setGrantForm({ name: '', total: 1000000, spent: 0, status: 'On Track' });
+    setShowGrantModal(true);
+  };
+
+  const openEditGrant = (g: any) => {
+    setEditingGrantId(g.id);
+    setGrantForm({ name: g.name, total: Number(g.total) || 0, spent: Number(g.spent) || 0, status: g.status || 'On Track' });
+    setShowGrantModal(true);
+  };
+
+  const saveGrant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        name: grantForm.name,
+        total: Number(grantForm.total),
+        spent: Number(grantForm.spent),
+        variance: Number(grantForm.total) - Number(grantForm.spent),
+        status: grantForm.status,
+      };
+      const res = await apiFetch(editingGrantId ? `/finance/grants/${encodeURIComponent(editingGrantId)}` : '/finance/grants', {
+        method: editingGrantId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('save grant');
+      toast.success(editingGrantId ? 'Grant updated.' : 'Grant created.');
+      setShowGrantModal(false);
+      await loadGrants();
+    } catch {
+      toast.error('Failed to save grant.');
+    }
+  };
+
+  const deleteGrant = async (id: string) => {
+    if (!confirm('Delete this grant?')) return;
+    try {
+      const res = await apiFetch(`/finance/grants/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('delete');
+      toast.success('Grant deleted.');
+      await loadGrants();
+    } catch {
+      toast.error('Failed to delete grant.');
+    }
   };
 
   return (
@@ -228,6 +284,9 @@ const Finance: React.FC = () => {
         <div className="card-header flex justify-between items-center">
           <h3 className="card-title">Grant Budget & Utilization</h3>
           <div className="flex gap-2">
+            <button className="btn btn-primary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={openCreateGrant}>
+              <Plus size={14} /> Add Grant
+            </button>
             <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={loadGrants} disabled={grantsLoading}>
               <RefreshCw size={14} /> {grantsLoading ? 'Loading…' : 'Refresh'}
             </button>
@@ -272,10 +331,20 @@ const Finance: React.FC = () => {
                         </span>
                       </td>
                       <td>
-                        <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                          onClick={() => toast(`Generating P&L report for ${grant.name}...`, { icon: '📊' })}>
-                          View P&L
-                        </button>
+                        <div className="flex gap-2">
+                          <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                            onClick={() => toast(`Generating P&L report for ${grant.name}...`, { icon: '📊' })}>
+                            View P&L
+                          </button>
+                          <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                            onClick={() => openEditGrant(grant)}>
+                            Edit
+                          </button>
+                          <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+                            onClick={() => deleteGrant(grant.id)}>
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -303,11 +372,7 @@ const Finance: React.FC = () => {
                       if (val.length > 5 && entry.fund === 'FCRA') {
                         setIsClassifying(true);
                         try {
-                          const token = localStorage.getItem('access_token');
-                          const res = await fetch(`http://localhost:8000/workflows/classify-transaction?description=${encodeURIComponent(val)}`, {
-                            method: 'POST',
-                            headers: { 'Authorization': `Bearer ${token}` }
-                          });
+                          const res = await apiFetch(`/workflows/classify-transaction?description=${encodeURIComponent(val)}`, { method: 'POST' });
                           if (res.ok) {
                             const data = await res.json();
                             setClassification(data);
@@ -355,6 +420,41 @@ const Finance: React.FC = () => {
                 </select>
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Record Entry</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showGrantModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '440px', padding: '1.5rem', position: 'relative' }}>
+            <button onClick={() => setShowGrantModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
+            <h2 style={{ marginBottom: '1.25rem' }}>{editingGrantId ? 'Edit Grant' : 'Add Grant'}</h2>
+            <form onSubmit={saveGrant} className="flex-col gap-4 flex">
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Grant name</label>
+                <input required className="input-field" value={grantForm.name} onChange={(e) => setGrantForm({ ...grantForm, name: e.target.value })} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Total budget (₹)</label>
+                  <input type="number" className="input-field" min={0} value={grantForm.total} onChange={(e) => setGrantForm({ ...grantForm, total: Number(e.target.value) })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Spent (₹)</label>
+                  <input type="number" className="input-field" min={0} value={grantForm.spent} onChange={(e) => setGrantForm({ ...grantForm, spent: Number(e.target.value) })} />
+                </div>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Status</label>
+                <select className="input-field" value={grantForm.status} onChange={(e) => setGrantForm({ ...grantForm, status: e.target.value })}>
+                  <option value="On Track">On Track</option>
+                  <option value="Over Budget">Over Budget</option>
+                </select>
+              </div>
+              <button type="submit" className="btn btn-primary">
+                {editingGrantId ? 'Save changes' : 'Create grant'}
+              </button>
             </form>
           </div>
         </div>

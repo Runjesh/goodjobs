@@ -103,7 +103,7 @@ const AgentHQ: React.FC = () => {
       setApprovals(prev => prev.filter(a => a.id !== id));
       console.log('Execution result:', execData);
     } catch {
-      toast.error('Failed to approve/execute (requires ED/Admin + DB).');
+      toast.error('Failed to approve/execute.');
     }
   };
 
@@ -118,7 +118,7 @@ const AgentHQ: React.FC = () => {
       toast.success('Rejected.');
       setApprovals(prev => prev.filter(a => a.id !== id));
     } catch {
-      toast.error('Failed to reject (requires ED/Admin + DB).');
+      toast.error('Failed to reject.');
     }
   };
 

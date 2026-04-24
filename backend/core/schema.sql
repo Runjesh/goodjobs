@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS donors (
 
 CREATE INDEX idx_donors_ngo ON donors(ngo_id);
 
+-- Optional app metadata for SevaSuite UI (safe to apply repeatedly)
+ALTER TABLE donors ADD COLUMN IF NOT EXISTS donor_type TEXT;
+ALTER TABLE donors ADD COLUMN IF NOT EXISTS pan_masked TEXT;
+ALTER TABLE donors ADD COLUMN IF NOT EXISTS location_text TEXT;
+ALTER TABLE donors ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
+ALTER TABLE donors ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb;
+
 -- ── 3. Finance: Transactions (ngo_id scoped) ───────────────────────────────
 CREATE TYPE fund_type AS ENUM ('General', 'FCRA', 'CSR', 'Restricted Grant');
 
@@ -73,6 +80,107 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 CREATE INDEX idx_transactions_ngo ON transactions(ngo_id);
 CREATE INDEX idx_transactions_donor ON transactions(donor_id);
+
+-- Optional app metadata for SevaSuite UI (safe to apply repeatedly)
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS donor_name TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS campaign_id TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS campaign_title TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb;
+
+-- ── 3b. Fundraising: Campaigns (ngo_id scoped) ─────────────────────────────
+CREATE TABLE IF NOT EXISTS campaigns (
+    id           TEXT PRIMARY KEY,                 -- frontend-friendly id e.g. c1, c2
+    ngo_id       TEXT NOT NULL,
+    title        VARCHAR(255) NOT NULL,
+    cause        VARCHAR(120),
+    goal         DECIMAL(14, 2) NOT NULL DEFAULT 0,
+    raised       DECIMAL(14, 2) NOT NULL DEFAULT 0,
+    donors_count INTEGER NOT NULL DEFAULT 0,
+    status       VARCHAR(20) NOT NULL DEFAULT 'active', -- active | draft
+    image        TEXT,
+    created_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaigns_ngo ON campaigns(ngo_id);
+
+-- ── 3c. CSR: Pipeline Cards (ngo_id scoped) ────────────────────────────────
+CREATE TABLE IF NOT EXISTS csr_pipeline_cards (
+    id          TEXT PRIMARY KEY,         -- frontend-friendly id
+    ngo_id      TEXT NOT NULL,
+    company     VARCHAR(255) NOT NULL,
+    amount      DECIMAL(14, 2) NOT NULL DEFAULT 0,
+    project     TEXT,
+    tags        TEXT[] DEFAULT '{}',
+    agent       TEXT,
+    col         VARCHAR(40) NOT NULL DEFAULT 'prospecting',
+    date_label  TEXT,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_csr_pipeline_ngo ON csr_pipeline_cards(ngo_id);
+
+-- ── 3d. Volunteers: Shifts + Signups (ngo_id scoped) ───────────────────────
+CREATE TABLE IF NOT EXISTS volunteer_shifts (
+    id          INTEGER PRIMARY KEY,
+    ngo_id      TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    date_label  TEXT NOT NULL,
+    location    TEXT NOT NULL,
+    filled      INTEGER NOT NULL DEFAULT 0,
+    total       INTEGER NOT NULL DEFAULT 0,
+    role        TEXT NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_volunteer_shifts_ngo ON volunteer_shifts(ngo_id);
+
+CREATE TABLE IF NOT EXISTS volunteer_shift_signups (
+    id             TEXT PRIMARY KEY,
+    ngo_id         TEXT NOT NULL,
+    shift_id       INTEGER NOT NULL,
+    volunteer_name TEXT NOT NULL,
+    created_at     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_volunteer_signups_ngo ON volunteer_shift_signups(ngo_id);
+
+-- ── 3g. Volunteers: Events (reminders/broadcasts) for Inbox UX ──────────────
+CREATE TABLE IF NOT EXISTS volunteer_events (
+    id            TEXT PRIMARY KEY,
+    ngo_id        TEXT NOT NULL,
+    type          TEXT NOT NULL,                -- reminder | broadcast | signup | etc
+    payload       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_volunteer_events_ngo ON volunteer_events(ngo_id);
+
+-- ── 3e. Programs: Beneficiaries (ngo_id scoped) ────────────────────────────
+CREATE TABLE IF NOT EXISTS program_beneficiaries (
+    id          TEXT PRIMARY KEY,  -- frontend-friendly
+    ngo_id      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    program     TEXT NOT NULL,
+    location    TEXT NOT NULL,
+    aadhaar     BOOLEAN NOT NULL DEFAULT false,
+    family_size INTEGER NOT NULL DEFAULT 1,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_program_beneficiaries_ngo ON program_beneficiaries(ngo_id);
+
+-- ── 3f. Volunteers: Roster (ngo_id scoped) ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS volunteer_roster (
+    id         TEXT PRIMARY KEY,
+    ngo_id     TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    skills     TEXT[] DEFAULT '{}',
+    hours      INTEGER NOT NULL DEFAULT 0,
+    verified   BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_volunteer_roster_ngo ON volunteer_roster(ngo_id);
 
 -- ── 4. RAG Vector Store (ngo_id scoped) ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vector_documents (
@@ -281,6 +389,20 @@ CREATE INDEX IF NOT EXISTS idx_compliance_docs_expiry ON compliance_documents(ex
 
 ALTER TABLE compliance_documents ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE;
 ALTER TABLE compliance_documents ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;
+
+-- ── 15. Inbox item state (generic snooze/done for any kind) ─────────────────
+CREATE TABLE IF NOT EXISTS inbox_item_states (
+    ngo_id        TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    ref_id        TEXT NOT NULL,
+    snoozed_until TIMESTAMP WITH TIME ZONE,
+    resolved_at   TIMESTAMP WITH TIME ZONE,
+    updated_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ngo_id, kind, ref_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_states_ngo ON inbox_item_states(ngo_id);
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Row Level Security (RLS) — One DB, many NGOs, zero data leakage

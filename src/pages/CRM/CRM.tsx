@@ -120,10 +120,36 @@ const CRM: React.FC = () => {
     });
   }, [donors, searchQuery, activeFilter]);
 
-  const handleAddContact = (e: React.FormEvent) => {
+  const handleAddContact = async (e: React.FormEvent) => {
     e.preventDefault();
-    addDonor({ name: newContact.name, type: newContact.type, pan: newContact.pan, location: newContact.location, tags: ['New'] });
-    toast.success(`${newContact.name} added to CRM!`);
+    try {
+      const res = await apiFetch('/crm/donors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newContact.name,
+          type: newContact.type,
+          pan: newContact.pan,
+          location: newContact.location,
+          tags: ['New'],
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.donor?.id) {
+          useStore.getState().addDonorWithId(data.donor);
+        } else {
+          addDonor({ name: newContact.name, type: newContact.type, pan: newContact.pan, location: newContact.location, tags: ['New'] });
+        }
+        toast.success(`${newContact.name} added to CRM!`);
+      } else {
+        addDonor({ name: newContact.name, type: newContact.type, pan: newContact.pan, location: newContact.location, tags: ['New'] });
+        toast.success(`${newContact.name} added to CRM!`);
+      }
+    } catch {
+      addDonor({ name: newContact.name, type: newContact.type, pan: newContact.pan, location: newContact.location, tags: ['New'] });
+      toast.success(`${newContact.name} added to CRM!`);
+    }
     setShowAddContact(false);
     setNewContact({ name: '', type: 'Recurring', pan: '', location: '' });
   };

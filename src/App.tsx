@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
 import Layout from './components/Layout/Layout';
 import Dashboard from './pages/Dashboard/Dashboard';
+import Tasks from './pages/Tasks/Tasks';
 import Fundraising from './pages/Fundraising/Fundraising';
 import CRM from './pages/CRM/CRM';
 import Compliance from './pages/Compliance/Compliance';
@@ -33,6 +34,7 @@ function App() {
           </ProtectedRoute>
         }>
           <Route index element={<Dashboard />} />
+          <Route path="tasks"       element={<ProtectedRoute module="tasks"><Tasks /></ProtectedRoute>} />
           <Route path="agent-hq"    element={<ProtectedRoute module="agent-hq"><AgentHQ /></ProtectedRoute>} />
           <Route path="fundraising" element={<ProtectedRoute module="fundraising"><Fundraising /></ProtectedRoute>} />
           <Route path="crm"         element={<ProtectedRoute module="crm"><CRM /></ProtectedRoute>} />

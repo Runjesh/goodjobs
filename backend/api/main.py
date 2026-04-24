@@ -15,7 +15,7 @@ from core.rag_pipeline import ingest_document
 from core.tally_xml_export import build_tally_xml
 from core.auth import (
     get_current_user, require_role, create_access_token,
-    demo_authenticate, TokenUser
+    demo_authenticate, TokenUser, DEMO_USERS
 )
 from core.observability import init_sentry
 from jobs.lapse_detector import run_lapse_detection
@@ -24,7 +24,7 @@ from agents.orchestrator import process_orchestration
 from core.gen_ai import summarize_conversations, analyze_sentiment, draft_annual_report
 from core.intent_router import route_intent, generate_morning_brief
 from fastapi.responses import Response
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from core.db import db_conn
 
 # ── Sentry: initialise before app creation ──────────────────────────────────
@@ -33,7 +33,7 @@ init_sentry()
 app = FastAPI(
     title="SevaSuite Agent API",
     description="Agentic backend for the SevaSuite India-first Nonprofit OS",
-    version="2.0.0"
+    version="2.0.0",
 )
 
 # CORS for local React frontend
@@ -51,6 +51,899 @@ app.add_middleware(
 async def attach_ngo_context(request: Request, call_next):
     response = await call_next(request)
     return response
+
+# In-memory stores (demo mode when DATABASE_URL is not configured)
+INTENT_QUEUE_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+COMPLIANCE_DOCS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+DPDP_NOTICE_MEM_BY_NGO: Dict[str, Dict[str, Any]] = {}
+DONORS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+TX_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+CAMPAIGNS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+CSR_CARDS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+VOLUNTEER_SHIFTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+VOLUNTEER_SIGNUPS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+BENEFICIARIES_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+VOLUNTEERS_ROSTER_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+FINANCE_GRANTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+INBOX_STATE_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+
+
+def _get_mem_inbox_state(ngo_id: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    return INBOX_STATE_MEM_BY_NGO.setdefault(ngo_id, {})
+
+
+def _mem_get_state(ngo_id: str, kind: str, ref_id: str) -> Dict[str, Any]:
+    return _get_mem_inbox_state(ngo_id).get(kind, {}).get(ref_id, {})
+
+
+def _mem_upsert_state(ngo_id: str, kind: str, ref_id: str, snoozed_until: Optional[str] = None, resolved_at: Optional[str] = None):
+    by_kind = _get_mem_inbox_state(ngo_id).setdefault(kind, {})
+    state = by_kind.setdefault(ref_id, {})
+    if snoozed_until is not None:
+        state["snoozed_until"] = snoozed_until
+    if resolved_at is not None:
+        state["resolved_at"] = resolved_at
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _db_load_inbox_states(cur, ngo_id: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    cur.execute(
+        """
+        SELECT kind, ref_id, snoozed_until, resolved_at
+        FROM inbox_item_states
+        WHERE ngo_id = %s
+        """,
+        (ngo_id,),
+    )
+    out: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for kind, ref_id, snoozed_until, resolved_at in cur.fetchall():
+        out.setdefault(kind, {})[ref_id] = {
+            "snoozed_until": snoozed_until.isoformat() if hasattr(snoozed_until, "isoformat") and snoozed_until else None,
+            "resolved_at": resolved_at.isoformat() if hasattr(resolved_at, "isoformat") and resolved_at else None,
+        }
+    return out
+
+
+def _db_upsert_inbox_state(cur, ngo_id: str, kind: str, ref_id: str, snoozed_until: Optional[str] = None, resolved_at: Optional[str] = None):
+    cur.execute(
+        """
+        INSERT INTO inbox_item_states (ngo_id, kind, ref_id, snoozed_until, resolved_at, updated_at)
+        VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, CURRENT_TIMESTAMP)
+        ON CONFLICT (ngo_id, kind, ref_id)
+        DO UPDATE SET
+          snoozed_until = COALESCE(EXCLUDED.snoozed_until, inbox_item_states.snoozed_until),
+          resolved_at   = COALESCE(EXCLUDED.resolved_at, inbox_item_states.resolved_at),
+          updated_at    = CURRENT_TIMESTAMP
+        """,
+        (ngo_id, kind, ref_id, snoozed_until, resolved_at),
+    )
+
+
+def _parse_until_ts(until: str) -> datetime:
+    """
+    Accepts ISO datetime or YYYY-MM-DD and returns an aware UTC datetime.
+    """
+    try:
+        if len(until) == 10 and until[4] == "-" and until[7] == "-":
+            d = datetime.fromisoformat(until)
+            return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid until timestamp format.")
+
+
+def _mask_pan(pan: str) -> str:
+    p = (pan or "").strip().upper()
+    if len(p) < 4:
+        return p
+    # Simple mask: keep first 4 and last 1 when length permits
+    if len(p) <= 5:
+        return p[0] + "*" * (len(p) - 2) + p[-1]
+    return p[:4] + "*" * max(0, len(p) - 5) + p[-1]
+
+
+def _seed_memory_crm(ngo_id: str):
+    """
+    Populate memory mode with the same demo donors/transactions as the frontend
+    so the app feels "alive" without a DB.
+    """
+    if ngo_id in DONORS_MEM_BY_NGO:
+        return
+    donors = [
+        {"id": "1", "name": "Anjali Desai", "type": "Major Donor", "totalGiven": 450000, "lastGift": "2026-03-15", "initial": "A", "pan": "ABCP****4D", "location": "Mumbai, Maharashtra", "tags": ["Education Cause"]},
+        {"id": "2", "name": "Rohan Gupta", "type": "Recurring", "totalGiven": 24000, "lastGift": "2026-04-01", "initial": "R", "pan": "BVCX****9H", "location": "Delhi, NCR", "tags": ["Monthly Giver"]},
+        {"id": "3", "name": "Infosys Foundation", "type": "CSR Partner", "totalGiven": 5000000, "lastGift": "2025-11-20", "initial": "I", "pan": "INFS****1C", "location": "Bangalore, Karnataka", "tags": ["CSR"]},
+        {"id": "4", "name": "Priya Sharma", "type": "Lapsing", "totalGiven": 15000, "lastGift": "2025-08-10", "initial": "P", "pan": "PRYS****3J", "location": "Pune, Maharashtra", "tags": ["Health"]},
+        {"id": "5", "name": "Vikram Singh", "type": "Event Attendee", "totalGiven": 5000, "lastGift": "2026-02-28", "initial": "V", "pan": "VKRS****2K", "location": "Jaipur, Rajasthan", "tags": ["Events"]},
+    ]
+    DONORS_MEM_BY_NGO[ngo_id] = donors
+    TX_MEM_BY_NGO[ngo_id] = [
+        {"id": "TRX-1092", "donorId": "1", "donorName": "Anjali Desai", "amount": 5000, "method": "UPI AutoPay", "campaignId": "c1", "campaignTitle": "Digital Literacy for Rural Girls", "date": "2 Mins ago", "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000) - 120000},
+        {"id": "TRX-1091", "donorId": "4", "donorName": "Priya Sharma", "amount": 15000, "method": "Credit Card", "campaignId": "c2", "campaignTitle": "Emergency Medical Relief Fund", "date": "15 Mins ago", "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000) - 900000},
+        {"id": "TRX-1090", "donorId": "2", "donorName": "Rohan Gupta", "amount": 2500, "method": "UPI QR", "campaignId": "c1", "campaignTitle": "Digital Literacy for Rural Girls", "date": "1 Hour ago", "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000) - 3600000},
+        {"id": "TRX-1089", "donorId": "3", "donorName": "Infosys Foundation", "amount": 50000, "method": "NEFT", "campaignId": "c2", "campaignTitle": "Emergency Medical Relief Fund", "date": "3 Hours ago", "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000) - 10800000},
+    ]
+
+
+def _seed_memory_campaigns(ngo_id: str):
+    if ngo_id in CAMPAIGNS_MEM_BY_NGO:
+        return
+    CAMPAIGNS_MEM_BY_NGO[ngo_id] = [
+        {
+            "id": "c1",
+            "title": "Digital Literacy for Rural Girls",
+            "raised": 1250000,
+            "goal": 2000000,
+            "donorsCount": 342,
+            "status": "active",
+            "image": "linear-gradient(135deg, #a855f7, #ec4899)",
+            "cause": "Education",
+        },
+        {
+            "id": "c2",
+            "title": "Emergency Medical Relief Fund",
+            "raised": 850000,
+            "goal": 1000000,
+            "donorsCount": 89,
+            "status": "active",
+            "image": "linear-gradient(135deg, #3b82f6, #06b6d4)",
+            "cause": "Health",
+        },
+        {
+            "id": "c3",
+            "title": "Annual Gala 2026 Table Booking",
+            "raised": 0,
+            "goal": 500000,
+            "donorsCount": 0,
+            "status": "draft",
+            "image": "linear-gradient(135deg, #10b981, #3b82f6)",
+            "cause": "Events",
+        },
+    ]
+
+
+def _seed_memory_csr(ngo_id: str):
+    if ngo_id in CSR_CARDS_MEM_BY_NGO:
+        return
+    CSR_CARDS_MEM_BY_NGO[ngo_id] = [
+        {"id": "1", "company": "Reliance Industries", "amount": 5000000, "project": "Rural Healthcare Phase 2", "tags": ["Health", "Gujarat"], "agent": "AD", "col": "prospecting", "date": "Last contact: 2d ago"},
+        {"id": "2", "company": "Tata Consultancy Services", "amount": 2500000, "project": "Digital Literacy 2026", "tags": ["Education", "Tech"], "agent": "RS", "col": "pitch", "date": "Sent on: Oct 12"},
+        {"id": "3", "company": "HDFC Bank CSR", "amount": 8000000, "project": "Women Livelihood Center", "tags": ["Livelihood"], "agent": "AD", "col": "diligence", "date": "Audit pending"},
+        {"id": "4", "company": "Wipro Care", "amount": 1200000, "project": "School Infrastructure", "tags": ["Education", "WASH"], "agent": "PM", "col": "mou", "date": "Signed: Oct 15"},
+        {"id": "5", "company": "Mahindra Finance", "amount": 4500000, "project": "Farmer Support Init", "tags": ["Agriculture"], "agent": "RS", "col": "live", "date": "Report due: Nov 30"},
+        {"id": "6", "company": "Infosys Foundation", "amount": 6000000, "project": "STEM for Girls", "tags": ["Education"], "agent": "AD", "col": "live", "date": "Report due: Dec 15"},
+    ]
+
+
+def _seed_memory_volunteer_ops(ngo_id: str):
+    if ngo_id in VOLUNTEER_SHIFTS_MEM_BY_NGO:
+        return
+    VOLUNTEER_SHIFTS_MEM_BY_NGO[ngo_id] = [
+        {"id": 1, "title": "Weekend Teaching Assistant", "date": "Sat, Nov 12 • 09:00 AM", "location": "Govt School, Block B", "filled": 4, "total": 5, "role": "Education"},
+        {"id": 2, "title": "Health Camp Registration Desk", "date": "Sun, Nov 13 • 08:30 AM", "location": "Community Hall, Pune", "filled": 8, "total": 10, "role": "Admin"},
+        {"id": 3, "title": "Tree Plantation Drive", "date": "Sat, Nov 19 • 07:00 AM", "location": "City Park Outskirts", "filled": 25, "total": 50, "role": "Environment"},
+    ]
+    VOLUNTEER_SIGNUPS_MEM_BY_NGO[ngo_id] = []
+
+
+def _seed_memory_beneficiaries(ngo_id: str):
+    if ngo_id in BENEFICIARIES_MEM_BY_NGO:
+        return
+    BENEFICIARIES_MEM_BY_NGO[ngo_id] = [
+        {"id": "BEN-1045", "name": "Lakshmi Devi", "program": "Women Livelihood Center", "location": "Nashik, MH", "aadhaar": True, "familySize": 4},
+        {"id": "BEN-1046", "name": "Rahul Kumar", "program": "Digital Literacy 2026", "location": "Patna, BR", "aadhaar": True, "familySize": 1},
+        {"id": "BEN-1047", "name": "Sunita Bai", "program": "Healthcare Camp", "location": "Pune, MH", "aadhaar": False, "familySize": 3},
+        {"id": "BEN-1048", "name": "Anita Desai", "program": "Women Livelihood Center", "location": "Nashik, MH", "aadhaar": True, "familySize": 5},
+    ]
+
+
+def _seed_memory_volunteer_roster(ngo_id: str):
+    if ngo_id in VOLUNTEERS_ROSTER_MEM_BY_NGO:
+        return
+    VOLUNTEERS_ROSTER_MEM_BY_NGO[ngo_id] = [
+        {"id": "V-101", "name": "Rohan Sharma", "skills": ["Teaching", "English"], "hours": 45, "verified": True},
+        {"id": "V-102", "name": "Priya Patel", "skills": ["Medical Camp", "Admin"], "hours": 120, "verified": True},
+        {"id": "V-103", "name": "Karan Singh", "skills": ["Logistics"], "hours": 8, "verified": False},
+        {"id": "V-104", "name": "Neha Gupta", "skills": ["Social Media", "Photography"], "hours": 32, "verified": True},
+    ]
+
+
+def _seed_memory_finance_grants(ngo_id: str):
+    if ngo_id in FINANCE_GRANTS_MEM_BY_NGO:
+        return
+    FINANCE_GRANTS_MEM_BY_NGO[ngo_id] = [
+        {"id": "G-2026-01", "name": "Rural Digital Literacy (CSR)", "total": 2500000, "spent": 1800000, "variance": 50000, "status": "On Track"},
+        {"id": "G-2026-02", "name": "Women Empowerment (FCRA)", "total": 4000000, "spent": 3800000, "variance": -150000, "status": "Over Budget"},
+        {"id": "G-2026-03", "name": "Healthcare Camp Fund", "total": 1000000, "spent": 400000, "variance": 0, "status": "On Track"},
+    ]
+
+
+class BeneficiaryCreate(BaseModel):
+    name: str
+    program: str
+    location: str
+    aadhaar: bool = False
+    familySize: int = 1
+
+
+@app.get("/programs/beneficiaries", tags=["Programs"])
+def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_beneficiaries(current_user.ngo_id)
+            return {"beneficiaries": BENEFICIARIES_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, name, program, location, aadhaar, family_size
+            FROM program_beneficiaries
+            WHERE ngo_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1000
+            """,
+            (current_user.ngo_id,),
+        )
+        rows = cur.fetchall()
+        return {
+            "beneficiaries": [
+                {"id": r[0], "name": r[1], "program": r[2], "location": r[3], "aadhaar": bool(r[4]), "familySize": int(r[5])}
+                for r in rows
+            ],
+            "source": "db",
+        }
+
+
+@app.post("/programs/beneficiaries", tags=["Programs"])
+def create_beneficiary(body: BeneficiaryCreate, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_beneficiaries(current_user.ngo_id)
+            new_id = f"BEN-{1000 + len(BENEFICIARIES_MEM_BY_NGO.get(current_user.ngo_id, [])) + 49}"
+            ben = {"id": new_id, "name": body.name, "program": body.program, "location": body.location, "aadhaar": bool(body.aadhaar), "familySize": int(body.familySize)}
+            BENEFICIARIES_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, ben)
+            return {"status": "created", "beneficiary": ben, "source": "memory"}
+        cur = conn.cursor()
+        new_id = f"BEN-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        cur.execute(
+            """
+            INSERT INTO program_beneficiaries (id, ngo_id, name, program, location, aadhaar, family_size)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (new_id, current_user.ngo_id, body.name, body.program, body.location, bool(body.aadhaar), int(body.familySize)),
+        )
+        ben = {"id": new_id, "name": body.name, "program": body.program, "location": body.location, "aadhaar": bool(body.aadhaar), "familySize": int(body.familySize)}
+        return {"status": "created", "beneficiary": ben, "source": "db"}
+
+
+class VolunteerCreate(BaseModel):
+    name: str
+    skills: List[str] = []
+    verified: bool = False
+
+
+@app.get("/volunteers/roster", tags=["Volunteers"])
+def list_volunteer_roster(current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_volunteer_roster(current_user.ngo_id)
+            return {"volunteers": VOLUNTEERS_ROSTER_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, name, COALESCE(skills,'{}'), hours, verified
+            FROM volunteer_roster
+            WHERE ngo_id = %s
+            ORDER BY created_at DESC
+            LIMIT 2000
+            """,
+            (current_user.ngo_id,),
+        )
+        rows = cur.fetchall()
+        return {
+            "volunteers": [
+                {"id": r[0], "name": r[1], "skills": list(r[2] or []), "hours": int(r[3] or 0), "verified": bool(r[4])}
+                for r in rows
+            ],
+            "source": "db",
+        }
+
+
+@app.post("/volunteers/roster", tags=["Volunteers"])
+def create_volunteer_roster(body: VolunteerCreate, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_volunteer_roster(current_user.ngo_id)
+            new_id = f"V-{100 + len(VOLUNTEERS_ROSTER_MEM_BY_NGO.get(current_user.ngo_id, [])) + 5}"
+            v = {"id": new_id, "name": body.name, "skills": body.skills or [], "hours": 0, "verified": bool(body.verified)}
+            VOLUNTEERS_ROSTER_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, v)
+            return {"status": "created", "volunteer": v, "source": "memory"}
+        cur = conn.cursor()
+        new_id = f"V-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        cur.execute(
+            """
+            INSERT INTO volunteer_roster (id, ngo_id, name, skills, hours, verified)
+            VALUES (%s, %s, %s, %s, 0, %s)
+            RETURNING id
+            """,
+            (new_id, current_user.ngo_id, body.name, body.skills or [], bool(body.verified)),
+        )
+        v = {"id": new_id, "name": body.name, "skills": body.skills or [], "hours": 0, "verified": bool(body.verified)}
+        return {"status": "created", "volunteer": v, "source": "db"}
+
+
+class VolunteerSignupRequest(BaseModel):
+    volunteer_name: str
+
+
+@app.get("/volunteers/shifts", tags=["Volunteers"])
+def list_volunteer_shifts(current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_volunteer_ops(current_user.ngo_id)
+            return {"shifts": VOLUNTEER_SHIFTS_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, title, date_label, location, filled, total, role
+            FROM volunteer_shifts
+            WHERE ngo_id = %s
+            ORDER BY id ASC
+            """,
+            (current_user.ngo_id,),
+        )
+        rows = cur.fetchall()
+        return {
+            "shifts": [
+                {"id": r[0], "title": r[1], "date": r[2], "location": r[3], "filled": int(r[4]), "total": int(r[5]), "role": r[6]}
+                for r in rows
+            ],
+            "source": "db",
+        }
+
+
+@app.post("/volunteers/shifts/{shift_id}/signup", tags=["Volunteers"])
+def signup_volunteer_shift(
+    shift_id: int,
+    body: VolunteerSignupRequest,
+    current_user: TokenUser = Depends(require_role("ed", "programs")),
+):
+    if not body.volunteer_name.strip():
+        raise HTTPException(status_code=400, detail="volunteer_name is required.")
+
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_volunteer_ops(current_user.ngo_id)
+            shifts = VOLUNTEER_SHIFTS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            shift = next((s for s in shifts if int(s.get("id")) == int(shift_id)), None)
+            if not shift:
+                raise HTTPException(status_code=404, detail="Shift not found.")
+            if int(shift.get("filled", 0)) >= int(shift.get("total", 0)):
+                raise HTTPException(status_code=409, detail="Shift is full.")
+
+            signup_id = f"vs_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            VOLUNTEER_SIGNUPS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).append(
+                {"id": signup_id, "shiftId": int(shift_id), "volunteerName": body.volunteer_name, "createdAt": datetime.now(timezone.utc).isoformat()}
+            )
+            shift["filled"] = int(shift.get("filled", 0)) + 1
+            event = {
+                "type": "signup",
+                "shift_id": int(shift_id),
+                "shift_title": shift.get("title"),
+                "volunteer_name": body.volunteer_name,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "by": current_user.email,
+            }
+            VOLUNTEER_ACTIVITY_LOG.append(event)
+            return {"status": "signed_up", "signup_id": signup_id, "shift": shift, "source": "memory"}
+
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT filled, total, title FROM volunteer_shifts WHERE ngo_id = %s AND id = %s",
+            (current_user.ngo_id, int(shift_id)),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Shift not found.")
+        filled, total, title = int(row[0]), int(row[1]), row[2]
+        if filled >= total:
+            raise HTTPException(status_code=409, detail="Shift is full.")
+
+        signup_id = f"vs_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        cur.execute(
+            """
+            INSERT INTO volunteer_shift_signups (id, ngo_id, shift_id, volunteer_name)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (signup_id, current_user.ngo_id, int(shift_id), body.volunteer_name),
+        )
+        cur.execute(
+            "UPDATE volunteer_shifts SET filled = filled + 1 WHERE ngo_id = %s AND id = %s",
+            (current_user.ngo_id, int(shift_id)),
+        )
+        event = {
+            "type": "signup",
+            "shift_id": int(shift_id),
+            "shift_title": title,
+            "volunteer_name": body.volunteer_name,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "by": current_user.email,
+        }
+        VOLUNTEER_ACTIVITY_LOG.append(event)
+        return {"status": "signed_up", "signup_id": signup_id, "source": "db"}
+
+
+@app.get("/volunteers/signups", tags=["Volunteers"])
+def list_volunteer_signups(current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_volunteer_ops(current_user.ngo_id)
+            return {"signups": VOLUNTEER_SIGNUPS_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, shift_id, volunteer_name, created_at
+            FROM volunteer_shift_signups
+            WHERE ngo_id = %s
+            ORDER BY created_at DESC
+            LIMIT 500
+            """,
+            (current_user.ngo_id,),
+        )
+        rows = cur.fetchall()
+        return {
+            "signups": [
+                {"id": r[0], "shiftId": int(r[1]), "volunteerName": r[2], "createdAt": r[3].isoformat() if hasattr(r[3], "isoformat") else str(r[3])}
+                for r in rows
+            ],
+            "source": "db",
+        }
+
+
+class CsrCardCreate(BaseModel):
+    company: str
+    amount: float
+    project: str = ""
+    tags: List[str] = []
+    agent: str = "AD"
+    col: str = "prospecting"
+    date: str = "Just added"
+
+
+class CsrCardMove(BaseModel):
+    col: str
+
+
+@app.get("/csr/cards", tags=["CSR"])
+def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_csr(current_user.ngo_id)
+            return {"cards": CSR_CARDS_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, company, amount::float, COALESCE(project,''), COALESCE(tags,'{}'), COALESCE(agent,''), col, COALESCE(date_label,'')
+            FROM csr_pipeline_cards
+            WHERE ngo_id = %s
+            ORDER BY created_at DESC
+            LIMIT 500
+            """,
+            (current_user.ngo_id,),
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append(
+                {
+                    "id": r[0],
+                    "company": r[1],
+                    "amount": float(r[2] or 0),
+                    "project": r[3] or "",
+                    "tags": list(r[4] or []),
+                    "agent": r[5] or "",
+                    "col": r[6] or "prospecting",
+                    "date": r[7] or "",
+                }
+            )
+        return {"cards": out, "source": "db"}
+
+
+@app.post("/csr/cards", tags=["CSR"])
+def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_csr(current_user.ngo_id)
+            new_id = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+            card = {
+                "id": new_id,
+                "company": body.company,
+                "amount": float(body.amount),
+                "project": body.project,
+                "tags": body.tags or [],
+                "agent": body.agent,
+                "col": body.col,
+                "date": body.date,
+            }
+            CSR_CARDS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, card)
+            return {"status": "created", "card": card, "source": "memory"}
+        cur = conn.cursor()
+        new_id = f"csr_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        cur.execute(
+            """
+            INSERT INTO csr_pipeline_cards (id, ngo_id, company, amount, project, tags, agent, col, date_label)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (new_id, current_user.ngo_id, body.company, float(body.amount), body.project, body.tags or [], body.agent, body.col, body.date),
+        )
+        card = {
+            "id": new_id,
+            "company": body.company,
+            "amount": float(body.amount),
+            "project": body.project,
+            "tags": body.tags or [],
+            "agent": body.agent,
+            "col": body.col,
+            "date": body.date,
+        }
+        return {"status": "created", "card": card, "source": "db"}
+
+
+@app.patch("/csr/cards/{card_id}/move", tags=["CSR"])
+def move_csr_card(card_id: str, body: CsrCardMove, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_csr(current_user.ngo_id)
+            cards = CSR_CARDS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for c in cards:
+                if str(c.get("id")) == str(card_id):
+                    c["col"] = body.col
+                    return {"status": "moved", "id": card_id, "col": body.col, "source": "memory"}
+            raise HTTPException(status_code=404, detail="CSR card not found.")
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE csr_pipeline_cards
+            SET col = %s
+            WHERE ngo_id = %s AND id = %s
+            RETURNING id
+            """,
+            (body.col, current_user.ngo_id, card_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="CSR card not found.")
+        return {"status": "moved", "id": row[0], "col": body.col, "source": "db"}
+
+
+class CampaignCreate(BaseModel):
+    title: str
+    goal: float = 0
+    status: str = "active"  # active | draft
+    image: Optional[str] = None
+    cause: Optional[str] = None
+
+
+@app.get("/fundraising/campaigns", tags=["Fundraising"])
+def list_campaigns(current_user: TokenUser = Depends(require_role("ed", "fundraising", "finance", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_campaigns(current_user.ngo_id)
+            return {"campaigns": CAMPAIGNS_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, title, COALESCE(raised, 0)::float, COALESCE(goal, 0)::float,
+                   COALESCE(donors_count, 0)::int, COALESCE(status, 'active')::text,
+                   COALESCE(image, '')::text, COALESCE(cause, '')::text
+            FROM campaigns
+            WHERE ngo_id = %s
+            ORDER BY created_at DESC
+            LIMIT 200
+            """,
+            (current_user.ngo_id,),
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append(
+                {
+                    "id": r[0],
+                    "title": r[1],
+                    "raised": float(r[2] or 0),
+                    "goal": float(r[3] or 0),
+                    "donorsCount": int(r[4] or 0),
+                    "status": r[5],
+                    "image": r[6] or "",
+                    "cause": r[7] or "",
+                }
+            )
+        return {"campaigns": out, "source": "db"}
+
+
+@app.post("/fundraising/campaigns", tags=["Fundraising"])
+def create_campaign(body: CampaignCreate, current_user: TokenUser = Depends(require_role("ed", "fundraising"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_campaigns(current_user.ngo_id)
+            new_id = f"c{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            camp = {
+                "id": new_id,
+                "title": body.title,
+                "raised": 0,
+                "goal": float(body.goal or 0),
+                "donorsCount": 0,
+                "status": body.status,
+                "image": body.image or "linear-gradient(135deg, #10b981, #047857)",
+                "cause": body.cause or "",
+            }
+            CAMPAIGNS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, camp)
+            return {"status": "created", "campaign": camp, "source": "memory"}
+        cur = conn.cursor()
+        new_id = f"c{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        cur.execute(
+            """
+            INSERT INTO campaigns (id, ngo_id, title, cause, goal, raised, donors_count, status, image)
+            VALUES (%s, %s, %s, %s, %s, 0, 0, %s, %s)
+            RETURNING id
+            """,
+            (new_id, current_user.ngo_id, body.title, body.cause, float(body.goal or 0), body.status, body.image),
+        )
+        camp = {
+            "id": new_id,
+            "title": body.title,
+            "raised": 0,
+            "goal": float(body.goal or 0),
+            "donorsCount": 0,
+            "status": body.status,
+            "image": body.image or "",
+            "cause": body.cause or "",
+        }
+        return {"status": "created", "campaign": camp, "source": "db"}
+
+
+# ── CRM Persistence (Donors + Transactions) ───────────────────────────────────
+
+class DonorCreate(BaseModel):
+    name: str
+    type: str = "Recurring"
+    pan: str = ""
+    location: str = ""
+    tags: List[str] = []
+
+
+@app.get("/crm/donors", tags=["CRM"])
+def list_donors(current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising", "finance", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            return {"donors": DONORS_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text, full_name, COALESCE(donor_type, 'Recurring') as donor_type,
+                   COALESCE(total_lifetime_value, 0)::float,
+                   COALESCE(pan_masked, '') as pan_masked,
+                   COALESCE(location_text, '') as location_text,
+                   COALESCE(tags, '{}') as tags,
+                   created_at
+            FROM donors
+            WHERE ngo_id = %s::uuid
+            ORDER BY created_at DESC
+            LIMIT 1000
+            """,
+            (current_user.ngo_id,),
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append(
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "type": r[2],
+                    "totalGiven": float(r[3] or 0),
+                    "lastGift": "N/A",
+                    "initial": (r[1] or "U")[:1].upper(),
+                    "pan": r[4] or "",
+                    "location": r[5] or "",
+                    "tags": list(r[6] or []),
+                }
+            )
+        return {"donors": out, "source": "db"}
+
+
+@app.post("/crm/donors", tags=["CRM"])
+def create_donor(body: DonorCreate, current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            new_id = f"{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            donor = {
+                "id": new_id,
+                "name": body.name,
+                "type": body.type,
+                "totalGiven": 0,
+                "lastGift": "N/A",
+                "initial": (body.name or "U")[:1].upper(),
+                "pan": _mask_pan(body.pan),
+                "location": body.location,
+                "tags": body.tags or ["New"],
+            }
+            DONORS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, donor)
+            return {"status": "created", "donor": donor, "source": "memory"}
+
+        cur = conn.cursor()
+        donor_code = f"D{int(datetime.now(timezone.utc).timestamp())}"
+        cur.execute(
+            """
+            INSERT INTO donors (ngo_id, donor_code, full_name, donor_type, pan_masked, location_text, tags, consent_given, consent_date)
+            VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, true, CURRENT_TIMESTAMP)
+            RETURNING id::text, created_at
+            """,
+            (
+                current_user.ngo_id,
+                donor_code,
+                body.name,
+                body.type,
+                _mask_pan(body.pan),
+                body.location,
+                body.tags or [],
+            ),
+        )
+        new_id, created_at = cur.fetchone()
+        donor = {
+            "id": new_id,
+            "name": body.name,
+            "type": body.type,
+            "totalGiven": 0,
+            "lastGift": "N/A",
+            "initial": (body.name or "U")[:1].upper(),
+            "pan": _mask_pan(body.pan),
+            "location": body.location,
+            "tags": body.tags or [],
+        }
+        return {"status": "created", "donor": donor, "source": "db"}
+
+
+class TransactionCreate(BaseModel):
+    donorId: str
+    donorName: str
+    amount: float
+    method: str = "UPI"
+    campaignId: Optional[str] = None
+    campaignTitle: Optional[str] = None
+
+
+@app.get("/finance/transactions", tags=["Finance"])
+def list_transactions(current_user: TokenUser = Depends(require_role("ed", "finance", "fundraising", "crm"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            txs = TX_MEM_BY_NGO.get(current_user.ngo_id, [])
+            txs_sorted = sorted(txs, key=lambda t: int(t.get("timestamp") or 0), reverse=True)
+            return {"transactions": txs_sorted, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text,
+                   COALESCE(donor_id::text, '') as donor_id,
+                   COALESCE(donor_name, '') as donor_name,
+                   amount::float,
+                   COALESCE(payment_method, '') as payment_method,
+                   COALESCE(campaign_id, '') as campaign_id,
+                   COALESCE(campaign_title, '') as campaign_title,
+                   transaction_date
+            FROM transactions
+            WHERE ngo_id = %s::uuid
+            ORDER BY transaction_date DESC
+            LIMIT 500
+            """,
+            (current_user.ngo_id,),
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append(
+                {
+                    "id": r[0],
+                    "donorId": r[1] or "",
+                    "donorName": r[2] or "",
+                    "amount": float(r[3] or 0),
+                    "method": r[4] or "",
+                    "campaignId": r[5] or "",
+                    "campaignTitle": r[6] or "",
+                    "date": (r[7].date().isoformat() if hasattr(r[7], "date") else str(r[7])),
+                    "timestamp": int(r[7].timestamp() * 1000) if hasattr(r[7], "timestamp") else int(datetime.now(timezone.utc).timestamp() * 1000),
+                }
+            )
+        return {"transactions": out, "source": "db"}
+
+
+@app.post("/finance/transactions", tags=["Finance"])
+def create_transaction(body: TransactionCreate, current_user: TokenUser = Depends(require_role("ed", "finance", "fundraising"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            _seed_memory_campaigns(current_user.ngo_id)
+            new_id = f"TRX-{1000 + len(TX_MEM_BY_NGO.get(current_user.ngo_id, [])) + 100}"
+            tx = {
+                "id": new_id,
+                "donorId": body.donorId,
+                "donorName": body.donorName,
+                "amount": float(body.amount),
+                "method": body.method,
+                "campaignId": body.campaignId or "",
+                "campaignTitle": body.campaignTitle or "",
+                "date": "Just now",
+                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+            }
+            TX_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, tx)
+            # Update donor aggregates (best-effort)
+            donors = DONORS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for d in donors:
+                if d.get("id") == body.donorId:
+                    d["totalGiven"] = float(d.get("totalGiven") or 0) + float(body.amount)
+                    d["lastGift"] = datetime.now(timezone.utc).date().isoformat()
+                    break
+            # Update campaign aggregates (best-effort)
+            if body.campaignId:
+                campaigns = CAMPAIGNS_MEM_BY_NGO.get(current_user.ngo_id, [])
+                for c in campaigns:
+                    if c.get("id") == body.campaignId:
+                        c["raised"] = float(c.get("raised") or 0) + float(body.amount)
+                        c["donorsCount"] = int(c.get("donorsCount") or 0) + 1
+                        break
+            return {"status": "created", "transaction": tx, "source": "memory"}
+
+        cur = conn.cursor()
+        # Try to cast donor_id to UUID; if the frontend passes a non-uuid ID (legacy demo),
+        # store it in meta and keep donor_id NULL.
+        donor_uuid = None
+        try:
+            import uuid as _uuid
+            donor_uuid = str(_uuid.UUID(body.donorId))
+        except Exception:
+            donor_uuid = None
+
+        cur.execute(
+            """
+            INSERT INTO transactions (ngo_id, donor_id, donor_name, amount, fund_classification, payment_method, campaign_id, campaign_title, receipt_generated)
+            VALUES (%s::uuid, %s::uuid, %s, %s, 'General', %s, %s, %s, true)
+            RETURNING id::text, transaction_date
+            """,
+            (
+                current_user.ngo_id,
+                donor_uuid,
+                body.donorName,
+                float(body.amount),
+                body.method,
+                body.campaignId,
+                body.campaignTitle,
+            ),
+        )
+        new_id, tx_dt = cur.fetchone()
+        tx = {
+            "id": new_id,
+            "donorId": donor_uuid or "",
+            "donorName": body.donorName,
+            "amount": float(body.amount),
+            "method": body.method,
+            "campaignId": body.campaignId or "",
+            "campaignTitle": body.campaignTitle or "",
+            "date": (tx_dt.date().isoformat() if hasattr(tx_dt, "date") else str(tx_dt)),
+            "timestamp": int(tx_dt.timestamp() * 1000) if hasattr(tx_dt, "timestamp") else int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+        # Best-effort campaign aggregate update
+        if body.campaignId:
+            try:
+                cur.execute(
+                    "UPDATE campaigns SET raised = COALESCE(raised,0) + %s WHERE ngo_id = %s AND id = %s",
+                    (float(body.amount), current_user.ngo_id, body.campaignId),
+                )
+            except Exception:
+                pass
+        return {"status": "created", "transaction": tx, "source": "db"}
 
 # ── Request Models ──────────────────────────────────────────────────────────────
 
@@ -130,7 +1023,44 @@ def register_ngo(body: RegisterNgoRequest):
     """
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            # Demo mode: allow lightweight registration so nonprofits can try the product
+            # without setting up Postgres. This is not persistent across restarts.
+            ngo_id = f"ngo_{body.ngo_slug}"
+            ngo_name = body.ngo_name
+            user_id = f"user_{int(datetime.now(timezone.utc).timestamp())}"
+            role = body.role or "ed"
+
+            if body.email in DEMO_USERS:
+                raise HTTPException(status_code=409, detail="Email already registered (demo mode).")
+
+            DEMO_USERS[body.email] = {
+                "user_id": user_id,
+                "name": body.full_name,
+                "password": body.password,
+                "role": role,
+                "ngo_id": ngo_id,
+                "ngo_name": ngo_name,
+            }
+
+            token = create_access_token(
+                user_id=user_id,
+                email=body.email,
+                role=role,
+                ngo_id=ngo_id,
+                ngo_name=ngo_name,
+            )
+            return {
+                "access_token": token,
+                "token_type": "bearer",
+                "user_id": user_id,
+                "name": body.full_name,
+                "email": body.email,
+                "role": role,
+                "ngo_id": ngo_id,
+                "ngo_name": ngo_name,
+                "expires_in_hours": 24,
+                "source": "memory",
+            }
         cur = conn.cursor()
 
         # Create NGO (schema.sql defines ngos.id UUID)
@@ -659,7 +1589,23 @@ def post_process_intent(directive: str, current_user: TokenUser = Depends(requir
             )
             row = cur.fetchone()
             return {**card, "queue_id": row[0], "queued": True}
-    return {**card, "queued": False}
+    # Demo mode: keep a minimal in-memory queue so the product works without DB
+    ngo_items = INTENT_QUEUE_MEM_BY_NGO.setdefault(current_user.ngo_id, [])
+    queue_id = f"mem_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+    ngo_items.append(
+        {
+            "id": queue_id,
+            "directive": directive,
+            "intent_type": card.get("intent_type"),
+            "risk_level": card.get("risk_level"),
+            "status": "queued",
+            "action_card": card,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "snoozed_until": None,
+            "resolved_at": None,
+        }
+    )
+    return {**card, "queue_id": queue_id, "queued": True, "source": "memory"}
 
 
 @app.get("/intent/queue", tags=["Agentic UX"])
@@ -670,7 +1616,11 @@ def get_intent_queue(
 ):
     with db_conn() as conn:
         if conn is None:
-            return {"items": [], "source": "memory"}
+            items = INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, [])
+            if status:
+                items = [i for i in items if i.get("status") == status]
+            lim = max(1, min(limit, 200))
+            return {"items": items[:lim], "source": "memory"}
         cur = conn.cursor()
         where = ["ngo_id = %s"]
         params: List[Any] = [current_user.ngo_id]
@@ -717,7 +1667,13 @@ def post_intent_decision(
         raise HTTPException(status_code=400, detail="decision must be approved|rejected")
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            items = INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for it in items:
+                if it.get("id") == item_id:
+                    it["status"] = body.decision
+                    it["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    return {"id": item_id, "status": body.decision, "source": "memory"}
+            raise HTTPException(status_code=404, detail="Queue item not found.")
         cur = conn.cursor()
         cur.execute(
             """
@@ -749,7 +1705,35 @@ def post_intent_execute(
     """
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            items = INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, [])
+            item = next((i for i in items if i.get("id") == item_id), None)
+            if not item:
+                raise HTTPException(status_code=404, detail="Queue item not found.")
+
+            status_val = item.get("status")
+            if status_val not in ("queued", "approved"):
+                raise HTTPException(status_code=409, detail=f"Intent is not executable from status '{status_val}'.")
+
+            action_card = item.get("action_card") or {}
+            intent_type = action_card.get("intent_type") if isinstance(action_card, dict) else None
+            action_data = (action_card.get("action_data") or {}) if isinstance(action_card, dict) else {}
+
+            if body.dry_run:
+                return {"status": "dry_run", "intent_type": intent_type, "action_data": action_data, "source": "memory"}
+
+            try:
+                result = process_orchestration(intent_type or "unknown", action_data)
+                item["status"] = "executed"
+                item["executed_at"] = datetime.now(timezone.utc).isoformat()
+                item["updated_at"] = item["executed_at"]
+                item["execution_result"] = result
+                item["last_error"] = None
+                return {"id": item_id, "status": "executed", "result": result, "source": "memory"}
+            except Exception as e:
+                item["status"] = "failed"
+                item["updated_at"] = datetime.now(timezone.utc).isoformat()
+                item["last_error"] = str(e)
+                raise HTTPException(status_code=500, detail={"id": item_id, "status": "failed", "error": str(e), "source": "memory"})
         cur = conn.cursor()
         cur.execute(
             """
@@ -930,7 +1914,11 @@ def list_compliance_documents(
 ):
     with db_conn() as conn:
         if conn is None:
-            return {"documents": [], "source": "memory"}
+            docs = COMPLIANCE_DOCS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            if status:
+                docs = [d for d in docs if d.get("status") == status]
+            lim = max(1, min(limit, 500))
+            return {"documents": docs[:lim], "source": "memory"}
         cur = conn.cursor()
         where = ["ngo_id = %s"]
         params: List[Any] = [current_user.ngo_id]
@@ -964,7 +1952,22 @@ def create_compliance_document(
 ):
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            docs = COMPLIANCE_DOCS_MEM_BY_NGO.setdefault(current_user.ngo_id, [])
+            doc_id = f"memdoc_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            docs.insert(
+                0,
+                {
+                    "id": doc_id,
+                    "name": body.name,
+                    "doc_type": body.doc_type,
+                    "status": body.status,
+                    "expiry_date": body.expiry_date,
+                    "s3_key": body.s3_key,
+                    "snoozed_until": None,
+                    "resolved_at": None,
+                },
+            )
+            return {"status": "created", "id": doc_id, "source": "memory"}
         cur = conn.cursor()
         cur.execute(
             """
@@ -985,12 +1988,162 @@ def get_inbox(current_user: TokenUser = Depends(get_current_user)):
     Unified inbox for busy generalists:
     - queued intents needing approval
     - compliance docs expiring within 30 days
+    - finance flags (over budget / negative variance / FCRA admin cap)
+    - volunteer ops reminders (scheduled reminders + upcoming full shifts)
     """
     items: List[Dict[str, Any]] = []
     with db_conn() as conn:
         if conn is None:
-            return {"items": items, "source": "memory"}
+            now = datetime.now(timezone.utc)
+            state = _get_mem_inbox_state(current_user.ngo_id)
+            # queued intents
+            for it in INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, []):
+                if it.get("status") != "queued":
+                    continue
+                if it.get("resolved_at"):
+                    continue
+                su = it.get("snoozed_until")
+                if su:
+                    try:
+                        if _parse_until_ts(su) > now:
+                            continue
+                    except HTTPException:
+                        pass
+                items.append(
+                    {
+                        "kind": "intent",
+                        "priority": "High" if (it.get("risk_level") or "").lower() == "high" else "Medium",
+                        "title": it.get("directive"),
+                        "meta": {"intent_type": it.get("intent_type"), "risk_level": it.get("risk_level")},
+                        "ref": {"id": it.get("id")},
+                        "created_at": it.get("created_at"),
+                        "primary_action": {"label": "Review & approve", "route": "/agent-hq"},
+                    }
+                )
+
+            # compliance docs expiring within 30 days
+            for d in COMPLIANCE_DOCS_MEM_BY_NGO.get(current_user.ngo_id, []):
+                if d.get("resolved_at"):
+                    continue
+                su = d.get("snoozed_until")
+                if su:
+                    try:
+                        if _parse_until_ts(su) > now:
+                            continue
+                    except HTTPException:
+                        pass
+                exp = d.get("expiry_date")
+                if not exp:
+                    continue
+                try:
+                    exp_dt = datetime.fromisoformat(exp).date()
+                except Exception:
+                    continue
+                if exp_dt > (now.date() + timedelta(days=30)):
+                    continue
+                items.append(
+                    {
+                        "kind": "compliance_doc",
+                        "priority": "High" if d.get("status") in ("Expired", "Expiring Soon") else "Medium",
+                        "title": f"{d.get('name')} expiring on {exp}",
+                        "meta": {"doc_type": d.get("doc_type"), "status": d.get("status"), "expiry_date": exp},
+                        "ref": {"id": d.get("id")},
+                        "primary_action": {"label": "Open vault", "route": "/compliance"},
+                    }
+                )
+
+            # finance flags (memory)
+            try:
+                _seed_memory_finance_grants(current_user.ngo_id)
+                for g in FINANCE_GRANTS_MEM_BY_NGO.get(current_user.ngo_id, [])[:50]:
+                    ref_id = str(g.get("id") or "")
+                    st = _mem_get_state(current_user.ngo_id, "finance_flag", ref_id) if ref_id else {}
+                    if st.get("resolved_at"):
+                        continue
+                    if st.get("snoozed_until"):
+                        try:
+                            if _parse_until_ts(st["snoozed_until"]) > now:
+                                continue
+                        except HTTPException:
+                            pass
+                    if (g.get("status") == "Over Budget") or (float(g.get("variance") or 0) < 0):
+                        items.append(
+                            {
+                                "kind": "finance_flag",
+                                "priority": "High",
+                                "pill": "Finance",
+                                "title": f"Grant at risk: {g.get('name')}",
+                                "subtitle": f"Variance: ₹{abs(float(g.get('variance') or 0)):,.0f} ({'over' if float(g.get('variance') or 0) < 0 else 'check'})",
+                                "meta": g,
+                                "ref": {"id": ref_id},
+                                "primary_action": {"label": "Open Finance", "route": "/finance"},
+                            }
+                        )
+                        break
+            except Exception:
+                pass
+
+            # volunteer reminders (memory)
+            try:
+                # scheduled reminder events
+                for ev in reversed(VOLUNTEER_ACTIVITY_LOG[-50:]):
+                    if ev.get("type") == "reminder":
+                        ref_id = str(ev.get("id") or ev.get("created_at") or ev.get("shift_id") or "")
+                        st = _mem_get_state(current_user.ngo_id, "volunteer_reminder", ref_id) if ref_id else {}
+                        if st.get("resolved_at"):
+                            continue
+                        if st.get("snoozed_until"):
+                            try:
+                                if _parse_until_ts(st["snoozed_until"]) > now:
+                                    continue
+                            except HTTPException:
+                                pass
+                        items.append(
+                            {
+                                "kind": "volunteer_reminder",
+                                "priority": "Medium",
+                                "pill": "Volunteers",
+                                "title": f"Reminder scheduled: {ev.get('shift_title')}",
+                                "subtitle": f"Channel: {ev.get('channel')} • Timing: {ev.get('timing')}",
+                                "meta": ev,
+                                "ref": {"id": ref_id},
+                                "primary_action": {"label": "Open Volunteers", "route": "/volunteers"},
+                            }
+                        )
+                        break
+                # full shifts
+                _seed_memory_volunteer_ops(current_user.ngo_id)
+                for s in VOLUNTEER_SHIFTS_MEM_BY_NGO.get(current_user.ngo_id, [])[:20]:
+                    ref_id = str(s.get("id") or "")
+                    st = _mem_get_state(current_user.ngo_id, "volunteer_shift_full", ref_id) if ref_id else {}
+                    if st.get("resolved_at"):
+                        continue
+                    if st.get("snoozed_until"):
+                        try:
+                            if _parse_until_ts(st["snoozed_until"]) > now:
+                                continue
+                        except HTTPException:
+                            pass
+                    if int(s.get("filled", 0)) >= int(s.get("total", 0)) and int(s.get("total", 0)) > 0:
+                        items.append(
+                            {
+                                "kind": "volunteer_shift_full",
+                                "priority": "Medium",
+                                "pill": "Volunteers",
+                                "title": f"Shift full: {s.get('title')}",
+                                "subtitle": f"{s.get('filled')}/{s.get('total')} filled • {s.get('date')}",
+                                "meta": s,
+                                "ref": {"id": ref_id},
+                                "primary_action": {"label": "Manage shift", "route": "/volunteers"},
+                            }
+                        )
+                        break
+            except Exception:
+                pass
+
+            return {"items": items[:40], "source": "memory"}
         cur = conn.cursor()
+        states = _db_load_inbox_states(cur, current_user.ngo_id)
 
         # Intents
         cur.execute(
@@ -1041,17 +2194,135 @@ def get_inbox(current_user: TokenUser = Depends(get_current_user)):
                 "primary_action": {"label": "Open vault", "route": "/compliance"},
             })
 
+        # Finance flags (DB)
+        try:
+            cur.execute(
+                """
+                SELECT id::text, name, total::float, spent::float, variance::float, status
+                FROM finance_grants
+                WHERE ngo_id = %s AND (status = 'Over Budget' OR variance < 0)
+                ORDER BY created_at DESC
+                LIMIT 5
+                """,
+                (current_user.ngo_id,),
+            )
+            for g in cur.fetchall():
+                ref_id = str(g[0])
+                st = states.get("finance_flag", {}).get(ref_id, {})
+                if st.get("resolved_at"):
+                    continue
+                if st.get("snoozed_until"):
+                    try:
+                        if _parse_until_ts(st["snoozed_until"]) > datetime.now(timezone.utc):
+                            continue
+                    except HTTPException:
+                        pass
+                items.append(
+                    {
+                        "kind": "finance_flag",
+                        "priority": "High",
+                        "pill": "Finance",
+                        "title": f"Grant at risk: {g[1]}",
+                        "subtitle": f"Variance: ₹{abs(float(g[4] or 0)):,.0f}",
+                        "meta": {"id": g[0], "name": g[1], "total": g[2], "spent": g[3], "variance": g[4], "status": g[5]},
+                        "ref": {"id": ref_id},
+                        "primary_action": {"label": "Open Finance", "route": "/finance"},
+                    }
+                )
+        except Exception:
+            pass
+
+        # Volunteer reminders (DB): from volunteer_events table
+        try:
+            cur.execute(
+                """
+                SELECT id, payload, created_at
+                FROM volunteer_events
+                WHERE ngo_id = %s AND type = 'reminder'
+                ORDER BY created_at DESC
+                LIMIT 20
+                """,
+                (current_user.ngo_id,),
+            )
+            for ev_id, payload, created_at in cur.fetchall():
+                ref_id = str(ev_id)
+                st = states.get("volunteer_reminder", {}).get(ref_id, {})
+                if st.get("resolved_at"):
+                    continue
+                if st.get("snoozed_until"):
+                    try:
+                        if _parse_until_ts(st["snoozed_until"]) > datetime.now(timezone.utc):
+                            continue
+                    except HTTPException:
+                        pass
+                payload = payload if isinstance(payload, dict) else {}
+                items.append(
+                    {
+                        "kind": "volunteer_reminder",
+                        "priority": "Medium",
+                        "pill": "Volunteers",
+                        "title": f"Reminder scheduled: {payload.get('shift_title') or 'Volunteer shift'}",
+                        "subtitle": f"Channel: {payload.get('channel','')} • Timing: {payload.get('timing','')}",
+                        "meta": payload,
+                        "ref": {"id": ref_id},
+                        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+                        "primary_action": {"label": "Open Volunteers", "route": "/volunteers"},
+                    }
+                )
+                break
+        except Exception:
+            pass
+
+        # Volunteer shift full (DB): derived from volunteer_shifts
+        try:
+            cur.execute(
+                """
+                SELECT id::text, title, date_label, location, filled, total
+                FROM volunteer_shifts
+                WHERE ngo_id = %s AND total > 0 AND filled >= total
+                ORDER BY id ASC
+                LIMIT 20
+                """,
+                (current_user.ngo_id,),
+            )
+            for sid, title, date_label, location, filled, total in cur.fetchall():
+                ref_id = str(sid)
+                st = states.get("volunteer_shift_full", {}).get(ref_id, {})
+                if st.get("resolved_at"):
+                    continue
+                if st.get("snoozed_until"):
+                    try:
+                        if _parse_until_ts(st["snoozed_until"]) > datetime.now(timezone.utc):
+                            continue
+                    except HTTPException:
+                        pass
+                items.append(
+                    {
+                        "kind": "volunteer_shift_full",
+                        "priority": "Medium",
+                        "pill": "Volunteers",
+                        "title": f"Shift full: {title}",
+                        "subtitle": f"{filled}/{total} filled • {date_label}",
+                        "meta": {"id": sid, "title": title, "date": date_label, "location": location, "filled": filled, "total": total},
+                        "ref": {"id": ref_id},
+                        "primary_action": {"label": "Manage shift", "route": "/volunteers"},
+                    }
+                )
+                break
+        except Exception:
+            pass
+
     return {"items": items, "source": "db"}
 
 
 class InboxSnoozeRequest(BaseModel):
-    kind: str  # intent | compliance_doc
+    kind: str  # intent | compliance_doc | finance_flag | volunteer_reminder | volunteer_shift_full | ...
     id: str
     until: str  # ISO datetime or YYYY-MM-DD
 
 
 class InboxResolveRequest(BaseModel):
-    kind: str  # intent | compliance_doc
+    kind: str  # intent | compliance_doc | finance_flag | volunteer_reminder | volunteer_shift_full | ...
     id: str
 
 
@@ -1059,7 +2330,24 @@ class InboxResolveRequest(BaseModel):
 def post_inbox_snooze(body: InboxSnoozeRequest, current_user: TokenUser = Depends(require_role("ed", "admin", "finance", "programs"))):
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            until_iso = _parse_until_ts(body.until).isoformat()
+            if body.kind == "intent":
+                items = INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, [])
+                for it in items:
+                    if it.get("id") == body.id:
+                        it["snoozed_until"] = until_iso
+                        return {"status": "snoozed", "id": body.id, "source": "memory"}
+            elif body.kind == "compliance_doc":
+                docs = COMPLIANCE_DOCS_MEM_BY_NGO.get(current_user.ngo_id, [])
+                for d in docs:
+                    if d.get("id") == body.id:
+                        d["snoozed_until"] = until_iso
+                        return {"status": "snoozed", "id": body.id, "source": "memory"}
+            else:
+                # generic snooze for other kinds in memory
+                _mem_upsert_state(current_user.ngo_id, body.kind, body.id, snoozed_until=until_iso)
+                return {"status": "snoozed", "id": body.id, "source": "memory"}
+            raise HTTPException(status_code=404, detail="Inbox item not found.")
         cur = conn.cursor()
         if body.kind == "intent":
             cur.execute(
@@ -1082,7 +2370,8 @@ def post_inbox_snooze(body: InboxSnoozeRequest, current_user: TokenUser = Depend
                 (body.until, current_user.ngo_id, body.id),
             )
         else:
-            raise HTTPException(status_code=400, detail="Unknown kind.")
+            _db_upsert_inbox_state(cur, current_user.ngo_id, body.kind, body.id, snoozed_until=body.until)
+            return {"status": "snoozed", "id": body.id, "source": "db"}
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Inbox item not found.")
@@ -1093,7 +2382,24 @@ def post_inbox_snooze(body: InboxSnoozeRequest, current_user: TokenUser = Depend
 def post_inbox_resolve(body: InboxResolveRequest, current_user: TokenUser = Depends(require_role("ed", "admin", "finance", "programs"))):
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            resolved_iso = datetime.now(timezone.utc).isoformat()
+            if body.kind == "intent":
+                items = INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, [])
+                for it in items:
+                    if it.get("id") == body.id:
+                        it["resolved_at"] = resolved_iso
+                        it["status"] = "rejected"
+                        return {"status": "resolved", "id": body.id, "source": "memory"}
+            elif body.kind == "compliance_doc":
+                docs = COMPLIANCE_DOCS_MEM_BY_NGO.get(current_user.ngo_id, [])
+                for d in docs:
+                    if d.get("id") == body.id:
+                        d["resolved_at"] = resolved_iso
+                        return {"status": "resolved", "id": body.id, "source": "memory"}
+            else:
+                _mem_upsert_state(current_user.ngo_id, body.kind, body.id, resolved_at=resolved_iso)
+                return {"status": "resolved", "id": body.id, "source": "memory"}
+            raise HTTPException(status_code=404, detail="Inbox item not found.")
         cur = conn.cursor()
         if body.kind == "intent":
             cur.execute(
@@ -1116,7 +2422,8 @@ def post_inbox_resolve(body: InboxResolveRequest, current_user: TokenUser = Depe
                 (current_user.ngo_id, body.id),
             )
         else:
-            raise HTTPException(status_code=400, detail="Unknown kind.")
+            _db_upsert_inbox_state(cur, current_user.ngo_id, body.kind, body.id, resolved_at=datetime.now(timezone.utc).isoformat())
+            return {"status": "resolved", "id": body.id, "source": "db"}
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Inbox item not found.")
@@ -1147,7 +2454,10 @@ def post_volunteer_broadcast(
     body: VolunteerBroadcastRequest,
     current_user: TokenUser = Depends(require_role("ed", "programs")),
 ):
+    event_id = f"ve_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
     event = {
+        "id": event_id,
+        "ngo_id": current_user.ngo_id,
         "type": "broadcast",
         "channel": body.channel,
         "audience": body.audience,
@@ -1156,6 +2466,21 @@ def post_volunteer_broadcast(
         "by": current_user.email,
     }
     VOLUNTEER_ACTIVITY_LOG.append(event)
+    # DB (optional): persist as volunteer_events for audit / inbox UX
+    with db_conn() as conn:
+        if conn is not None:
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO volunteer_events (id, ngo_id, type, payload)
+                    VALUES (%s, %s, %s, %s::jsonb)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (event_id, current_user.ngo_id, "broadcast", json.dumps(event)),
+                )
+            except Exception:
+                pass
     # In production: enqueue WhatsApp/SMS send job here.
     return {"status": "queued", "event": event}
 
@@ -1165,7 +2490,10 @@ def post_volunteer_reminder(
     background_tasks: BackgroundTasks,
     current_user: TokenUser = Depends(require_role("ed", "programs")),
 ):
+    event_id = f"ve_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
     event = {
+        "id": event_id,
+        "ngo_id": current_user.ngo_id,
         "type": "reminder",
         "shift_id": body.shift_id,
         "shift_title": body.shift_title,
@@ -1183,6 +2511,20 @@ def post_volunteer_reminder(
 
     background_tasks.add_task(_noop_send)
     VOLUNTEER_ACTIVITY_LOG.append(event)
+    with db_conn() as conn:
+        if conn is not None:
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO volunteer_events (id, ngo_id, type, payload)
+                    VALUES (%s, %s, %s, %s::jsonb)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (event_id, current_user.ngo_id, "reminder", json.dumps(event)),
+                )
+            except Exception:
+                pass
     return {"status": "scheduled", "event": event}
 
 @app.get("/volunteers/activity", tags=["Volunteers"])
@@ -1273,6 +2615,9 @@ def get_dpdp_notice(current_user: TokenUser = Depends(get_current_user)):
             row = cur.fetchone()
             if row:
                 return {"version": row[0], "notice_md": row[1], "created_at": row[2].isoformat()}
+    mem = DPDP_NOTICE_MEM_BY_NGO.get(current_user.ngo_id)
+    if mem:
+        return {"version": mem.get("version", 1), "notice_md": mem.get("notice_md", default_md), "created_at": mem.get("created_at"), "source": "memory"}
     return {"version": 1, "notice_md": default_md, "created_at": None, "source": "default"}
 
 
@@ -1285,7 +2630,16 @@ def post_dpdp_notice(body: DpdpNoticeUpsert, current_user: TokenUser = Depends(r
     """Create a new DPDP notice version for the NGO."""
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            prev = DPDP_NOTICE_MEM_BY_NGO.get(current_user.ngo_id) or {"version": 0}
+            next_version = int(prev.get("version", 0)) + 1
+            created_at = datetime.now(timezone.utc).isoformat()
+            DPDP_NOTICE_MEM_BY_NGO[current_user.ngo_id] = {
+                "version": next_version,
+                "notice_md": body.notice_md,
+                "created_at": created_at,
+                "created_by": current_user.email,
+            }
+            return {"id": f"mem_notice_{next_version}", "version": next_version, "created_at": created_at, "source": "memory"}
         cur = conn.cursor()
         cur.execute(
             "SELECT COALESCE(MAX(version), 0) FROM dpdp_notice_versions WHERE ngo_id = %s",
@@ -1336,6 +2690,11 @@ def get_dpdp_notice_pdf(version: Optional[int] = None, current_user: TokenUser =
             if row:
                 ver = row[0]
                 notice_md = row[1]
+        else:
+            mem = DPDP_NOTICE_MEM_BY_NGO.get(current_user.ngo_id)
+            if mem:
+                ver = mem.get("version", 1)
+                notice_md = mem.get("notice_md")
     if notice_md is None:
         # fallback to default constructed notice
         notice_md = get_dpdp_notice(current_user).get("notice_md")  # type: ignore
@@ -1363,7 +2722,8 @@ class GrantRow(BaseModel):
 def get_finance_grants(current_user: TokenUser = Depends(require_role("ed", "finance"))):
     with db_conn() as conn:
         if conn is None:
-            return {"grants": [], "source": "memory"}
+            _seed_memory_finance_grants(current_user.ngo_id)
+            return {"grants": FINANCE_GRANTS_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
         cur = conn.cursor()
         cur.execute(
             """
@@ -1384,7 +2744,12 @@ def get_finance_grants(current_user: TokenUser = Depends(require_role("ed", "fin
 def post_finance_grant(body: GrantRow, current_user: TokenUser = Depends(require_role("ed", "finance"))):
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            _seed_memory_finance_grants(current_user.ngo_id)
+            variance = body.variance if body.variance != 0 else (float(body.total) - float(body.spent))
+            new_id = body.id or f"G-{datetime.now(timezone.utc).year}-{int(datetime.now(timezone.utc).timestamp())}"
+            row = {"id": new_id, "name": body.name, "total": float(body.total), "spent": float(body.spent), "variance": float(variance), "status": body.status}
+            FINANCE_GRANTS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, row)
+            return {"status": "created", "id": new_id, "grant": row, "source": "memory"}
         cur = conn.cursor()
         variance = body.variance if body.variance != 0 else (float(body.total) - float(body.spent))
         cur.execute(
@@ -1397,11 +2762,49 @@ def post_finance_grant(body: GrantRow, current_user: TokenUser = Depends(require
         )
         return {"status": "created", "id": cur.fetchone()[0]}
 
+
+@app.put("/finance/grants/{grant_id}", tags=["Finance"])
+def put_finance_grant(grant_id: str, body: GrantRow, current_user: TokenUser = Depends(require_role("ed", "finance"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_finance_grants(current_user.ngo_id)
+            grants = FINANCE_GRANTS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for g in grants:
+                if g.get("id") == grant_id:
+                    g["name"] = body.name
+                    g["total"] = float(body.total)
+                    g["spent"] = float(body.spent)
+                    g["variance"] = float(body.variance if body.variance != 0 else (float(body.total) - float(body.spent)))
+                    g["status"] = body.status
+                    return {"status": "updated", "id": grant_id, "grant": g, "source": "memory"}
+            raise HTTPException(status_code=404, detail="Grant not found.")
+        cur = conn.cursor()
+        variance = body.variance if body.variance != 0 else (float(body.total) - float(body.spent))
+        cur.execute(
+            """
+            UPDATE finance_grants
+            SET name = %s, total = %s, spent = %s, variance = %s, status = %s
+            WHERE ngo_id = %s AND id::text = %s
+            RETURNING id::text
+            """,
+            (body.name, float(body.total), float(body.spent), float(variance), body.status, current_user.ngo_id, grant_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Grant not found.")
+        return {"status": "updated", "id": row[0], "source": "db"}
+
 @app.delete("/finance/grants/{grant_id}", tags=["Finance"])
 def delete_finance_grant(grant_id: str, current_user: TokenUser = Depends(require_role("ed", "finance"))):
     with db_conn() as conn:
         if conn is None:
-            raise HTTPException(status_code=501, detail="DB not configured.")
+            _seed_memory_finance_grants(current_user.ngo_id)
+            grants = FINANCE_GRANTS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            nxt = [g for g in grants if g.get("id") != grant_id]
+            if len(nxt) == len(grants):
+                raise HTTPException(status_code=404, detail="Grant not found.")
+            FINANCE_GRANTS_MEM_BY_NGO[current_user.ngo_id] = nxt
+            return {"status": "deleted", "id": grant_id, "source": "memory"}
         cur = conn.cursor()
         cur.execute(
             "DELETE FROM finance_grants WHERE ngo_id = %s AND id::text = %s RETURNING id::text",

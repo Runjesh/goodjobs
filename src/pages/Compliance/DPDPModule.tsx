@@ -370,7 +370,7 @@ const DPDPModule: React.FC = () => {
                   setNoticeVersion(data.version || noticeVersion);
                   toast.success(`Notice saved as version ${data.version}.`);
                 } catch {
-                  toast.error('Failed to save notice (requires DB + ED/Admin role).');
+                  toast.error('Failed to save notice.');
                 }
               }}
             >

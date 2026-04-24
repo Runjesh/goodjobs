@@ -1,22 +1,19 @@
 import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, HeartHandshake, Users, Cpu, MoreHorizontal
+  LayoutDashboard, HeartHandshake, Users, Cpu, CheckSquare
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-
-interface BottomNavProps {
-  onMoreClick: () => void;
-}
 
 const PRIMARY_NAV = [
   { path: '/',            icon: LayoutDashboard, label: 'Dashboard',  module: 'dashboard'  },
   { path: '/fundraising', icon: HeartHandshake,  label: 'Raising',    module: 'fundraising' },
   { path: '/crm',         icon: Users,           label: 'Donors',     module: 'crm'        },
+  { path: '/tasks',       icon: CheckSquare,     label: 'Tasks',      module: 'tasks'  },
   { path: '/agent-hq',    icon: Cpu,             label: 'Copilot',    module: 'agent-hq'  },
 ];
 
-const BottomNav: React.FC<BottomNavProps> = ({ onMoreClick }) => {
+const BottomNav: React.FC = () => {
   const { can } = useAuth();
 
   return (
@@ -39,16 +36,6 @@ const BottomNav: React.FC<BottomNavProps> = ({ onMoreClick }) => {
           </NavLink>
         );
       })}
-
-      {/* More button */}
-      <button
-        className="bottom-nav-item"
-        onClick={onMoreClick}
-        aria-label="More navigation options"
-      >
-        <MoreHorizontal size={22} className="bottom-nav-icon" />
-        <span className="bottom-nav-label">More</span>
-      </button>
     </nav>
   );
 };

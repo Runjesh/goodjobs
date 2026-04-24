@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, X, ClipboardList, MessageCircle, Send, Bot, Loader2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
@@ -25,8 +25,27 @@ const Programs: React.FC = () => {
   const [conversationalInput, setConversationalInput] = useState('');
   const [isParsing, setIsParsing] = useState(false);
 
-  const handleEnroll = (e: React.FormEvent) => {
+  const refreshBeneficiaries = async () => {
+    try {
+      const res = await apiFetch('/programs/beneficiaries');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.beneficiaries)) {
+        useStore.getState().setBeneficiaries(data.beneficiaries);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    refreshBeneficiaries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleEnroll = async (e: React.FormEvent) => {
     e.preventDefault();
+    // optimistic
     addBeneficiary({
       name: form.name,
       program: form.program,
@@ -34,6 +53,28 @@ const Programs: React.FC = () => {
       aadhaar: form.aadhaar,
       familySize: Number(form.familySize),
     });
+    try {
+      const res = await apiFetch('/programs/beneficiaries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          program: form.program,
+          location: form.location,
+          aadhaar: form.aadhaar,
+          familySize: Number(form.familySize),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.beneficiary?.id) {
+          // easiest: refresh canonical list
+          await refreshBeneficiaries();
+        }
+      }
+    } catch {
+      // ignore
+    }
     toast.success(`${form.name} enrolled in ${form.program}!`);
     setForm({ name: '', program: programs[0], location: '', aadhaar: false, familySize: 1 });
     setShowModal(false);

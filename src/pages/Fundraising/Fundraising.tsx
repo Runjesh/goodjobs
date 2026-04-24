@@ -16,9 +16,31 @@ const Fundraising: React.FC = () => {
   const [donationData, setDonationData] = useState({ amount: 1000, donorId: donors[0]?.id || '', campaignId: campaigns[0]?.id || '' });
   const [mandate, setMandate] = useState({ donorId: donors[0]?.id || '', amount: 500, frequency: 'monthly', upiId: '', campaign: campaigns[0]?.id || '' });
 
-  const handleCreateCampaign = (e: React.FormEvent) => {
+  const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Optimistic local add
     addCampaign({ title: newCampaign.title, goal: newCampaign.goal, status: 'active', image: 'linear-gradient(135deg, #10b981, #047857)' });
+    try {
+      const res = await apiFetch('/fundraising/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newCampaign.title,
+          goal: newCampaign.goal,
+          status: 'active',
+          image: 'linear-gradient(135deg, #10b981, #047857)',
+          cause: newCampaign.cause,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.campaign?.id) {
+          useStore.getState().addCampaignWithId(data.campaign);
+        }
+      }
+    } catch {
+      // ignore, still usable locally
+    }
     toast.success(`Campaign "${newCampaign.title}" launched!`);
     setShowModal(false);
     setNewCampaign({ title: '', goal: 100000, cause: 'Education' });
@@ -102,7 +124,7 @@ const Fundraising: React.FC = () => {
     const campaign = campaigns.find(c => c.id === donationData.campaignId);
     if (!donor || !campaign) return;
 
-    // 1. Update Global State (Zustand)
+    // 1. Update Global State (Zustand) optimistically
     addTransaction({
       donorId: donor.id,
       donorName: donor.name,
@@ -112,6 +134,30 @@ const Fundraising: React.FC = () => {
       campaignTitle: campaign.title,
       date: 'Just now'
     });
+
+    // 1b. Persist transaction (DB or memory backend)
+    try {
+      const txRes = await apiFetch('/finance/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          donorId: donor.id,
+          donorName: donor.name,
+          amount: Number(donationData.amount),
+          method: 'UPI AutoPay',
+          campaignId: campaign.id,
+          campaignTitle: campaign.title,
+        }),
+      });
+      if (txRes.ok) {
+        const data = await txRes.json();
+        if (data?.transaction?.id) {
+          useStore.getState().addTransactionWithId(data.transaction);
+        }
+      }
+    } catch {
+      // ignore; demo still works locally
+    }
 
     // 2. Trigger the Python FastAPI Agent backend (Donor Nurture)
     try {

@@ -15,6 +15,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ed: [
     // Executive Director — full access to everything
     { module: 'dashboard',   canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
+    { module: 'tasks',       canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'fundraising', canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'crm',         canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'finance',     canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
@@ -27,6 +28,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   finance: [
     { module: 'dashboard',   canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
+    { module: 'tasks',       canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
     { module: 'fundraising', canView: true,  canEdit: true,  canExport: true,  canApproveAgents: false },
     { module: 'crm',         canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
     { module: 'finance',     canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
@@ -39,6 +41,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   programs: [
     { module: 'dashboard',   canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'tasks',       canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'fundraising', canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'crm',         canView: true,  canEdit: true,  canExport: false, canApproveAgents: false },
     { module: 'finance',     canView: false, canEdit: false, canExport: false, canApproveAgents: false },
@@ -51,6 +54,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   field: [
     { module: 'dashboard',   canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'tasks',       canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'fundraising', canView: false, canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'crm',         canView: false, canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'finance',     canView: false, canEdit: false, canExport: false, canApproveAgents: false },
@@ -63,6 +67,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   board: [
     { module: 'dashboard',   canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
+    { module: 'tasks',       canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
     { module: 'fundraising', canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
     { module: 'crm',         canView: false, canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'finance',     canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
