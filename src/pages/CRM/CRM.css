@@ -11,7 +11,7 @@
 
 .donor-sidebar {
   width: 320px;
-  background: white;
+  background: var(--color-bg-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-light);
   display: flex;
@@ -115,7 +115,7 @@
 
 .donor-detail {
   flex: 1;
-  background: white;
+  background: var(--color-bg-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-light);
   display: flex;
@@ -214,7 +214,7 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: white;
+  background: var(--color-bg-card);
   border: 2px solid var(--color-primary);
   display: flex;
   align-items: center;
@@ -222,7 +222,7 @@
 }
 
 .timeline-content {
-  background: white;
+  background: var(--color-bg-card);
   padding: 1rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
@@ -236,7 +236,7 @@
 }
 
 .stat-block {
-  background: white;
+  background: var(--color-bg-card);
   padding: 1.5rem;
   border-radius: var(--radius-md);
   margin-bottom: 1rem;

@@ -6,7 +6,7 @@ export const translations = {
   en: {
     dashboard: 'Dashboard',
     tasks: 'Tasks',
-    copilot: 'SevaSuite Copilot',
+    copilot: 'GoodJobs Copilot',
     fundraising: 'Fundraising Cloud',
     crm: 'Donor CRM',
     finance: 'Finance & FCRA',
@@ -23,7 +23,7 @@ export const translations = {
   hi: {
     dashboard: 'डैशबोर्ड',
     tasks: 'कार्य',
-    copilot: 'सेवास्वीट कोपायलट',
+    copilot: 'गुडजॉब्स कोपायलट',
     fundraising: 'फंडरेज़िंग क्लाउड',
     crm: 'डोनर सीआरएम',
     finance: 'वित्त और FCRA',
@@ -40,7 +40,7 @@ export const translations = {
   ta: {
     dashboard: 'டாஷ்போர்டு',
     tasks: 'பணிகள்',
-    copilot: 'சேவாசூட் கோபைலட்',
+    copilot: 'குட்ஜாப்ஸ் கோபைலட்',
     fundraising: 'நிதி திரட்டல்',
     crm: 'நன்கொடையாளர் CRM',
     finance: 'நிதி & FCRA',

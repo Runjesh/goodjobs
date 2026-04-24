@@ -127,7 +127,7 @@ const Login: React.FC = () => {
           <div className="auth-logo">GJ</div>
           <div>
             <h1 className="auth-brand-name">GoodJobs</h1>
-            <p className="auth-brand-tagline">SevaSuite — India's Nonprofit OS</p>
+            <p className="auth-brand-tagline">Infrastructure for Social Good</p>
           </div>
         </div>
         <div className="auth-hero">
@@ -140,16 +140,16 @@ const Login: React.FC = () => {
             <div key={f} className="auth-feature-item"><ShieldCheck size={16} color="#10b981" /> {f}</div>
           ))}
         </div>
-        <div className="auth-agent-badge"><Cpu size={16} color="#8b5cf6" /><span>Powered by SevaSuite Copilot</span></div>
+        <div className="auth-agent-badge"><Cpu size={16} color="#8b5cf6" /><span>Powered by GoodJobs Copilot</span></div>
       </div>
 
       <div className="auth-right">
         {/* Mobile Header (visible only on < 768px) */}
         <div className="auth-mobile-header">
-          <div className="auth-logo">SS</div>
+          <div className="auth-logo">GJ</div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: '1.25rem', color: 'var(--color-primary)' }}>SevaSuite</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>India's Nonprofit OS</div>
+            <div style={{ fontWeight: 700, fontSize: '1.25rem', color: 'var(--color-primary)' }}>GoodJobs</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Infrastructure for Social Good</div>
           </div>
         </div>
 

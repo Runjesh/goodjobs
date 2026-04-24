@@ -39,7 +39,7 @@
 .auth-logo {
   width: 52px;
   height: 52px;
-  background: white;
+  background: var(--color-bg-card);
   border-radius: 14px;
   display: flex;
   align-items: center;
@@ -129,7 +129,7 @@
 }
 
 .auth-card {
-  background: white;
+  background: var(--color-bg-card);
   border-radius: 20px;
   padding: 2.5rem;
   width: 100%;
@@ -178,7 +178,7 @@
 
 .demo-btn {
   flex: 1;
-  background: white;
+  background: var(--color-bg-card);
   border: 1px solid #bfdbfe;
   border-radius: 8px;
   padding: 0.5rem 0.75rem;
@@ -248,7 +248,7 @@
   padding: 1rem 1.25rem;
   border: 2px solid var(--color-border-light);
   border-radius: 12px;
-  background: white;
+  background: var(--color-bg-card);
   cursor: pointer;
   transition: all 0.15s ease;
   text-align: left;

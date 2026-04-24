@@ -141,7 +141,7 @@ const AgentHQ: React.FC = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title text-gradient flex items-center gap-2">
-            <Cpu size={28} /> SevaSuite Copilot (Agent HQ)
+            <Cpu size={28} /> GoodJobs Copilot (Agent HQ)
           </h1>
           <p className="page-subtitle">Monitor autonomous actions, approve high-stakes tasks, and configure agent behaviour.</p>
         </div>

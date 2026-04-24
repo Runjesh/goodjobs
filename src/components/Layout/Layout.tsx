@@ -22,7 +22,7 @@ import './Layout.css';
 const NAV_ITEMS = [
   { path: '/',            icon: LayoutDashboard, label: 'Dashboard',         module: 'dashboard',   section: 'main'    },
   { path: '/tasks',       icon: CheckSquare,     label: 'Tasks',             module: 'tasks',       section: 'main'    },
-  { path: '/agent-hq',   icon: Cpu,             label: 'SevaSuite Copilot', module: 'agent-hq',   section: 'main', accent: '#8b5cf6' },
+  { path: '/agent-hq',   icon: Cpu,             label: 'GoodJobs Copilot', module: 'agent-hq',   section: 'main', accent: '#8b5cf6' },
   { path: '/fundraising', icon: HeartHandshake,  label: 'Fundraising Cloud', module: 'fundraising', section: 'main'    },
   { path: '/crm',         icon: Users,           label: 'Donor CRM',         module: 'crm',         section: 'main'    },
   { path: '/finance',     icon: Wallet,          label: 'Finance & FCRA',    module: 'finance',     section: 'ops'     },
@@ -219,10 +219,10 @@ const Layout: React.FC = () => {
       <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`} aria-label="Main navigation">
 
         <div className="sidebar-header">
-          <div className="logo-icon">SS</div>
+          <div className="logo-icon">GJ</div>
           <div>
-            <div className="brand-name">SevaSuite</div>
-            <div className="brand-tagline">India's NGO OS</div>
+            <div className="brand-name">GoodJobs</div>
+            <div className="brand-tagline">Infrastructure for Social Good</div>
           </div>
           <button
             className="sidebar-close-btn"

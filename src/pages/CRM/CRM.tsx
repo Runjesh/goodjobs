@@ -70,7 +70,7 @@ const CRM: React.FC = () => {
           headers,
           body: JSON.stringify([
             { sender: 'Donor', text: 'I really like the work you are doing for girls education.' },
-            { sender: 'SevaSuite', text: 'Thank you Anjali! Your support makes it possible.' },
+            { sender: 'GoodJobs', text: 'Thank you Anjali! Your support makes it possible.' },
             { sender: 'Donor', text: 'When is the next site visit? I would like to join.' }
           ])
         });

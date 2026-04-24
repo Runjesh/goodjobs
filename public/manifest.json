@@ -1,7 +1,7 @@
 {
-  "name": "SevaSuite",
-  "short_name": "SevaSuite",
-  "description": "India's Nonprofit Operating System — Fundraising, CRM, Finance & AI Agents",
+  "name": "GoodJobs Infrastructure for Social Good",
+  "short_name": "GoodJobs",
+  "description": "Infrastructure for Social Good — Fundraising, CRM, Finance, Programs & AI Copilot",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
@@ -27,7 +27,7 @@
     { "name": "Dashboard",   "url": "/",           "description": "Home dashboard" },
     { "name": "Fundraising", "url": "/fundraising", "description": "Campaigns & donations" },
     { "name": "Donor CRM",   "url": "/crm",         "description": "Manage donors" },
-    { "name": "AI Copilot",  "url": "/agent-hq",    "description": "SevaSuite AI agents" }
+    { "name": "AI Copilot",  "url": "/agent-hq",    "description": "GoodJobs AI copilot" }
   ],
   "categories": ["productivity", "finance", "utilities"],
   "prefer_related_applications": false

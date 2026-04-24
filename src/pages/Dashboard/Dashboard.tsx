@@ -493,7 +493,7 @@ const Dashboard: React.FC = () => {
           <div className="card-header flex justify-between items-center">
             <h3 className="card-title flex items-center gap-2"><Bot size={18} color="#8b5cf6" /> Agent Activity Feed</h3>
             <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-              onClick={() => toast('Full agent log available in SevaSuite Copilot.')}>
+              onClick={() => toast('Full agent log available in GoodJobs Copilot.')}>
               View All
             </button>
           </div>

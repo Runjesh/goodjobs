@@ -46,7 +46,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
             ref={inputRef}
             type="text"
             className="palette-input"
-            placeholder="Ask SevaSuite or search..."
+            placeholder="Ask GoodJobs or search..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
