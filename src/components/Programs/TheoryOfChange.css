@@ -1,0 +1,140 @@
+.toc-builder {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border);
+  padding: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.toc-toolbar {
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.toc-canvas {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 1rem;
+}
+
+.toc-column {
+  flex: 1;
+  min-width: 220px;
+  background: var(--color-bg-main);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  border-top: 4px solid transparent;
+}
+
+.col-input    { border-top-color: #94a3b8; }
+.col-activity { border-top-color: #3b82f6; }
+.col-output   { border-top-color: #f59e0b; }
+.col-outcome  { border-top-color: #10b981; }
+.col-impact   { border-top-color: #8b5cf6; }
+
+.toc-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.toc-column-header h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.action-btn-small {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.action-btn-small:hover {
+  background: white;
+  color: var(--color-primary);
+}
+
+.toc-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.toc-node {
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+  position: relative;
+  box-shadow: var(--shadow-xs);
+}
+
+.toc-textarea {
+  width: 100%;
+  border: none;
+  resize: none;
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  background: transparent;
+  min-height: 48px;
+  line-height: 1.4;
+}
+.toc-textarea:focus {
+  outline: none;
+}
+
+.toc-metric-badge {
+  font-size: 0.65rem;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-weight: 500;
+}
+
+.toc-delete {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.toc-node:hover .toc-delete {
+  opacity: 1;
+}
+.toc-delete:hover {
+  color: var(--color-danger);
+}
+
+.toc-arrow {
+  display: flex;
+  align-items: center;
+  margin-top: 4rem;
+}
+
+.toc-empty {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  padding: 1rem 0;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}

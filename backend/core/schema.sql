@@ -1,0 +1,261 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SevaSuite Production Schema — v3 (Sprint 3: Multi-Tenancy + RLS + DPDP)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Enable pgvector extension for AI embeddings
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ── 0. Multi-Tenancy: NGO Registry ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ngos (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(200) NOT NULL,
+    slug        VARCHAR(100) UNIQUE NOT NULL,      -- e.g. "india-ngo-trust"
+    pan         VARCHAR(20),
+    fcra_reg    VARCHAR(50),
+    reg_no      VARCHAR(100),
+    state       VARCHAR(100),
+    tier        VARCHAR(20) DEFAULT 'standard',    -- standard | pro | enterprise
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    is_active   BOOLEAN DEFAULT true
+);
+
+-- ── 1. Users & RBAC ────────────────────────────────────────────────────────
+CREATE TYPE user_role AS ENUM ('ed', 'finance', 'programs', 'field', 'board');
+
+CREATE TABLE IF NOT EXISTS users (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id          UUID NOT NULL REFERENCES ngos(id) ON DELETE CASCADE,
+    email           VARCHAR(255) UNIQUE NOT NULL,
+    password_hash   TEXT NOT NULL,               -- bcrypt hash; NEVER store plaintext
+    full_name       VARCHAR(150) NOT NULL,
+    role            user_role NOT NULL DEFAULT 'field',
+    avatar_url      TEXT,
+    last_login_at   TIMESTAMP WITH TIME ZONE,
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    is_active       BOOLEAN DEFAULT true
+);
+
+CREATE INDEX idx_users_ngo ON users(ngo_id);
+
+-- ── 2. Core CRM: Donors Table (ngo_id scoped) ─────────────────────────────
+CREATE TABLE IF NOT EXISTS donors (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id                UUID NOT NULL REFERENCES ngos(id) ON DELETE CASCADE,
+    donor_code            VARCHAR(20) NOT NULL,
+    full_name             VARCHAR(150) NOT NULL,
+    email                 VARCHAR(255),
+    phone                 VARCHAR(20),
+    preferred_language    VARCHAR(50) DEFAULT 'English',
+    total_lifetime_value  DECIMAL(12, 2) DEFAULT 0.00,
+    consent_given         BOOLEAN DEFAULT false,    -- DPDP: must be true to process
+    consent_date          TIMESTAMP WITH TIME ZONE,
+    created_at            TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (ngo_id, donor_code)
+);
+
+CREATE INDEX idx_donors_ngo ON donors(ngo_id);
+
+-- ── 3. Finance: Transactions (ngo_id scoped) ───────────────────────────────
+CREATE TYPE fund_type AS ENUM ('General', 'FCRA', 'CSR', 'Restricted Grant');
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id               UUID NOT NULL REFERENCES ngos(id) ON DELETE CASCADE,
+    donor_id             UUID REFERENCES donors(id),
+    amount               DECIMAL(12, 2) NOT NULL,
+    fund_classification  fund_type NOT NULL,
+    payment_method       VARCHAR(50),
+    transaction_date     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    requires_review      BOOLEAN DEFAULT false,
+    receipt_generated    BOOLEAN DEFAULT false
+);
+
+CREATE INDEX idx_transactions_ngo ON transactions(ngo_id);
+CREATE INDEX idx_transactions_donor ON transactions(donor_id);
+
+-- ── 4. RAG Vector Store (ngo_id scoped) ────────────────────────────────────
+CREATE TABLE IF NOT EXISTS vector_documents (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id          UUID NOT NULL REFERENCES ngos(id) ON DELETE CASCADE,
+    document_title  VARCHAR(255) NOT NULL,
+    document_type   VARCHAR(50) NOT NULL,
+    chunk_index     INTEGER NOT NULL,
+    chunk_text      TEXT NOT NULL,
+    embedding       vector(1536),
+    s3_key          TEXT,                          -- AWS S3 object key for full doc
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX ON vector_documents USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_vector_docs_ngo ON vector_documents(ngo_id);
+
+-- ── 5. Audit Log (ngo_id scoped, append-only) ──────────────────────────────
+CREATE TABLE IF NOT EXISTS agent_audit_log (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id            UUID NOT NULL REFERENCES ngos(id) ON DELETE CASCADE,
+    agent_name        VARCHAR(100) NOT NULL,
+    action_type       VARCHAR(100) NOT NULL,
+    target_id         UUID,
+    execution_details JSONB,
+    status            VARCHAR(20) NOT NULL,
+    performed_by      UUID REFERENCES users(id),
+    timestamp         TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_audit_ngo ON agent_audit_log(ngo_id);
+
+-- ── 6. DPDP Act 2023 — Consent Registry ────────────────────────────────────
+-- Tracks consent from every data subject (donor / beneficiary / volunteer).
+CREATE TYPE consent_purpose AS ENUM (
+    'fundraising_comms', 'operational_reporting', 'third_party_sharing',
+    'analytics', 'grant_reporting', 'whatsapp_outreach'
+);
+
+CREATE TABLE IF NOT EXISTS consent_registry (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id            UUID NOT NULL REFERENCES ngos(id) ON DELETE CASCADE,
+    data_subject_id   UUID,                          -- donor_id / beneficiary_id
+    data_subject_type VARCHAR(50) NOT NULL,           -- 'donor' | 'beneficiary' | 'volunteer'
+    email             VARCHAR(255),
+    phone             VARCHAR(20),
+    purpose           consent_purpose NOT NULL,
+    consent_given     BOOLEAN NOT NULL,
+    consent_date      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    ip_address        INET,
+    consent_text_hash TEXT,                           -- SHA256 of the exact notice shown
+    withdrawn_at      TIMESTAMP WITH TIME ZONE,       -- populated on §12 withdrawal
+    created_at        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_consent_ngo ON consent_registry(ngo_id);
+CREATE INDEX idx_consent_subject ON consent_registry(data_subject_id);
+
+-- ── 7. DPDP Act 2023 — Data Erasure Requests (§12) ─────────────────────────
+CREATE TYPE erasure_status AS ENUM (
+    'received', 'in_review', 'completed', 'rejected'
+);
+
+CREATE TABLE IF NOT EXISTS data_erasure_requests (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id            UUID NOT NULL REFERENCES ngos(id) ON DELETE CASCADE,
+    data_subject_id   UUID,
+    data_subject_type VARCHAR(50) NOT NULL,
+    email             VARCHAR(255) NOT NULL,
+    phone             VARCHAR(20),
+    request_reason    TEXT,
+    status            erasure_status NOT NULL DEFAULT 'received',
+    received_at       TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    -- DPDP §12: must complete within 30 days
+    deadline_at       TIMESTAMP WITH TIME ZONE GENERATED ALWAYS AS
+                        (received_at + INTERVAL '30 days') STORED,
+    completed_at      TIMESTAMP WITH TIME ZONE,
+    completed_by      UUID REFERENCES users(id),
+    rejection_reason  TEXT
+);
+
+CREATE INDEX idx_erasure_ngo ON data_erasure_requests(ngo_id);
+CREATE INDEX idx_erasure_status ON data_erasure_requests(status);
+
+-- ── 8. DPDP Act 2023 — Breach Log (§8: 72hr notification duty) ─────────────
+CREATE TYPE breach_severity AS ENUM ('low', 'medium', 'high', 'critical');
+
+CREATE TABLE IF NOT EXISTS breach_log (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id              UUID NOT NULL REFERENCES ngos(id) ON DELETE CASCADE,
+    title               VARCHAR(255) NOT NULL,
+    description         TEXT NOT NULL,
+    severity            breach_severity NOT NULL,
+    affected_records    INTEGER DEFAULT 0,
+    discovered_at       TIMESTAMP WITH TIME ZONE NOT NULL,
+    -- DPDP §8: notify DPB within 72 hours
+    notification_due_at TIMESTAMP WITH TIME ZONE GENERATED ALWAYS AS
+                          (discovered_at + INTERVAL '72 hours') STORED,
+    notified_dpb_at     TIMESTAMP WITH TIME ZONE,    -- NULL = not yet notified
+    remediation_notes   TEXT,
+    created_by          UUID REFERENCES users(id),
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_breach_ngo ON breach_log(ngo_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Row Level Security (RLS) — One DB, many NGOs, zero data leakage
+-- ═══════════════════════════════════════════════════════════════════════════
+-- How it works:
+--   1. App sets `SET app.current_ngo_id = '<uuid>'` at the start of each request.
+--   2. RLS policies filter every SELECT/INSERT/UPDATE/DELETE to that ngo_id only.
+--   3. Even if there is a query injection bug, data from other NGOs is invisible.
+
+ALTER TABLE donors             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vector_documents   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_audit_log    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE consent_registry   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE data_erasure_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE breach_log         ENABLE ROW LEVEL SECURITY;
+
+-- Helper function: read ngo_id from session variable
+CREATE OR REPLACE FUNCTION current_ngo_id() RETURNS UUID AS $$
+    SELECT NULLIF(current_setting('app.current_ngo_id', true), '')::UUID;
+$$ LANGUAGE sql STABLE;
+
+-- RLS Policies (one per table)
+CREATE POLICY ngo_isolate_donors
+    ON donors USING (ngo_id = current_ngo_id());
+
+CREATE POLICY ngo_isolate_transactions
+    ON transactions USING (ngo_id = current_ngo_id());
+
+CREATE POLICY ngo_isolate_vector_docs
+    ON vector_documents USING (ngo_id = current_ngo_id());
+
+CREATE POLICY ngo_isolate_audit_log
+    ON agent_audit_log USING (ngo_id = current_ngo_id());
+
+CREATE POLICY ngo_isolate_consent
+    ON consent_registry USING (ngo_id = current_ngo_id());
+
+CREATE POLICY ngo_isolate_erasure
+    ON data_erasure_requests USING (ngo_id = current_ngo_id());
+
+CREATE POLICY ngo_isolate_breach
+    ON breach_log USING (ngo_id = current_ngo_id());
+
+-- ── Seed data: default NGO + demo users ────────────────────────────────────
+-- Passwords are demo-only hashes (bcrypt of "demo1234").
+INSERT INTO ngos (id, name, slug, pan, fcra_reg, reg_no, state, tier)
+VALUES (
+    '00000000-0000-0000-0000-000000000001',
+    'India NGO Trust', 'india-ngo-trust',
+    'AABCI1234C', '231650212', 'MH/2015/0012345', 'Maharashtra', 'pro'
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO users (id, ngo_id, email, password_hash, full_name, role)
+VALUES
+    ('00000000-0000-0000-0000-000000000010',
+     '00000000-0000-0000-0000-000000000001',
+     'admin@indiango.org',
+     '$2b$12$demohashedpassword1..........................',
+     'Anjali Mehta', 'ed'),
+    ('00000000-0000-0000-0000-000000000011',
+     '00000000-0000-0000-0000-000000000001',
+     'finance@indiango.org',
+     '$2b$12$demohashedpassword2..........................',
+     'Rajan Sharma', 'finance'),
+    ('00000000-0000-0000-0000-000000000012',
+     '00000000-0000-0000-0000-000000000001',
+     'programs@indiango.org',
+     '$2b$12$demohashedpassword3..........................',
+     'Priya Nair', 'programs'),
+    ('00000000-0000-0000-0000-000000000013',
+     '00000000-0000-0000-0000-000000000001',
+     'field@indiango.org',
+     '$2b$12$demohashedpassword4..........................',
+     'Ramesh Kumar', 'field'),
+    ('00000000-0000-0000-0000-000000000014',
+     '00000000-0000-0000-0000-000000000001',
+     'board@indiango.org',
+     '$2b$12$demohashedpassword5..........................',
+     'Dr. Sunita Rao', 'board')
+ON CONFLICT DO NOTHING;
