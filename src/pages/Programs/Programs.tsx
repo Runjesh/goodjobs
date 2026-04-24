@@ -6,6 +6,7 @@ import FormBuilder from '../../components/FormBuilder/FormBuilder';
 import TheoryOfChangeBuilder from '../../components/Programs/TheoryOfChangeBuilder';
 import '../../components/FormBuilder/FormBuilder.css';
 import './Programs.css';
+import { apiFetch } from '../../api/client';
 
 const programs = ['Women Livelihood Center', 'Digital Literacy 2026', 'Healthcare Camp', 'STEM for Girls'];
 
@@ -259,13 +260,29 @@ const Programs: React.FC = () => {
               disabled={!conversationalInput || isParsing}
               onClick={async () => {
                 setIsParsing(true);
-                // Simulate agent parsing
-                setTimeout(() => {
+                try {
+                  const res = await apiFetch('/webhook/field-report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      report_text: conversationalInput,
+                      reporter_id: 'field_staff_001',
+                      program: form.program,
+                      report_date: new Date().toISOString().slice(0, 10),
+                    }),
+                  });
+                  if (res.ok) {
+                    toast.success("Submitted to MIS Agent. Processing in background.", { icon: '🤖' });
+                    setShowConversationalModal(false);
+                    setConversationalInput('');
+                  } else {
+                    toast.error("Failed to submit to MIS Agent.");
+                  }
+                } catch {
+                  toast.error("Failed to submit (backend not reachable).");
+                } finally {
                   setIsParsing(false);
-                  toast.success("MIS Agent Parsed: 1 beneficiary update, 1 activity log created.", { icon: '🤖' });
-                  setShowConversationalModal(false);
-                  setConversationalInput('');
-                }, 1500);
+                }
               }}
             >
               {isParsing ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}

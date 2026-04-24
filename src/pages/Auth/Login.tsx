@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Eye, EyeOff, Cpu } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth, ROLE_META, type UserRole } from '../../context/AuthContext';
+import { apiFetch } from '../../api/client';
 import './Auth.css';
 
 const roles = [
@@ -30,23 +31,48 @@ const Login: React.FC = () => {
   const [selectedRole, setSelectedRole] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [serverToken, setServerToken] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.email || !form.password) { toast.error('Please enter email and password'); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 900));
-    setLoading(false);
-    // Match demo accounts
+    try {
+      // Prefer real backend login (FastAPI /auth/login). If backend isn't running, fall back to demo.
+      const res = await apiFetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email, password: form.password }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setServerToken(data.access_token);
+        setPendingUser({
+          email: data.email,
+          password: form.password,
+          role: data.role,
+          name: data.name,
+          org: data.ngo_name,
+        } as any);
+        setStep('role');
+        return;
+      }
+    } catch {
+      // ignore, fall back to demo
+    } finally {
+      setLoading(false);
+    }
+
+    // Demo fallback
     const match = demoAccounts.find(a => a.email === form.email && a.password === form.password);
     if (match) {
       setPendingUser(match);
-      setStep('role');
     } else {
-      // Any email/password combo works in demo mode
       setPendingUser({ email: form.email, password: form.password, role: 'ed', name: form.email.split('@')[0], org: 'Demo NGO' });
-      setStep('role');
     }
+    setServerToken(null);
+    setStep('role');
   };
 
   const handleRoleSelect = (roleId: string) => {
@@ -63,7 +89,7 @@ const Login: React.FC = () => {
       role: roleId as UserRole,
       ngoId: 'ngo_001',
       ngoName: user.org || 'India NGO Trust',
-      token: `demo-jwt-${roleId}-${Date.now()}`,
+      token: serverToken || `demo-jwt-${roleId}-${Date.now()}`,
       avatar: meta.icon,
     });
 

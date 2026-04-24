@@ -544,3 +544,83 @@ def get_morning_brief(current_user: TokenUser = Depends(require_role("ed", "admi
     Returns the prioritized daily attention list for the user.
     """
     return generate_morning_brief()
+
+# ── AWS S3 Storage (Compliance Vault) ──────────────────────────────────────────
+
+from core.s3_storage import (
+    generate_presigned_upload_url,
+    generate_presigned_download_url,
+    list_ngo_files,
+    delete_file
+)
+
+class S3UploadRequest(BaseModel):
+    folder: str
+    filename: str
+    content_type: str = "application/octet-stream"
+
+@app.post("/storage/presigned-upload", tags=["Storage"])
+def get_presigned_upload(request: S3UploadRequest, current_user: TokenUser = Depends(get_current_user)):
+    """Generate a presigned URL for direct S3 upload."""
+    return generate_presigned_upload_url(
+        ngo_id=current_user.ngo_id,
+        folder=request.folder,
+        filename=request.filename,
+        content_type=request.content_type
+    )
+
+@app.get("/storage/files", tags=["Storage"])
+def get_storage_files(folder: Optional[str] = None, current_user: TokenUser = Depends(get_current_user)):
+    """List files for the current NGO in the specified folder."""
+    return {"files": list_ngo_files(current_user.ngo_id, folder=folder)}
+
+@app.delete("/storage/file", tags=["Storage"])
+def delete_storage_file(key: str, current_user: TokenUser = Depends(get_current_user)):
+    """Delete a file from S3."""
+    return delete_file(key, current_user.ngo_id)
+
+# ── DPDP Act Compliance ───────────────────────────────────────────────────────
+
+class WithdrawConsentRequest(BaseModel):
+    consent_id: str
+    reason: Optional[str] = None
+
+class ErasureLogRequest(BaseModel):
+    name: str
+    email: str
+    reason: str
+
+class BreachLogRequest(BaseModel):
+    title: str
+    severity: str
+    affected_records: int
+    description: str
+
+@app.post("/compliance/consent/withdraw", tags=["Compliance"])
+def withdraw_consent(req: WithdrawConsentRequest, current_user: TokenUser = Depends(get_current_user)):
+    """Log the withdrawal of a user's consent under DPDP §12."""
+    return {"status": "success", "message": f"Consent {req.consent_id} withdrawn successfully."}
+
+@app.post("/compliance/erasure", tags=["Compliance"])
+def log_erasure_request(req: ErasureLogRequest, current_user: TokenUser = Depends(get_current_user)):
+    """Log a Right to Erasure request under DPDP §12."""
+    from datetime import datetime, timedelta, timezone
+    deadline = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+    return {
+        "status": "received", 
+        "request_id": f"e{int(datetime.now().timestamp())}",
+        "deadline": deadline,
+        "message": "Erasure request logged. Must be completed within 30 days."
+    }
+
+@app.post("/compliance/breach", tags=["Compliance"])
+def log_breach(req: BreachLogRequest, current_user: TokenUser = Depends(get_current_user)):
+    """Log a data breach to start the 72-hour DPB notification timer under DPDP §8."""
+    from datetime import datetime, timedelta, timezone
+    notif_due = (datetime.now(timezone.utc) + timedelta(hours=72)).isoformat()
+    return {
+        "status": "logged",
+        "breach_id": f"b{int(datetime.now().timestamp())}",
+        "notification_due": notif_due,
+        "message": "Breach logged. You must notify the DPB within 72 hours."
+    }

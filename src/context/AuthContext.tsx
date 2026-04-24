@@ -121,11 +121,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = useCallback((newUser: AuthUser) => {
     setUser(newUser);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser));
+    // Back-compat for pages that read access_token directly
+    localStorage.setItem('access_token', newUser.token);
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem('access_token');
   }, []);
 
   const can = useCallback((module: string, action: keyof Omit<Permission, 'module'>): boolean => {

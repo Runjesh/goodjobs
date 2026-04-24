@@ -3,6 +3,7 @@ import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRigh
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import './Settings.css';
+import { apiFetch } from '../../api/client';
 
 const TABS = [
   { id: 'profile',  label: 'Profile',      icon: <User size={16} /> },
@@ -177,7 +178,31 @@ const Settings: React.FC = () => {
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button className="btn btn-secondary" style={{ flex: 1 }} onClick={handleExportData}><Download size={14} /> Export My Data (§12)</button>
                   <button className="btn btn-secondary" style={{ flex: 1, color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
-                    onClick={() => toast('Erasure request submitted. Account will be deleted within 72 hours.', { icon: '🗑️', duration: 5000 })}>
+                    onClick={async () => {
+                      if (!user) return;
+                      try {
+                        const res = await apiFetch('/compliance/erasure', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            name: user.name,
+                            email: user.email,
+                            reason: 'User requested account erasure from Settings.',
+                          }),
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok) {
+                          toast(
+                            data.message || 'Erasure request logged. Must be completed within 30 days.',
+                            { icon: '🗑️', duration: 6000 }
+                          );
+                        } else {
+                          toast.error('Failed to submit erasure request.');
+                        }
+                      } catch {
+                        toast.error('Failed to submit erasure request (backend not reachable).');
+                      }
+                    }}>
                     <Trash2 size={14} /> Request Erasure (§13)
                   </button>
                 </div>

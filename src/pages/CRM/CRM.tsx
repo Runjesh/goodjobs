@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
+import { apiFetch } from '../../api/client';
 import './CRM.css';
 
 const WA_TEMPLATES = [
@@ -46,10 +47,7 @@ const CRM: React.FC = () => {
     const fetchPropensity = async () => {
       setPropensityLoading(true);
       try {
-        const token = localStorage.getItem('access_token');
-        const res = await fetch(`http://localhost:8000/analytics/donor-propensity/${activeDonorId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`/analytics/donor-propensity/${activeDonorId}`);
         if (res.ok) {
           const data = await res.json();
           setPropensity({ score: data.propensity_score, recommendation: data.recommendation, insights: data.insights });
@@ -64,11 +62,10 @@ const CRM: React.FC = () => {
     const fetchAiInsights = async () => {
       setAiLoading(true);
       try {
-        const token = localStorage.getItem('access_token');
-        const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+        const headers = { 'Content-Type': 'application/json' };
         
         // Fetch Summary
-        const sumRes = await fetch('http://localhost:8000/gen-ai/summarize', {
+        const sumRes = await apiFetch('/gen-ai/summarize', {
           method: 'POST',
           headers,
           body: JSON.stringify([
@@ -79,7 +76,7 @@ const CRM: React.FC = () => {
         });
         
         // Fetch Sentiment
-        const sentRes = await fetch(`http://localhost:8000/gen-ai/sentiment?text=${encodeURIComponent("I am very happy with the progress reports.")}`, {
+        const sentRes = await apiFetch(`/gen-ai/sentiment?text=${encodeURIComponent("I am very happy with the progress reports.")}`, {
           method: 'POST',
           headers
         });
@@ -99,7 +96,6 @@ const CRM: React.FC = () => {
       }
     };
 
-    fetchPropensity();
     fetchPropensity();
     fetchAiInsights();
   }, [activeDonorId, viewMode]);
@@ -348,7 +344,7 @@ const CRM: React.FC = () => {
                     onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                   >
                     <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.25rem' }}>{donor.name.split(' ')[0]}</div>
-                    <div style={{ fontSize: '0.7rem', opacity: 0.9 }}>RFM: {donor.rfmScore || '78'}</div>
+                    <div style={{ fontSize: '0.7rem', opacity: 0.9 }}>RFM: {(donor as any).rfmScore || '78'}</div>
                   </div>
                 )
               })}

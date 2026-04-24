@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, Link as LinkIcon, Share2, Download, QrCode, X, Heart, BarChart2, TrendingUp, Users, IndianRupee, RefreshCw } from 'lucide-react';
+import { Plus, Link as LinkIcon, Share2, Download, QrCode, X, Heart, BarChart2, TrendingUp, Users, IndianRupee, RefreshCw, Loader2, Bot } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
+import { apiFetch } from '../../api/client';
 import './Fundraising.css';
 
 const Fundraising: React.FC = () => {
@@ -26,10 +27,8 @@ const Fundraising: React.FC = () => {
   const handleSuggestGoal = async () => {
     setIsSuggesting(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch(`http://localhost:8000/workflows/suggest-goal?cause=${newCampaign.cause}`, {
+      const res = await apiFetch(`/workflows/suggest-goal?cause=${encodeURIComponent(newCampaign.cause)}`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
@@ -62,14 +61,35 @@ const Fundraising: React.FC = () => {
     toast.success('Transaction data exported!');
   };
 
-  const handleCreateMandate = (e: React.FormEvent) => {
+  const handleCreateMandate = async (e: React.FormEvent) => {
     e.preventDefault();
     const donor = donors.find(d => d.id === mandate.donorId);
-    toast.success(
-      `UPI AutoPay mandate created for ${donor?.name}! ₹${mandate.amount}/${mandate.frequency} via ${mandate.upiId || 'UPI ID'}. First debit scheduled.`,
-      { icon: '🔄', duration: 5000 }
-    );
-    setShowRecurringModal(false);
+    try {
+      const res = await apiFetch('/mandate/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          donor_id: mandate.donorId,
+          donor_name: donor?.name || 'Unknown',
+          upi_id: mandate.upiId,
+          amount: Number(mandate.amount),
+          frequency: mandate.frequency,
+          campaign_id: mandate.campaign || null,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(
+          `Mandate ${data.mandate_id} created for ${data.donor_name}. Next debit: ${data.next_debit}.`,
+          { icon: '🔄', duration: 5000 }
+        );
+        setShowRecurringModal(false);
+        return;
+      }
+      toast.error('Failed to create mandate.');
+    } catch {
+      toast.error('Failed to create mandate (backend not reachable).');
+    }
   };
 
   const totalRaised = transactions.reduce((s, t) => s + t.amount, 0);
@@ -93,9 +113,9 @@ const Fundraising: React.FC = () => {
       date: 'Just now'
     });
 
-    // 2. Trigger the Python FastAPI LangGraph Agent Backend
+    // 2. Trigger the Python FastAPI Agent backend (Donor Nurture)
     try {
-      await fetch('http://localhost:8000/webhook/donation', {
+      await apiFetch('/webhook/donation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -118,13 +138,11 @@ const Fundraising: React.FC = () => {
   const handleZeroTouch = async () => {
     setIsZeroTouchLoading(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch('http://localhost:8000/intent/process?directive=' + encodeURIComponent("Run a monsoon appeal for clean water, goal 3L, 30 days"), {
+      const res = await apiFetch('/intent/process?directive=' + encodeURIComponent("Run a monsoon appeal for clean water, goal 3L, 30 days"), {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        const data = await res.json();
+        await res.json();
         toast.success("Autonomous Campaign Drafted! Review the proposal in your Intent Queue.", { duration: 6000 });
       }
     } catch (err) {

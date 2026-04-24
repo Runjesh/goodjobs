@@ -12,7 +12,7 @@ import UserChip from '../Auth/UserChip';
 import BottomNav from '../ui/BottomNav';
 import NotificationCenter from '../Notifications/NotificationCenter';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
-import { useTranslation } from '../../i18n';
+import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
 import './Layout.css';
 
@@ -102,7 +102,7 @@ const Layout: React.FC = () => {
       const Icon = item.icon;
       const hasAccess = can(item.module, 'canView');
       // Look up translation key based on module name
-      const tKey = item.module.replace('-', '') as keyof typeof import('../../i18n').translations['en'];
+      const tKey = item.module.replace('-', '') as TranslationKey;
       const label = t(tKey) || item.label;
 
       return (

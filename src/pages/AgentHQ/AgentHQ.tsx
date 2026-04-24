@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './AgentHQ.css';
+import { apiFetch } from '../../api/client';
 
 const agents = [
   { id: 1, name: 'Donor Nurture Agent', module: 'Fundraising + CRM', status: 'Active' },
@@ -107,7 +108,19 @@ const AgentHQ: React.FC = () => {
           </h1>
           <p className="page-subtitle">Monitor autonomous actions, approve high-stakes tasks, and configure agent behaviour.</p>
         </div>
-        <button className="btn btn-secondary" onClick={() => toast('Triggering Board Briefing Agent...', { icon: '🤖' })}>
+        <button
+          className="btn btn-secondary"
+          onClick={async () => {
+            toast('Triggering Board Briefing Agent...', { icon: '🤖' });
+            try {
+              const res = await apiFetch('/trigger/board-brief', { method: 'POST' });
+              if (!res.ok) toast.error('Failed to trigger board brief.');
+              else toast.success('Board briefing triggered.');
+            } catch {
+              toast.error('Failed to trigger board brief (backend not reachable).');
+            }
+          }}
+        >
           <Bot size={16} /> Run Morning Brief Now
         </button>
       </div>

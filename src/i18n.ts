@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 type SupportedLanguage = 'en' | 'hi' | 'ta';
 
-const translations = {
+export const translations = {
   en: {
     dashboard: 'Dashboard',
     copilot: 'SevaSuite Copilot',
@@ -53,6 +53,8 @@ const translations = {
   }
 };
 
+export type TranslationKey = keyof typeof translations['en'];
+
 let currentLanguage: SupportedLanguage = (localStorage.getItem('language') as SupportedLanguage) || 'en';
 const listeners = new Set<(lang: SupportedLanguage) => void>();
 
@@ -72,7 +74,7 @@ export const useTranslation = () => {
     };
   }, []);
 
-  const t = useCallback((key: keyof typeof translations['en']) => {
+  const t = useCallback((key: TranslationKey) => {
     return translations[lang][key] || translations['en'][key];
   }, [lang]);
 

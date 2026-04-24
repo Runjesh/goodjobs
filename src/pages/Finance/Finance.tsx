@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './Finance.css';
+import { apiFetch } from '../../api/client';
 
 const initialGrants = [
   { id: 'G-2026-01', name: 'Rural Digital Literacy (CSR)', total: 2500000, spent: 1800000, variance: 50000, status: 'On Track' },
@@ -38,28 +39,41 @@ const Finance: React.FC = () => {
     }, 2000);
   };
 
-  const handleTallyXMLExport = () => {
-    // Simulate generating Tally XML with the voucher format
-    const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
-<ENVELOPE>
-  <HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
-  <BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME></REQUESTDESC>
-    <REQUESTDATA>
-      <TALLYMESSAGE xmlns:UDF="TallyUDF">
-        <VOUCHER REMOTEID="SVST-TRX001" ACTION="Create" OBJVIEW="Accounting Voucher View">
-          <DATE>20260422</DATE><VOUCHTYPENAME>Receipt</VOUCHTYPENAME>
-          <VOUCHERNUMBER>RCT/TRX001</VOUCHERNUMBER>
-          <PARTYLEDGERNAME>Anjali Desai</PARTYLEDGERNAME>
-          <NARRATION>Donation | Campaign: Digital Literacy | Fund: General | UPI AutoPay | PAN: ABCDE1234F</NARRATION>
-        </VOUCHER>
-      </TALLYMESSAGE>
-    </REQUESTDATA>
-  </IMPORTDATA></BODY>
-</ENVELOPE>`;
-    const blob = new Blob([xmlContent], { type: 'application/xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `sevasuite_tally_${new Date().toISOString().split('T')[0]}.xml`; a.click();
-    toast.success('Tally Prime XML exported! Import via Gateway of Tally → Import → Vouchers', { duration: 5000, icon: '💾' });
+  const handleTallyXMLExport = async () => {
+    try {
+      // Use backend generator so the format stays consistent.
+      const res = await apiFetch('/export/tally-xml', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ngo_name: 'India NGO Trust',
+          transactions: [
+            {
+              id: 'TRX-1090',
+              date: new Date().toISOString().slice(0, 10),
+              amount: 5000,
+              donor_name: 'Anjali Desai',
+              method: 'UPI',
+              fund: 'General',
+            },
+          ],
+        }),
+      });
+      if (!res.ok) {
+        toast.error('Failed to export Tally XML.');
+        return;
+      }
+      const xml = await res.text();
+      const blob = new Blob([xml], { type: 'application/xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sevasuite_tally_${new Date().toISOString().split('T')[0]}.xml`;
+      a.click();
+      toast.success('Tally Prime XML exported from backend.', { duration: 5000, icon: '💾' });
+    } catch {
+      toast.error('Failed to export Tally XML (backend not reachable).');
+    }
   };
 
   const handleExportReport = () => {

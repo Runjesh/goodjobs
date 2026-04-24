@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Shield, UserCheck, Trash2, AlertOctagon, FileText, Plus, X, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { apiFetch } from '../../api/client';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ConsentRecord {
@@ -64,19 +65,37 @@ const DPDPModule: React.FC = () => {
   const [erasureForm, setErasureForm] = useState({ name:'', email:'', reason:'' });
   const [breachForm, setBreachForm] = useState({ title:'', severity:'medium' as BreachRecord['severity'], affectedRecords:0, description:'' });
 
-  const handleWithdrawConsent = (id: string) => {
-    setConsents(prev => prev.map(c => c.id === id ? { ...c, given:false, withdrawn: new Date().toISOString().slice(0,10) } : c));
-    toast('Consent withdrawn. Subject will not receive further communications.', { icon:'📋', duration:4000 });
+  const handleWithdrawConsent = async (id: string) => {
+    try {
+      const res = await apiFetch('/compliance/consent/withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consent_id: id })
+      });
+      if (res.ok) {
+        setConsents(prev => prev.map(c => c.id === id ? { ...c, given:false, withdrawn: new Date().toISOString().slice(0,10) } : c));
+        toast('Consent withdrawn. Subject will not receive further communications.', { icon:'📋', duration:4000 });
+      }
+    } catch (e) { toast.error("Failed to withdraw consent."); }
   };
 
-  const handleAddErasure = (e: React.FormEvent) => {
+  const handleAddErasure = async (e: React.FormEvent) => {
     e.preventDefault();
-    const received = new Date().toISOString().slice(0,10);
-    const deadline = new Date(Date.now() + 30*24*60*60*1000).toISOString().slice(0,10);
-    setErasures(prev => [...prev, { id:`e${Date.now()}`, ...erasureForm, status:'received', received, deadline }]);
-    setErasureForm({ name:'', email:'', reason:'' });
-    setShowErasureModal(false);
-    toast.success('Erasure request logged. Must be completed within 30 days (DPDP §12).', { duration:5000 });
+    try {
+      const res = await apiFetch('/compliance/erasure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(erasureForm)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const received = new Date().toISOString().slice(0,10);
+        setErasures(prev => [...prev, { id: data.request_id || `e${Date.now()}`, ...erasureForm, status:'received', received, deadline: data.deadline }]);
+        setErasureForm({ name:'', email:'', reason:'' });
+        setShowErasureModal(false);
+        toast.success(data.message || 'Erasure request logged. Must be completed within 30 days (DPDP §12).', { duration:5000 });
+      }
+    } catch (e) { toast.error("Failed to log erasure request."); }
   };
 
   const handleCompleteErasure = (id: string) => {
@@ -84,14 +103,28 @@ const DPDPModule: React.FC = () => {
     toast.success('Erasure completed and logged.', { icon:'✅' });
   };
 
-  const handleAddBreach = (e: React.FormEvent) => {
+  const handleAddBreach = async (e: React.FormEvent) => {
     e.preventDefault();
-    const discovered = new Date().toISOString();
-    const notificationDue = new Date(Date.now() + 72*60*60*1000).toISOString();
-    setBreaches(prev => [...prev, { id:`b${Date.now()}`, ...breachForm, discovered, notificationDue, notified:false }]);
-    setBreachForm({ title:'', severity:'medium', affectedRecords:0, description:'' });
-    setShowBreachModal(false);
-    toast('⚠️ Breach logged. You must notify the DPB within 72 hours (DPDP §8).', { duration:6000 });
+    try {
+      const res = await apiFetch('/compliance/breach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: breachForm.title,
+          severity: breachForm.severity,
+          affected_records: breachForm.affectedRecords,
+          description: breachForm.description
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const discovered = new Date().toISOString();
+        setBreaches(prev => [...prev, { id: data.breach_id || `b${Date.now()}`, ...breachForm, discovered, notificationDue: data.notification_due, notified:false }]);
+        setBreachForm({ title:'', severity:'medium', affectedRecords:0, description:'' });
+        setShowBreachModal(false);
+        toast('⚠️ ' + (data.message || 'Breach logged. You must notify the DPB within 72 hours (DPDP §8).'), { duration:6000 });
+      }
+    } catch (e) { toast.error("Failed to log breach."); }
   };
 
   const handleNotifyDPB = (id: string) => {
