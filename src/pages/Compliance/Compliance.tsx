@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { ShieldCheck, Upload, Calendar, Users, X, CheckCircle2, AlertTriangle, Download, Plus, Shield } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ShieldCheck, Upload, Calendar, Users, X, CheckCircle2, AlertTriangle, Download, Plus, Shield, Trash2, RefreshCw } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import DPDPModule from './DPDPModule';
 import './Compliance.css';
+import { apiFetch } from '../../api/client';
 
 const PAGE_TABS = [
   { id: 'vault',  label: '📁 Registration Vault' },
@@ -17,33 +18,183 @@ const filings = [
   { id: 4, name: 'Darpan NGO Renewal', due: 'Mar 31, 2027', assignee: 'Admin', status: 'Pending' },
 ];
 
-const boardMembers = [
-  { id: 1, name: 'Dr. Arun Sharma', role: 'Chairperson', din: 'DIN00****12', tenure: 'Since 2019' },
-  { id: 2, name: 'Ms. Kavita Patel', role: 'Treasurer', din: 'DIN00****34', tenure: 'Since 2021' },
-  { id: 3, name: 'Mr. Suresh Iyer', role: 'Secretary', din: 'DIN00****56', tenure: 'Since 2020' },
-];
+type BoardMember = { id: string; name: string; role: string; din: string; tenure?: string };
 
 const Compliance: React.FC = () => {
   const { complianceDocs, addComplianceDoc } = useStore();
   const [pageTab, setPageTab] = useState('vault');
   const [showDocModal, setShowDocModal] = useState(false);
   const [docForm, setDocForm] = useState({ name: '', type: 'Tax Exemption', status: 'Valid' as 'Valid' | 'Expiring Soon' | 'Expired', expiry: '' });
+  const [vaultFiles, setVaultFiles] = useState<{ key: string; filename: string; size: number; last_modified: string }[]>([]);
+  const [vaultLoading, setVaultLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [boardMembers, setBoardMembers] = useState<BoardMember[]>([]);
+  const [boardLoading, setBoardLoading] = useState(false);
+  const [showBoardModal, setShowBoardModal] = useState(false);
+  const [boardForm, setBoardForm] = useState({ name: '', role: 'Trustee', din: '', tenure: '' });
 
-  const handleAddDoc = (e: React.FormEvent) => {
+  const refreshVault = async () => {
+    setVaultLoading(true);
+    try {
+      const res = await apiFetch('/storage/files?folder=compliance');
+      if (!res.ok) throw new Error('Failed to list vault files');
+      const data = await res.json();
+      setVaultFiles(Array.isArray(data.files) ? data.files : []);
+    } catch {
+      toast.error('Failed to load vault files.');
+    } finally {
+      setVaultLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (pageTab !== 'vault') return;
+    refreshVault();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageTab]);
+
+  const refreshBoard = async () => {
+    setBoardLoading(true);
+    try {
+      const res = await apiFetch('/governance/board-members');
+      if (!res.ok) throw new Error('board list failed');
+      const data = await res.json();
+      setBoardMembers(Array.isArray(data.members) ? data.members : []);
+    } catch {
+      toast.error('Failed to load board members.');
+    } finally {
+      setBoardLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (pageTab !== 'vault') return;
+    refreshBoard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageTab]);
+
+  const handleAddBoardMember = async (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      const res = await apiFetch('/governance/board-members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: boardForm.name,
+          role: boardForm.role,
+          din: boardForm.din,
+          tenure: boardForm.tenure || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error('create failed');
+      toast.success('Board member added.');
+      setShowBoardModal(false);
+      setBoardForm({ name: '', role: 'Trustee', din: '', tenure: '' });
+      await refreshBoard();
+    } catch {
+      toast.error('Failed to add board member.');
+    }
+  };
+
+  const handleDeleteBoardMember = async (id: string) => {
+    try {
+      const res = await apiFetch(`/governance/board-members/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('delete failed');
+      toast.success('Board member removed.');
+      await refreshBoard();
+    } catch {
+      toast.error('Failed to remove board member.');
+    }
+  };
+
+  const handleAddDoc = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFile) {
+      toast.error('Please select a PDF file to upload.');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const presignRes = await apiFetch('/storage/presigned-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folder: 'compliance',
+          filename: selectedFile.name,
+          content_type: selectedFile.type || 'application/pdf',
+        }),
+      });
+      if (!presignRes.ok) throw new Error('presign failed');
+      const presign = await presignRes.json();
+
+      const putRes = await fetch(presign.url, {
+        method: 'PUT',
+        headers: { 'Content-Type': selectedFile.type || 'application/pdf' },
+        body: selectedFile,
+      });
+      if (!putRes.ok) throw new Error('upload failed');
+
     addComplianceDoc({
-      name: docForm.name,
+      name: docForm.name || selectedFile.name,
       type: docForm.type,
       status: docForm.status,
       expiry: docForm.expiry,
     });
-    toast.success(`${docForm.name} added to Document Vault!`);
+
+      // Persist metadata for unified Inbox/reporting (non-blocking for UX)
+      try {
+        await apiFetch('/compliance/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: docForm.name || selectedFile.name,
+            doc_type: docForm.type,
+            status: docForm.status,
+            expiry_date: docForm.expiry || null,
+            s3_key: presign.key,
+          }),
+        });
+      } catch {}
+
+      toast.success('Uploaded to Compliance Vault.');
     setDocForm({ name: '', type: 'Tax Exemption', status: 'Valid', expiry: '' });
+      setSelectedFile(null);
     setShowDocModal(false);
+      await refreshVault();
+    } catch {
+      toast.error('Upload failed. Check backend/S3 settings.');
+    } finally {
+      setUploading(false);
+    }
   };
 
-  const handleDownload = (name: string) => {
-    toast.success(`Downloading ${name}...`, { icon: '📄' });
+  const handleDownload = async (file: { key: string; filename: string }) => {
+    try {
+      const res = await apiFetch('/storage/presigned-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: file.key, filename: file.filename }),
+      });
+      if (!res.ok) throw new Error('presign download failed');
+      const data = await res.json();
+      window.open(data.url, '_blank', 'noopener,noreferrer');
+    } catch {
+      toast.error('Failed to download file.');
+    }
+  };
+
+  const handleDelete = async (key: string) => {
+    try {
+      const res = await apiFetch(`/storage/file?key=${encodeURIComponent(key)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('delete failed');
+      toast.success('File deleted.');
+      await refreshVault();
+    } catch {
+      toast.error('Failed to delete file.');
+    }
   };
 
   const handleFilingAction = (filing: typeof filings[0]) => {
@@ -61,7 +212,24 @@ const Compliance: React.FC = () => {
           <p className="page-subtitle">Statutory registrations, filings, board governance & DPDP Act 2023 compliance.</p>
         </div>
         <div className="flex gap-4">
-          <button className="btn btn-secondary" onClick={() => toast('Generating Compliance Health Report PDF...', { icon: '📊' })}>
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              try {
+                const res = await apiFetch('/compliance/health-report.pdf');
+                if (!res.ok) throw new Error('report failed');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'compliance_health_report.pdf';
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch {
+                toast.error('Failed to download health report.');
+              }
+            }}
+          >
             <Download size={16} /> Health Report
           </button>
           {pageTab === 'vault' && (
@@ -113,9 +281,14 @@ const Compliance: React.FC = () => {
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <div className="card-header flex justify-between items-center">
           <h3 className="card-title">📁 Registration Vault ({complianceDocs.length} documents)</h3>
-          <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }} onClick={() => setShowDocModal(true)}>
-            <Plus size={14} /> Add
-          </button>
+          <div className="flex gap-2">
+            <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }} onClick={refreshVault} disabled={vaultLoading}>
+              <RefreshCw size={14} /> Refresh
+            </button>
+            <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }} onClick={() => setShowDocModal(true)}>
+              <Plus size={14} /> Add
+            </button>
+          </div>
         </div>
         <div className="table-scroll-wrap">
           <div className="table-scroll">
@@ -140,12 +313,62 @@ const Compliance: React.FC = () => {
                     </td>
                     <td style={{ padding: '1rem', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>{doc.expiry}</td>
                     <td style={{ padding: '1rem' }}>
-                      <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => handleDownload(doc.name)}>
+                      <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => toast('This table is metadata-only. Download from Cloud Vault below.', { icon: '☁️' })}>
                         <Download size={14} /> Download
                       </button>
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Cloud Vault (S3) */}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div className="card-header flex justify-between items-center">
+          <h3 className="card-title">☁️ Cloud Vault Files ({vaultFiles.length})</h3>
+          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+            Stored per-NGO in S3 (or mock mode)
+          </div>
+        </div>
+        <div className="table-scroll-wrap">
+          <div className="table-scroll">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: 'var(--color-bg-main)' }}>
+                  {['Filename', 'Size', 'Last Modified', 'Actions'].map(h => (
+                    <th key={h} style={{ textAlign: 'left', padding: '0.75rem 1rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-light)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {vaultLoading ? (
+                  <tr><td colSpan={4} style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>Loading…</td></tr>
+                ) : vaultFiles.length === 0 ? (
+                  <tr><td colSpan={4} style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>No files yet. Upload one above.</td></tr>
+                ) : (
+                  vaultFiles.map(f => (
+                    <tr key={f.key} style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+                      <td style={{ padding: '1rem', fontWeight: 500 }}>{f.filename}</td>
+                      <td style={{ padding: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
+                        {(f.size / 1024 / 1024).toFixed(2)} MB
+                      </td>
+                      <td style={{ padding: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>{f.last_modified}</td>
+                      <td style={{ padding: '1rem' }}>
+                        <div className="flex gap-2">
+                          <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => handleDownload(f)}>
+                            <Download size={14} /> Download
+                          </button>
+                          <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }} onClick={() => handleDelete(f.key)}>
+                            <Trash2 size={14} /> Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -178,7 +401,9 @@ const Compliance: React.FC = () => {
             <h3 className="card-title flex items-center gap-2"><Users size={18} /> Board of Trustees</h3>
           </div>
           <div className="card-body">
-            {boardMembers.map(m => (
+            {boardLoading ? (
+              <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>Loading…</div>
+            ) : boardMembers.map(m => (
               <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.875rem 0', borderBottom: '1px solid var(--color-border-light)' }}>
                 <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--color-primary-light)', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>
                   {m.name.charAt(0)}
@@ -187,15 +412,57 @@ const Compliance: React.FC = () => {
                   <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{m.name}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{m.role} • {m.din} • {m.tenure}</div>
                 </div>
-                <ShieldCheck size={16} color="var(--color-success)" />
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+                  onClick={() => handleDeleteBoardMember(m.id)}
+                >
+                  Remove
+                </button>
               </div>
             ))}
-            <button className="btn btn-secondary" style={{ marginTop: '1rem', width: '100%', fontSize: '0.875rem' }} onClick={() => toast('Board member management panel coming soon!', { icon: '👥' })}>
-              <Plus size={14} /> Add Board Member
-            </button>
+            <div className="flex gap-2" style={{ marginTop: '1rem' }}>
+              <button className="btn btn-secondary" style={{ flex: 1, fontSize: '0.875rem' }} onClick={refreshBoard} disabled={boardLoading}>
+                Refresh
+              </button>
+              <button className="btn btn-primary" style={{ flex: 2, fontSize: '0.875rem' }} onClick={() => setShowBoardModal(true)}>
+                <Plus size={14} /> Add Board Member
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Add Board Member Modal */}
+      {showBoardModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '460px', padding: '1.5rem', position: 'relative' }}>
+            <button onClick={() => setShowBoardModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
+            <h2 style={{ marginBottom: '1.5rem' }}>Add Board Member</h2>
+            <form onSubmit={handleAddBoardMember} className="flex-col gap-4 flex">
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Full Name</label>
+                <input required type="text" className="input-field" value={boardForm.name} onChange={e => setBoardForm({ ...boardForm, name: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Role</label>
+                <select className="input-field" value={boardForm.role} onChange={e => setBoardForm({ ...boardForm, role: e.target.value })}>
+                  {['Chairperson', 'Treasurer', 'Secretary', 'Trustee'].map(r => <option key={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">DIN</label>
+                <input required type="text" className="input-field" placeholder="DIN00****99" value={boardForm.din} onChange={e => setBoardForm({ ...boardForm, din: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Tenure (optional)</label>
+                <input type="text" className="input-field" placeholder="Since 2026" value={boardForm.tenure} onChange={e => setBoardForm({ ...boardForm, tenure: e.target.value })} />
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Add Member</button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showDocModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
@@ -227,9 +494,23 @@ const Compliance: React.FC = () => {
               </div>
               <div style={{ border: '2px dashed var(--color-border)', borderRadius: 'var(--radius-md)', padding: '1.5rem', textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
                 <Upload size={20} style={{ margin: '0 auto 0.5rem' }} />
-                Click to select PDF file (simulated)
+                <div style={{ marginBottom: '0.5rem' }}>
+                  {selectedFile ? <strong>{selectedFile.name}</strong> : 'Select a PDF to upload'}
+                </div>
+                <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => fileInputRef.current?.click()}>
+                  Choose File
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  style={{ display: 'none' }}
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                />
               </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Add to Vault</button>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={uploading}>
+                {uploading ? 'Uploading…' : 'Upload to Vault'}
+              </button>
             </form>
           </div>
         </div>

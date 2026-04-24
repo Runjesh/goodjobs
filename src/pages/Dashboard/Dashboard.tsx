@@ -3,6 +3,7 @@ import { IndianRupee, Users, TrendingUp, AlertCircle, ArrowUpRight, ArrowDownRig
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import './Dashboard.css';
+import { apiFetch } from '../../api/client';
 
 const monthLabels = ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May (Est)', 'Jun (Est)', 'Jul (Est)'];
 const monthlyData   = [320000, 480000, 410000, 620000, 530000, 750000, 0, 0, 0];
@@ -32,17 +33,16 @@ const Dashboard: React.FC = () => {
   const [reportDrafting, setReportDrafting] = useState(false);
   const [morningBrief, setMorningBrief] = useState<any[]>([]);
   const [isBriefLoading, setIsBriefLoading] = useState(true);
+  const [inboxItems, setInboxItems] = useState<any[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(true);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const token = localStorage.getItem('access_token');
-        const headers = { 'Authorization': `Bearer ${token}` };
-
         const [forecastRes, anomalyRes, briefRes] = await Promise.all([
-          fetch('http://localhost:8000/analytics/revenue-forecast', { headers }),
-          fetch('http://localhost:8000/analytics/anomalies', { headers }),
-          fetch('http://localhost:8000/morning-brief', { headers })
+          apiFetch('/analytics/revenue-forecast'),
+          apiFetch('/analytics/anomalies'),
+          apiFetch('/morning-brief')
         ]);
 
         if (forecastRes.ok) {
@@ -78,6 +78,37 @@ const Dashboard: React.FC = () => {
 
     fetchAnalytics();
   }, []);
+
+  useEffect(() => {
+    const fetchInbox = async () => {
+      setInboxLoading(true);
+      try {
+        const res = await apiFetch('/inbox');
+        if (res.ok) {
+          const data = await res.json();
+          setInboxItems(Array.isArray(data.items) ? data.items : []);
+        }
+      } catch {
+        // ignore
+      } finally {
+        setInboxLoading(false);
+      }
+    };
+    fetchInbox();
+  }, []);
+
+  const refreshInbox = async () => {
+    setInboxLoading(true);
+    try {
+      const res = await apiFetch('/inbox');
+      if (res.ok) {
+        const data = await res.json();
+        setInboxItems(Array.isArray(data.items) ? data.items : []);
+      }
+    } finally {
+      setInboxLoading(false);
+    }
+  };
 
   const handleDraftReport = async () => {
     setReportDrafting(true);
@@ -171,6 +202,91 @@ const Dashboard: React.FC = () => {
             ))
           )}
         </section>
+
+        {/* Unified Inbox */}
+        <aside>
+          <div className="card" style={{ height: '100%' }}>
+            <div className="card-header">
+              <h3 className="card-title">Your Inbox</h3>
+            </div>
+            <div className="card-body">
+              {inboxLoading ? (
+                <div className="flex flex-col items-center gap-2 text-tertiary" style={{ padding: '1rem' }}>
+                  <Loader2 size={24} className="animate-spin" />
+                  <span style={{ fontSize: '0.85rem' }}>Loading…</span>
+                </div>
+              ) : inboxItems.length === 0 ? (
+                <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>
+                  No pending items. You’re all caught up.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {inboxItems.slice(0, 6).map((it: any, idx: number) => (
+                    <div key={idx} style={{ padding: '0.75rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'white' }}>
+                      <div className="flex justify-between items-center" style={{ marginBottom: '0.25rem' }}>
+                        <span className={`badge ${it.priority === 'High' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>{it.priority}</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>{(it.kind || '').toString().toUpperCase()}</span>
+                      </div>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>{it.title}</div>
+                      <div className="flex gap-2">
+                        <button
+                          className="btn btn-secondary"
+                          style={{ flex: 1, padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
+                          onClick={() => {
+                            if (it.primary_action?.route) window.location.hash = it.primary_action.route;
+                          }}
+                        >
+                          {it.primary_action?.label || 'Open'}
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
+                          onClick={async () => {
+                            try {
+                              const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+                              const res = await apiFetch('/inbox/snooze', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ kind: it.kind, id: it.ref?.id, until }),
+                              });
+                              if (!res.ok) throw new Error('snooze');
+                              toast.success('Snoozed for 24h.');
+                              refreshInbox();
+                            } catch {
+                              toast.error('Failed to snooze.');
+                            }
+                          }}
+                        >
+                          Snooze
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '0.35rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-success)', borderColor: 'var(--color-success)' }}
+                          onClick={async () => {
+                            try {
+                              const res = await apiFetch('/inbox/resolve', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ kind: it.kind, id: it.ref?.id }),
+                              });
+                              if (!res.ok) throw new Error('resolve');
+                              toast.success('Done.');
+                              refreshInbox();
+                            } catch {
+                              toast.error('Failed to mark done.');
+                            }
+                          }}
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
 
         {/* Agent Activity Sidebar */}
         <aside>

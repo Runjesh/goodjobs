@@ -3,6 +3,7 @@ import { Clock, Users, MapPin, UserPlus, Send, CheckCircle2, ShieldAlert, X, Bel
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import './Volunteers.css';
+import { apiFetch } from '../../api/client';
 
 const shifts = [
   { id: 1, title: 'Weekend Teaching Assistant', date: 'Sat, Nov 12 • 09:00 AM', location: 'Govt School, Block B', filled: 4, total: 5, role: 'Education' },
@@ -31,8 +32,22 @@ const Volunteers: React.FC = () => {
     setShowModal(false);
   };
 
-  const handleBroadcast = () => {
-    toast.success('WhatsApp broadcast sent to all 842 active volunteers!', { icon: '📲' });
+  const handleBroadcast = async () => {
+    try {
+      const res = await apiFetch('/volunteers/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: 'whatsapp',
+          audience: 'all',
+          message: 'Namaste! New volunteer opportunity is open. Reply YES to join. धन्यवाद 🙏',
+        }),
+      });
+      if (!res.ok) throw new Error('broadcast failed');
+      toast.success('Broadcast queued to volunteers.', { icon: '📲' });
+    } catch {
+      toast.error('Failed to queue broadcast (backend not reachable).');
+    }
   };
 
   const handleManageShift = (title: string) => {
@@ -41,9 +56,27 @@ const Volunteers: React.FC = () => {
     setShowReminderModal(true);
   };
 
-  const handleSendReminder = () => {
-    toast.success(`WhatsApp reminder scheduled for "${selectedShift.title}" — ${selectedShift.filled} volunteers will receive it ${reminderConfig.timing} before the shift!`, { icon: '🔔', duration: 4000 });
-    setShowReminderModal(false);
+  const handleSendReminder = async () => {
+    try {
+      const res = await apiFetch('/volunteers/reminder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shift_id: selectedShift.id,
+          shift_title: selectedShift.title,
+          shift_datetime: selectedShift.date,
+          channel: reminderConfig.channel,
+          timing: reminderConfig.timing,
+          message: reminderConfig.message || undefined,
+          recipients: selectedShift.filled,
+        }),
+      });
+      if (!res.ok) throw new Error('reminder failed');
+      toast.success(`Reminder scheduled for "${selectedShift.title}".`, { icon: '🔔', duration: 4000 });
+      setShowReminderModal(false);
+    } catch {
+      toast.error('Failed to schedule reminder (backend not reachable).');
+    }
   };
 
   return (

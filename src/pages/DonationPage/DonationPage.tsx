@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { ShieldCheck, Heart, IndianRupee, QrCode, CreditCard, Smartphone, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './DonationPage.css';
+import { apiFetch } from '../../api/client';
 
 const presets = [500, 1000, 2000, 5000, 10000];
 const causes = ['General Fund', 'Education', 'Healthcare', 'Women Empowerment'];
@@ -26,10 +27,28 @@ const DonationPage: React.FC = () => {
     e.preventDefault();
     if (!name || !email) { toast.error('Please fill in your name and email.'); return; }
     setProcessing(true);
-    // Simulate Razorpay payment processing
-    await new Promise(r => setTimeout(r, 2000));
-    setProcessing(false);
-    setStep('success');
+    try {
+      // For now we simulate payment success, but we DO trigger the backend webhook
+      // so agent flows (receipts/nurture) can run in dev.
+      await new Promise(r => setTimeout(r, 1200));
+      await apiFetch('/webhook/donation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: 'donation_received',
+          donor_id: email,
+          donor_name: isAnonymous ? 'Anonymous' : name,
+          donation_amount: finalAmount,
+          preferred_language: 'English',
+        }),
+      });
+      setStep('success');
+    } catch {
+      toast.error('Payment recorded, but backend agent trigger failed.');
+      setStep('success');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const handleDownload80G = () => {

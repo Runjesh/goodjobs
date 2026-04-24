@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './Finance.css';
@@ -17,6 +17,29 @@ const Finance: React.FC = () => {
   const [classification, setClassification] = useState<{category: string, confidence: number} | null>(null);
   const [isClassifying, setIsClassifying] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [grantsLoading, setGrantsLoading] = useState(false);
+
+  const loadGrants = async () => {
+    setGrantsLoading(true);
+    try {
+      const res = await apiFetch('/finance/grants');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.grants) && data.grants.length > 0) {
+          setGrants(data.grants);
+        }
+      }
+    } catch {
+      // ignore (demo fallback)
+    } finally {
+      setGrantsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGrants();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fcraTotal = 4000000;
   const fcraAdminSpent = 750000;
@@ -204,9 +227,14 @@ const Finance: React.FC = () => {
       <div className="card">
         <div className="card-header flex justify-between items-center">
           <h3 className="card-title">Grant Budget & Utilization</h3>
-          <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={handleExportReport}>
-            <Download size={14} /> Export CSV
-          </button>
+          <div className="flex gap-2">
+            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={loadGrants} disabled={grantsLoading}>
+              <RefreshCw size={14} /> {grantsLoading ? 'Loading…' : 'Refresh'}
+            </button>
+            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={handleExportReport}>
+              <Download size={14} /> Export CSV
+            </button>
+          </div>
         </div>
         <div className="table-scroll-wrap">
           <div className="table-scroll">

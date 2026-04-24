@@ -179,6 +179,109 @@ CREATE TABLE IF NOT EXISTS breach_log (
 
 CREATE INDEX idx_breach_ngo ON breach_log(ngo_id);
 
+-- ── 9. CSR Prospect DB (ngo_id scoped) ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS csr_prospect_companies (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id             TEXT NOT NULL,
+    company_name       VARCHAR(255) NOT NULL,
+    sector             VARCHAR(120) NOT NULL,
+    hq_city            VARCHAR(120) NOT NULL,
+    annual_revenue_cr  DECIMAL(14, 2) DEFAULT 0,
+    csr_obligation_cr  DECIMAL(14, 2) DEFAULT 0,
+    focus_areas        TEXT[] DEFAULT '{}',
+    created_at         TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_csr_prospect_companies_ngo ON csr_prospect_companies(ngo_id);
+CREATE INDEX IF NOT EXISTS idx_csr_prospect_companies_name ON csr_prospect_companies(company_name);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_csr_prospect_companies_unique
+    ON csr_prospect_companies (ngo_id, company_name, hq_city);
+
+-- ── 10. Governance: Board Members (ngo_id scoped) ──────────────────────────
+CREATE TABLE IF NOT EXISTS governance_board_members (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id      TEXT NOT NULL,
+    full_name   VARCHAR(255) NOT NULL,
+    role        VARCHAR(120) NOT NULL,
+    din         VARCHAR(80) NOT NULL,
+    tenure      VARCHAR(120),
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_board_members_ngo ON governance_board_members(ngo_id);
+
+-- ── 11. Agentic UX: Intent Queue / HITL Actions (ngo_id scoped) ─────────────
+CREATE TYPE intent_status AS ENUM ('queued', 'approved', 'executed', 'rejected', 'failed');
+
+CREATE TABLE IF NOT EXISTS intent_queue (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id        TEXT NOT NULL,
+    created_by    TEXT,
+    directive     TEXT NOT NULL,
+    intent_type   VARCHAR(80),
+    risk_level    VARCHAR(20),
+    action_card   JSONB NOT NULL,
+    status        intent_status NOT NULL DEFAULT 'queued',
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_intent_queue_ngo ON intent_queue(ngo_id);
+CREATE INDEX IF NOT EXISTS idx_intent_queue_status ON intent_queue(status);
+
+-- Forward-compatible columns (safe to apply repeatedly)
+ALTER TABLE intent_queue ADD COLUMN IF NOT EXISTS executed_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE intent_queue ADD COLUMN IF NOT EXISTS execution_result JSONB;
+ALTER TABLE intent_queue ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE intent_queue ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE;
+ALTER TABLE intent_queue ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;
+
+-- ── 12. DPDP Notice Versions (ngo_id scoped) ───────────────────────────────
+CREATE TABLE IF NOT EXISTS dpdp_notice_versions (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id      TEXT NOT NULL,
+    version     INTEGER NOT NULL,
+    notice_md   TEXT NOT NULL,
+    created_by  TEXT,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_dpdp_notice_version
+    ON dpdp_notice_versions (ngo_id, version);
+
+-- ── 13. Finance: Grants / Budgets (ngo_id scoped) ──────────────────────────
+CREATE TABLE IF NOT EXISTS finance_grants (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id      TEXT NOT NULL,
+    grant_code  VARCHAR(50),
+    name        VARCHAR(255) NOT NULL,
+    total       DECIMAL(14, 2) NOT NULL DEFAULT 0,
+    spent       DECIMAL(14, 2) NOT NULL DEFAULT 0,
+    variance    DECIMAL(14, 2) NOT NULL DEFAULT 0,
+    status      VARCHAR(50) NOT NULL DEFAULT 'On Track',
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_grants_ngo ON finance_grants(ngo_id);
+
+-- ── 14. Compliance: Document metadata (ngo_id scoped) ──────────────────────
+CREATE TABLE IF NOT EXISTS compliance_documents (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ngo_id      TEXT NOT NULL,
+    name        VARCHAR(255) NOT NULL,
+    doc_type    VARCHAR(120) NOT NULL,
+    status      VARCHAR(30) NOT NULL DEFAULT 'Valid', -- Valid | Expiring Soon | Expired
+    expiry_date DATE,
+    s3_key      TEXT,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_compliance_docs_ngo ON compliance_documents(ngo_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_docs_expiry ON compliance_documents(expiry_date);
+
+ALTER TABLE compliance_documents ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE;
+ALTER TABLE compliance_documents ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Row Level Security (RLS) — One DB, many NGOs, zero data leakage
 -- ═══════════════════════════════════════════════════════════════════════════

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, ArrowRight, X, Loader2, MessageSquare, Send } from 'lucide-react';
 import ActionCard from '../Common/ActionCard';
 import toast from 'react-hot-toast';
+import { apiFetch } from '../../api/client';
 
 const IntentBar: React.FC = () => {
   const [query, setQuery] = useState('');
@@ -18,15 +19,14 @@ const IntentBar: React.FC = () => {
     setShowResults(true);
     
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch(`http://localhost:8000/intent/process?directive=${encodeURIComponent(query)}`, {
+      const res = await apiFetch(`/intent/process?directive=${encodeURIComponent(query)}`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
       });
       
       if (res.ok) {
         const data = await res.json();
         setResultCard(data);
+        if (data.queued) toast.success('Added to Intent Queue for approval.', { duration: 2500 });
       } else {
         toast.error("Agent encountered a routing error.");
       }
@@ -131,7 +131,7 @@ const IntentBar: React.FC = () => {
                 category={resultCard.intent_type}
                 summary={`Risk Level: ${resultCard.risk_level}. Ready to execute based on extracted context: ${JSON.stringify(resultCard.action_data)}`}
                 onApprove={() => {
-                  toast.success("Executing directive...");
+                  toast.success("Approved. (Execution wiring next)");
                   handleClear();
                 }}
                 onEdit={() => toast("Opening structured editor...")}

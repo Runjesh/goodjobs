@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download } from 'lucide-react';
+import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import './CSR.css';
+import { apiFetch } from '../../api/client';
 
 const columns = [
   { id: 'prospecting', title: 'Prospecting', class: 'col-prospecting' },
@@ -34,6 +35,12 @@ const CSR: React.FC = () => {
   const [form, setForm] = useState({ company: '', amount: 1000000, project: '', tags: '', col: 'prospecting' });
   const [docRoom, setDocRoom] = useState<{ cardId: number; company: string } | null>(null);
   const [cardDocs, setCardDocs] = useState(INITIAL_DOCS);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<any | null>(null);
+  const [showProspectDb, setShowProspectDb] = useState(false);
+  const [dbQuery, setDbQuery] = useState('');
+  const [dbLoading, setDbLoading] = useState(false);
+  const [dbResults, setDbResults] = useState<any[]>([]);
 
   const handleDragStart = (id: number) => setDragId(id);
 
@@ -64,6 +71,50 @@ const CSR: React.FC = () => {
     setShowModal(false);
   };
 
+  const runProspectAgent = async () => {
+    if (!form.company.trim()) {
+      toast.error('Enter a corporate name first.');
+      return;
+    }
+    setAiLoading(true);
+    setAiResult(null);
+    try {
+      const res = await apiFetch('/trigger/csr-prospect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: form.company,
+          sector: 'Corporate',
+          annual_revenue_cr: Math.max(1, Math.round(Number(form.amount) / 10000000)),
+          focus_area: form.project || 'Education',
+          ngo_programs: [form.project].filter(Boolean),
+        }),
+      });
+      if (!res.ok) throw new Error('CSR agent failed');
+      const data = await res.json();
+      setAiResult(data);
+      toast.success('CSR Prospect Agent completed. Review outputs below.', { icon: '🤖', duration: 4000 });
+    } catch {
+      toast.error('CSR Prospect Agent failed (backend not reachable or error).');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const searchProspectDb = async () => {
+    setDbLoading(true);
+    try {
+      const res = await apiFetch(`/csr/prospect-db/search?q=${encodeURIComponent(dbQuery)}`);
+      if (!res.ok) throw new Error('search failed');
+      const data = await res.json();
+      setDbResults(Array.isArray(data.results) ? data.results : []);
+    } catch {
+      toast.error('Prospect DB search failed.');
+    } finally {
+      setDbLoading(false);
+    }
+  };
+
   const handleDocUpload = (cardId: number) => {
     const newDoc = {
       id: 'd' + Date.now(),
@@ -92,14 +143,117 @@ const CSR: React.FC = () => {
           <p className="page-subtitle">Track corporate prospects, manage proposals, and ensure CSR-1 compliance.</p>
         </div>
         <div className="flex gap-4">
-          <button className="btn btn-secondary" onClick={() => toast('Prospect database search coming soon!', { icon: '🔍' })}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => { setShowProspectDb(true); setTimeout(() => searchProspectDb(), 0); }}
+          >
             <Search size={16} /> Prospect DB
+          </button>
+          <button className="btn btn-secondary" onClick={runProspectAgent} disabled={aiLoading} style={{ border: '1px solid #8b5cf6', color: '#8b5cf6' }}>
+            {aiLoading ? <Loader2 size={16} className="animate-spin" /> : <Bot size={16} />}
+            {aiLoading ? 'Researching…' : 'AI Prospect Research'}
           </button>
           <button className="btn btn-primary" onClick={() => setShowModal(true)}>
             <Plus size={16} /> New Proposal
           </button>
         </div>
       </div>
+
+      {/* Prospect DB Modal */}
+      {showProspectDb && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '720px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+            <div className="card-header flex justify-between items-center" style={{ padding: '1.25rem 1.5rem' }}>
+              <h3 className="card-title flex items-center gap-2"><Search size={18} /> Prospect DB</h3>
+              <button className="action-btn" onClick={() => setShowProspectDb(false)}><X size={20} /></button>
+            </div>
+            <div style={{ padding: '0 1.5rem 1rem' }}>
+              <div className="flex gap-2">
+                <input
+                  className="input-field"
+                  style={{ flex: 1 }}
+                  placeholder="Search company or focus areas (e.g. education, Mumbai)"
+                  value={dbQuery}
+                  onChange={(e) => setDbQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') searchProspectDb(); }}
+                />
+                <button className="btn btn-primary" onClick={searchProspectDb} disabled={dbLoading}>
+                  {dbLoading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                  Search
+                </button>
+              </div>
+              <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--color-text-tertiary)' }}>
+                {dbResults.length} result(s)
+              </div>
+            </div>
+            <div style={{ padding: '0 1.5rem 1.5rem', overflowY: 'auto', flex: 1 }}>
+              {dbResults.length === 0 && !dbLoading ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-tertiary)' }}>
+                  No results. Try a different query.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {dbResults.map((c) => (
+                    <div key={c.id} style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', padding: '1rem', background: 'white' }}>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div style={{ fontWeight: 700 }}>{c.company_name}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{c.sector} • {c.hq_city}</div>
+                        </div>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
+                          onClick={() => {
+                            setForm(prev => ({ ...prev, company: c.company_name, amount: Math.round((c.csr_obligation_cr || 10) * 10000000), project: (c.focus_areas?.[0] || prev.project) }));
+                            toast.success('Prefilled proposal form from Prospect DB.');
+                            setShowProspectDb(false);
+                          }}
+                        >
+                          Use
+                        </button>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                        <div><strong>CSR Obligation:</strong> ₹{c.csr_obligation_cr?.toLocaleString?.() ?? c.csr_obligation_cr} Cr</div>
+                        <div><strong>Focus areas:</strong> {(c.focus_areas || []).join(', ')}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Output Panel */}
+      {aiResult && (
+        <div className="card" style={{ marginBottom: '1.5rem', borderLeft: '4px solid #8b5cf6' }}>
+          <div className="card-header flex justify-between items-center">
+            <h3 className="card-title flex items-center gap-2"><Sparkles size={18} color="#8b5cf6" /> AI Prospect Output</h3>
+            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={() => setAiResult(null)}>
+              <X size={14} /> Clear
+            </button>
+          </div>
+          <div className="card-body" style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+              <div style={{ background: 'var(--color-bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-tertiary)' }}>COMPANY</div>
+                <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{aiResult.company_name || form.company}</div>
+              </div>
+              <div style={{ background: 'var(--color-bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-tertiary)' }}>ALIGNMENT SCORE</div>
+                <div style={{ fontWeight: 700, color: '#8b5cf6' }}>{aiResult.alignment_score ?? '—'}</div>
+              </div>
+            </div>
+            <div style={{ background: 'var(--color-bg-main)', padding: '0.75rem', borderRadius: 'var(--radius-md)' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-tertiary)', marginBottom: '0.25rem' }}>RAW OUTPUT</div>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+{JSON.stringify(aiResult, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="csr-stats-row">
         <div className="stat-card">

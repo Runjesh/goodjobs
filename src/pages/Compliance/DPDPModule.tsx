@@ -64,6 +64,9 @@ const DPDPModule: React.FC = () => {
   const [showBreachModal, setShowBreachModal] = useState(false);
   const [erasureForm, setErasureForm] = useState({ name:'', email:'', reason:'' });
   const [breachForm, setBreachForm] = useState({ title:'', severity:'medium' as BreachRecord['severity'], affectedRecords:0, description:'' });
+  const [noticeMd, setNoticeMd] = useState<string>('');
+  const [noticeVersion, setNoticeVersion] = useState<number | null>(null);
+  const [noticeLoading, setNoticeLoading] = useState(false);
 
   const handleWithdrawConsent = async (id: string) => {
     try {
@@ -296,25 +299,83 @@ const DPDPModule: React.FC = () => {
       {activeTab==='notice' && (
         <div style={card}>
           <h4 style={{ margin:'0 0 1rem', fontWeight:700 }}>Data Fiduciary Notice <span style={{ color:'var(--color-text-tertiary)', fontWeight:400, fontSize:'0.8rem' }}>DPDP §5 — must be displayed to all data principals</span></h4>
-          <div style={{ background:'var(--color-bg-main)', border:'1px solid var(--color-border-light)', borderRadius:'var(--radius-md)', padding:'1.5rem', fontSize:'0.85rem', lineHeight:1.8, color:'var(--color-text-secondary)' }}>
-            <p><strong>Data Fiduciary:</strong> India NGO Trust (Registration No: MH/2015/0012345)</p>
-            <p><strong>Data Protection Officer / Grievance Officer:</strong> compliance@indiangotrust.org</p>
-            <p><strong>Purpose of Processing:</strong> Donor relationship management, fundraising communications, grant reporting, impact measurement, and statutory compliance under Indian law.</p>
-            <p><strong>Categories of Data Collected:</strong> Name, email, phone, donation history, UPI IDs, location (for field programs).</p>
-            <p><strong>Data Storage Location:</strong> AWS ap-south-1 (Mumbai, India). All data stays within Indian jurisdiction in compliance with data localisation norms.</p>
-            <p><strong>Data Retention:</strong> Donor data retained for 7 years for financial audit compliance. Beneficiary data retained for 5 years post-program.</p>
-            <p><strong>Your Rights Under DPDP 2023:</strong></p>
-            <ul style={{ marginLeft:'1.5rem' }}>
-              <li>§11 — Right to Access: Request a copy of your personal data.</li>
-              <li>§12 — Right to Correction & Erasure: Request correction or deletion within 30 days.</li>
-              <li>§13 — Right to Grievance Redressal: Contact our DPO within 48 hours of complaint.</li>
-              <li>§14 — Right to Nominate: Nominate someone to exercise rights on your behalf.</li>
-            </ul>
-            <p><strong>Last Updated:</strong> April 2026 &nbsp;|&nbsp; <strong>Version:</strong> 2.1</p>
+          <div style={{ background:'var(--color-bg-main)', border:'1px solid var(--color-border-light)', borderRadius:'var(--radius-md)', padding:'1rem' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.5rem' }}>
+              <div style={{ fontSize:'0.75rem', color:'var(--color-text-tertiary)' }}>
+                {noticeVersion ? `Version: ${noticeVersion}` : 'Version: —'}
+              </div>
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize:'0.75rem', padding:'0.25rem 0.75rem' }}
+                disabled={noticeLoading}
+                onClick={async () => {
+                  setNoticeLoading(true);
+                  try {
+                    const res = await apiFetch('/dpdp/notice');
+                    if (!res.ok) throw new Error('load failed');
+                    const data = await res.json();
+                    setNoticeMd(data.notice_md || '');
+                    setNoticeVersion(data.version || null);
+                  } catch {
+                    toast.error('Failed to load notice.');
+                  } finally {
+                    setNoticeLoading(false);
+                  }
+                }}
+              >
+                {noticeLoading ? 'Loading…' : 'Reload'}
+              </button>
+            </div>
+            <textarea
+              className="input-field"
+              rows={10}
+              style={{ width:'100%', fontFamily:'inherit' }}
+              value={noticeMd}
+              onChange={(e) => setNoticeMd(e.target.value)}
+              placeholder="Write your DPDP notice here (markdown)."
+            />
           </div>
           <div style={{ display:'flex', gap:'0.75rem', marginTop:'1rem' }}>
-            <button className="btn btn-secondary" onClick={()=>toast('Privacy Notice PDF downloaded.', {icon:'📄'})}>Download PDF</button>
-            <button className="btn btn-primary" onClick={()=>toast.success('Privacy Notice version saved!')}>Save Updated Notice</button>
+            <button
+              className="btn btn-secondary"
+              onClick={async () => {
+                try {
+                  const res = await apiFetch('/dpdp/notice.pdf');
+                  if (!res.ok) throw new Error('pdf failed');
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `dpdp_notice_v${noticeVersion || 1}.pdf`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch {
+                  toast.error('Failed to download PDF.');
+                }
+              }}
+            >
+              Download PDF
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={async () => {
+                try {
+                  const res = await apiFetch('/dpdp/notice', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notice_md: noticeMd }),
+                  });
+                  if (!res.ok) throw new Error('save failed');
+                  const data = await res.json();
+                  setNoticeVersion(data.version || noticeVersion);
+                  toast.success(`Notice saved as version ${data.version}.`);
+                } catch {
+                  toast.error('Failed to save notice (requires DB + ED/Admin role).');
+                }
+              }}
+            >
+              Save New Version
+            </button>
           </div>
         </div>
       )}

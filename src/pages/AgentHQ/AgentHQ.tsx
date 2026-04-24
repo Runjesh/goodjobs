@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Bot, CheckCircle, ShieldAlert, Activity, Cpu, XCircle, Check, Eye,
   Search, Settings, Sliders, Pause, Play, BarChart2
@@ -18,26 +18,15 @@ const agents = [
   { id: 8, name: 'Board Briefing Agent', module: 'Compliance HQ', status: 'Active' },
 ];
 
-const initialApprovals = [
-  {
-    id: 'HITL-8902', agent: 'Donor Nurture Agent', type: 'High Stakes (Major Donor >₹5L)',
-    title: 'Review Major Donor Outreach: Anjali Desai',
-    details: 'Agent drafted a personalized thank-you and impact update for Anjali Desai regarding her recent ₹5,00,000 contribution. Human review required before sending via WhatsApp/Email.',
-    time: '15 mins ago', risk: 'high-stakes'
-  },
-  {
-    id: 'HITL-8903', agent: 'Finance & Compliance Agent', type: 'FCRA Flag',
-    title: 'Suspicious Foreign Transaction Detected',
-    details: 'Transaction TRX-1099 originated from a UK bank but was routed to the General Fund. Agent halted classification. CFO approval required to release or re-route to SBI Main Branch account.',
-    time: '2 hours ago', risk: 'high-stakes'
-  },
-  {
-    id: 'HITL-8904', agent: 'CSR Pipeline Agent', type: 'First Outreach',
-    title: 'Approve First Outreach: Tata Trusts',
-    details: 'Agent scraped Tata Trusts 2024 annual report and drafted an alignment pitch for the Digital Literacy project. Human approval required before sending first cold outreach.',
-    time: '4 hours ago', risk: 'standard'
-  }
-];
+type QueueItem = {
+  id: string;
+  directive: string;
+  intent_type?: string;
+  risk_level?: string;
+  status: string;
+  action_card?: any;
+  created_at?: string;
+};
 
 const auditLogs = [
   { id: 'LOG-1200', time: '10:45 AM', agent: 'Donor Nurture', action: 'Sent 80G Receipt', details: 'Auto-generated and sent to rahul@example.com for TRX-1090.', status: 'Success' },
@@ -70,19 +59,67 @@ const agentMetrics = [
 ];
 
 const AgentHQ: React.FC = () => {
-  const [approvals, setApprovals] = useState(initialApprovals);
+  const [approvals, setApprovals] = useState<QueueItem[]>([]);
+  const [approvalsLoading, setApprovalsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'queue' | 'metrics' | 'config'>('queue');
   const [configs, setConfigs] = useState(agentConfigs);
   const [logSearch, setLogSearch] = useState('');
 
-  const handleApprove = (id: string) => {
-    toast.success('Agent action approved and executed successfully!');
-    setApprovals(approvals.filter(a => a.id !== id));
+  const loadApprovals = async () => {
+    setApprovalsLoading(true);
+    try {
+      const res = await apiFetch('/intent/queue?status=queued&limit=50');
+      if (!res.ok) throw new Error('queue failed');
+      const data = await res.json();
+      setApprovals(Array.isArray(data.items) ? data.items : []);
+    } catch {
+      toast.error('Failed to load intent queue.');
+    } finally {
+      setApprovalsLoading(false);
+    }
   };
 
-  const handleReject = (id: string) => {
-    toast.error('Agent action rejected and aborted.');
-    setApprovals(approvals.filter(a => a.id !== id));
+  useEffect(() => {
+    loadApprovals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleApprove = async (id: string) => {
+    try {
+      const res = await apiFetch(`/intent/queue/${encodeURIComponent(id)}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'approved' }),
+      });
+      if (!res.ok) throw new Error('approve failed');
+      const execRes = await apiFetch(`/intent/queue/${encodeURIComponent(id)}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: false }),
+      });
+      if (!execRes.ok) throw new Error('execute failed');
+      const execData = await execRes.json();
+      toast.success('Executed.');
+      setApprovals(prev => prev.filter(a => a.id !== id));
+      console.log('Execution result:', execData);
+    } catch {
+      toast.error('Failed to approve/execute (requires ED/Admin + DB).');
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    try {
+      const res = await apiFetch(`/intent/queue/${encodeURIComponent(id)}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'rejected' }),
+      });
+      if (!res.ok) throw new Error('reject failed');
+      toast.success('Rejected.');
+      setApprovals(prev => prev.filter(a => a.id !== id));
+    } catch {
+      toast.error('Failed to reject (requires ED/Admin + DB).');
+    }
   };
 
   const togglePause = (id: number) => {
@@ -171,22 +208,40 @@ const AgentHQ: React.FC = () => {
                 <h3 className="card-title flex items-center gap-2">
                   <ShieldAlert size={18} color="var(--color-warning)" /> Human-in-the-Loop (HITL) Action Queue
                 </h3>
+                <div style={{ marginLeft: 'auto' }}>
+                  <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={loadApprovals} disabled={approvalsLoading}>
+                    {approvalsLoading ? 'Loading…' : 'Refresh'}
+                  </button>
+                </div>
               </div>
               <div className="card-body">
                 <div className="approval-list">
                   {approvals.map(approval => (
-                    <div key={approval.id} className={`approval-card ${approval.risk}`}>
+                    <div key={approval.id} className={`approval-card ${approval.risk_level === 'High' ? 'high-stakes' : 'standard'}`}>
                       <div className="approval-header">
-                        <div className="approval-title">{approval.title}</div>
-                        <div className="approval-meta">{approval.time} • {approval.id}</div>
+                        <div className="approval-title">{approval.action_card?.summary || approval.directive}</div>
+                        <div className="approval-meta">{approval.created_at ? new Date(approval.created_at).toLocaleString() : ''} • {approval.id}</div>
                       </div>
                       <div className="flex items-center gap-2" style={{ fontSize: '0.75rem', color: 'var(--color-primary)', fontWeight: 600 }}>
-                        <Bot size={12} /> {approval.agent} • {approval.type}
+                        <Bot size={12} /> {approval.intent_type || approval.action_card?.intent_type || 'intent'} • Risk: {approval.risk_level || approval.action_card?.risk_level || '—'}
                       </div>
-                      <div className="approval-body">{approval.details}</div>
+                      <div className="approval-body" style={{ whiteSpace: 'pre-wrap' }}>
+                        {approval.directive}
+                      </div>
                       <div className="approval-actions">
-                        <button className="btn btn-secondary" style={{ padding: '0.375rem 0.75rem' }} onClick={() => toast('Loading draft preview...', { icon: '📄' })}>
-                          <Eye size={14} /> Review Draft
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '0.375rem 0.75rem' }}
+                          onClick={() => {
+                            try {
+                              navigator.clipboard?.writeText(JSON.stringify(approval.action_card || {}, null, 2));
+                              toast.success('Action card copied to clipboard.');
+                            } catch {
+                              toast('Unable to copy.', { icon: '📄' });
+                            }
+                          }}
+                        >
+                          <Eye size={14} /> View
                         </button>
                         <button className="btn btn-secondary" style={{ padding: '0.375rem 0.75rem', color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }} onClick={() => handleReject(approval.id)}>
                           <XCircle size={14} /> Reject
@@ -197,7 +252,7 @@ const AgentHQ: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                  {approvals.length === 0 && (
+                  {!approvalsLoading && approvals.length === 0 && (
                     <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-tertiary)' }}>
                       ✅ No pending actions requiring human approval.
                     </div>
