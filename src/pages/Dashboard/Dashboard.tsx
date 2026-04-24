@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { IndianRupee, Users, TrendingUp, AlertCircle, ArrowUpRight, ArrowDownRight, Bot, ShieldCheck, MessageCircle, X, Bell, Loader2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
-import './Dashboard.css';
 import { apiFetch } from '../../api/client';
+import './Dashboard.css';
 
 const monthLabels = ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May (Est)', 'Jun (Est)', 'Jul (Est)'];
 const monthlyData   = [320000, 480000, 410000, 620000, 530000, 750000, 0, 0, 0];
@@ -113,10 +113,9 @@ const Dashboard: React.FC = () => {
   const handleDraftReport = async () => {
     setReportDrafting(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch('http://localhost:8000/gen-ai/draft-report', {
+      const res = await apiFetch('/gen-ai/draft-report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ngo_name: "India NGO Trust",
           impact_data: { "education": "1200 girls trained", "health": "45 camps conducted", "revenue": "₹4.2Cr raised" }
@@ -127,6 +126,8 @@ const Dashboard: React.FC = () => {
         toast.success("AI Annual Report Draft Generated!", { duration: 5000 });
         console.log("Draft:", data.draft);
         // In a real app, open a modal with the draft
+      } else {
+        toast.error("Failed to generate draft.");
       }
     } catch (err) {
       toast.error("Failed to generate draft.");
