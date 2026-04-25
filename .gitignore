@@ -9,6 +9,15 @@ lerna-debug.log*
 
 node_modules
 dist
+dev-dist
+backend/.venv
+playwright-report
+test-results
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
 dist-ssr
 *.local
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
@@ -13,28 +13,32 @@ const columns = [
   { id: 'live', title: 'Project Live', class: 'col-live' }
 ];
 
-// Per-card document rooms
-const INITIAL_DOCS: Record<number, { id: string; name: string; type: string; size: string; uploaded: string }[]> = {
-  1: [
-    { id: 'd1', name: 'Reliance_CSR_Proposal_v2.pdf', type: 'Proposal', size: '2.4 MB', uploaded: 'Oct 10' },
-    { id: 'd2', name: 'Due_Diligence_Checklist.docx', type: 'Due Diligence', size: '890 KB', uploaded: 'Oct 18' },
-  ],
-  2: [
-    { id: 'd3', name: 'TCS_Pitch_Deck.pptx', type: 'Pitch', size: '5.1 MB', uploaded: 'Oct 12' },
-  ],
-  3: [
-    { id: 'd4', name: 'HDFC_MoU_Draft.pdf', type: 'MoU', size: '1.2 MB', uploaded: 'Oct 20' },
-    { id: 'd5', name: 'HDFC_Signed_MoU.pdf', type: 'MoU', size: '1.3 MB', uploaded: 'Oct 22' },
-  ],
-};
+function formatActivityHint(iso?: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return '1d ago';
+  return `${days}d ago`;
+}
+
+function idleDaysFromIso(iso?: string): number {
+  if (!iso) return 0;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 0;
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+}
 
 const CSR: React.FC = () => {
   const { csrCards, moveCSRCard, addCSRCard } = useStore();
   const [showModal, setShowModal] = useState(false);
-  const [dragId, setDragId] = useState<number | null>(null);
+  const [dragId, setDragId] = useState<number | string | null>(null);
   const [form, setForm] = useState({ company: '', amount: 1000000, project: '', tags: '', col: 'prospecting' });
-  const [docRoom, setDocRoom] = useState<{ cardId: number; company: string } | null>(null);
-  const [cardDocs, setCardDocs] = useState(INITIAL_DOCS);
+  const [docRoom, setDocRoom] = useState<{ cardId: number | string; company: string } | null>(null);
+  const [cardDocs, setCardDocs] = useState<Record<string, any[]>>({});
+  const [docUploading, setDocUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<any | null>(null);
   const [showProspectDb, setShowProspectDb] = useState(false);
@@ -42,11 +46,11 @@ const CSR: React.FC = () => {
   const [dbLoading, setDbLoading] = useState(false);
   const [dbResults, setDbResults] = useState<any[]>([]);
 
-  const handleDragStart = (id: number) => setDragId(id);
+  const handleDragStart = (id: number | string) => setDragId(id);
 
   const handleDrop = async (col: string) => {
     if (dragId !== null) {
-      const card = csrCards.find(c => c.id === dragId);
+      const card = csrCards.find(c => String(c.id) === String(dragId));
       if (card && card.col !== col) {
         moveCSRCard(dragId, col);
         try {
@@ -67,16 +71,6 @@ const CSR: React.FC = () => {
   const handleAddProposal = async (e: React.FormEvent) => {
     e.preventDefault();
     const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
-    // optimistic
-    addCSRCard({
-      company: form.company,
-      amount: Number(form.amount),
-      project: form.project,
-      tags,
-      agent: 'AD',
-      col: form.col,
-      date: 'Just added'
-    });
     try {
       const res = await apiFetch('/csr/cards', {
         method: 'POST',
@@ -96,13 +90,22 @@ const CSR: React.FC = () => {
         if (data?.card?.id) {
           useStore.getState().addCSRCardWithId(data.card);
         }
+        // refresh canonical list to avoid drift
+        const r = await apiFetch('/csr/cards');
+        if (r.ok) {
+          const rd = await r.json();
+          if (Array.isArray(rd.cards)) useStore.getState().setCsrCards(rd.cards);
+        }
+        toast.success(`New proposal for ${form.company} added to pipeline!`);
+        setForm({ company: '', amount: 1000000, project: '', tags: '', col: 'prospecting' });
+        setShowModal(false);
+        return;
       }
     } catch {
-      // ignore
+      toast.error('Failed to add proposal.');
+      return;
     }
-    toast.success(`New proposal for ${form.company} added to pipeline!`);
-    setForm({ company: '', amount: 1000000, project: '', tags: '', col: 'prospecting' });
-    setShowModal(false);
+    toast.error('Failed to add proposal.');
   };
 
   const runProspectAgent = async () => {
@@ -149,25 +152,137 @@ const CSR: React.FC = () => {
     }
   };
 
-  const handleDocUpload = (cardId: number) => {
-    const newDoc = {
-      id: 'd' + Date.now(),
-      name: `Document_${new Date().toLocaleDateString('en-IN')}.pdf`,
-      type: 'Misc',
-      size: `${(Math.random() * 3 + 0.5).toFixed(1)} MB`,
-      uploaded: 'Just now'
-    };
-    setCardDocs(prev => ({ ...prev, [cardId]: [...(prev[cardId] || []), newDoc] }));
-    toast.success('Document uploaded to document room!', { icon: '📁' });
+  const handleDocUpload = (cardId: number | string) => {
+    setDocRoom({ cardId, company: (csrCards.find(c => c.id === cardId)?.company || 'CSR') as any });
+    setTimeout(() => fileRef.current?.click(), 0);
   };
 
-  const handleDocDelete = (cardId: number, docId: string) => {
-    setCardDocs(prev => ({ ...prev, [cardId]: (prev[cardId] || []).filter(d => d.id !== docId) }));
-    toast('Document removed.', { duration: 1500 });
+  const handleDocDelete = (cardId: number | string, docId: string) => {
+    const run = async () => {
+      try {
+        const res = await apiFetch(`/csr/cards/${encodeURIComponent(String(cardId))}/documents/${encodeURIComponent(String(docId))}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('delete');
+        const r = await apiFetch(`/csr/cards/${encodeURIComponent(String(cardId))}/documents`);
+        if (r.ok) {
+          const data = await r.json();
+          setCardDocs(prev => ({ ...prev, [String(cardId)]: Array.isArray(data.documents) ? data.documents : [] }));
+        }
+        toast('Document removed.', { duration: 1500 });
+      } catch {
+        toast.error('Failed to remove document.');
+      }
+    };
+    run();
+  };
+
+  const refreshCardDocs = async (cardId: number | string) => {
+    try {
+      const res = await apiFetch(`/csr/cards/${encodeURIComponent(String(cardId))}/documents`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setCardDocs(prev => ({ ...prev, [String(cardId)]: Array.isArray(data.documents) ? data.documents : [] }));
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (!docRoom) return;
+    refreshCardDocs(docRoom.cardId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docRoom?.cardId]);
+
+  const onPickDocFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f || !docRoom) return;
+    setDocUploading(true);
+    try {
+      // 1) Presign upload to S3
+      const presignRes = await apiFetch('/storage/presigned-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folder: `csr/${docRoom.cardId}`,
+          filename: f.name,
+          content_type: f.type || 'application/pdf',
+        }),
+      });
+      if (!presignRes.ok) throw new Error('presign');
+      const presign = await presignRes.json();
+
+      // 2) PUT to S3
+      const putRes = await fetch(presign.url, {
+        method: 'PUT',
+        headers: { 'Content-Type': f.type || 'application/pdf' },
+        body: f,
+      });
+      if (!putRes.ok) throw new Error('put');
+
+      // 3) Persist metadata
+      const metaRes = await apiFetch(`/csr/cards/${encodeURIComponent(String(docRoom.cardId))}/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: f.name,
+          doc_type: 'Misc',
+          size_bytes: f.size,
+          s3_key: presign.key,
+        }),
+      });
+      if (!metaRes.ok) throw new Error('meta');
+      toast.success('Document uploaded.', { icon: '📁' });
+      await refreshCardDocs(docRoom.cardId);
+    } catch {
+      toast.error('Upload failed. Check backend/S3 settings.');
+    } finally {
+      setDocUploading(false);
+    }
+  };
+
+  const downloadProjectUc = async (company: string, project: string) => {
+    try {
+      const q = new URLSearchParams();
+      if (company) q.set('company', company);
+      if (project) q.set('project', project);
+      const qs = q.toString();
+      const res = await apiFetch(`/finance/uc.pdf${qs ? `?${qs}` : ''}`);
+      if (!res.ok) throw new Error('uc');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'utilization_certificate_draft.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('UC draft downloaded.');
+    } catch {
+      toast.error('Failed to download UC.');
+    }
+  };
+
+  const downloadDoc = async (doc: any) => {
+    try {
+      const key = doc?.s3_key || doc?.s3Key;
+      if (!key) throw new Error('missing key');
+      const res = await apiFetch('/storage/presigned-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, filename: doc.name }),
+      });
+      if (!res.ok) throw new Error('presign');
+      const data = await res.json();
+      window.open(data.url, '_blank', 'noopener,noreferrer');
+    } catch {
+      toast.error('Failed to download file.');
+    }
   };
 
   const totalPipeline = csrCards.reduce((s, c) => s + c.amount, 0);
   const signed = csrCards.filter(c => c.col === 'mou' || c.col === 'live').reduce((s, c) => s + c.amount, 0);
+  const reportsDueCount = csrCards.filter(
+    c => c.col === 'live' && idleDaysFromIso(c.last_activity_at || c.updated_at) >= 21
+  ).length;
 
   return (
     <div className="csr-container">
@@ -304,7 +419,7 @@ const CSR: React.FC = () => {
         </div>
         <div className="stat-card">
           <div className="stat-icon" style={{ color: '#10b981' }}><Clock size={24} /></div>
-          <div className="stat-info"><h4>Reports Due</h4><div className="stat-val">3</div></div>
+          <div className="stat-info"><h4>Reports Due</h4><div className="stat-val">{reportsDueCount}</div></div>
         </div>
       </div>
 
@@ -325,10 +440,12 @@ const CSR: React.FC = () => {
                 <span className="column-count">{colCards.length}</span>
               </div>
               <div className="kanban-cards">
-                {colCards.map(card => (
-                  <div key={card.id} className="kanban-card" draggable
+                {colCards.map(card => {
+                  const touchHint = formatActivityHint(card.last_activity_at || card.updated_at);
+                  return (
+                  <div key={String(card.id)} className="kanban-card" draggable
                     onDragStart={() => handleDragStart(card.id)}
-                    style={{ opacity: dragId === card.id ? 0.5 : 1 }}>
+                    style={{ opacity: dragId !== null && String(dragId) === String(card.id) ? 0.5 : 1 }}>
                     <div className="csr-card-header">
                       <div className="csr-company">{card.company}</div>
                       <div className="csr-amount">₹{(card.amount / 100000).toFixed(1)}L</div>
@@ -337,12 +454,28 @@ const CSR: React.FC = () => {
                     <div className="csr-tags">
                       {card.tags.map(tag => <span key={tag} className="csr-tag">{tag}</span>)}
                     </div>
+                    {(card.win_probability != null || touchHint) && (
+                      <div style={{ fontSize: '0.65rem', color: 'var(--color-text-tertiary)', marginTop: 2, lineHeight: 1.3 }}>
+                        {card.win_probability != null ? <span>Win {card.win_probability}%</span> : null}
+                        {card.win_probability != null && touchHint ? ' · ' : null}
+                        {touchHint ? <span>Last touch {touchHint}</span> : null}
+                      </div>
+                    )}
                     <div className="csr-footer">
                       <div className="csr-agent"><div className="csr-avatar">{card.agent}</div></div>
                       <div className="flex items-center gap-2">
+                        {card.col === 'live' && (
+                          <button
+                            className="csr-doc-btn"
+                            title="Download UC draft (project context)"
+                            onClick={() => downloadProjectUc(card.company, card.project)}
+                          >
+                            <FileText size={13} /> UC
+                          </button>
+                        )}
                         <button className="csr-doc-btn" title="Open Document Room"
                           onClick={() => setDocRoom({ cardId: card.id, company: card.company })}>
-                          <Folder size={13} /> Docs ({(cardDocs[card.id] || []).length})
+                          <Folder size={13} /> Docs ({(cardDocs[String(card.id)] || []).length})
                         </button>
                         <span className="flex items-center gap-1" style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>
                           <Clock size={11} /> {card.date}
@@ -350,7 +483,8 @@ const CSR: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {colCards.length === 0 && (
                   <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--color-text-tertiary)', fontSize: '0.875rem', border: '2px dashed var(--color-border-light)', borderRadius: 'var(--radius-md)' }}>
                     Drop here
@@ -408,35 +542,28 @@ const CSR: React.FC = () => {
               <button className="action-btn" onClick={() => setDocRoom(null)}><X size={20} /></button>
             </div>
             <div style={{ padding: '0 1.5rem 1.5rem', overflowY: 'auto', flex: 1 }}>
-              <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' }}>
-                {['Proposal', 'MoU', 'Due Diligence', 'Impact Report', 'Misc'].map(type => (
-                  <button key={type} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.625rem' }}
-                    onClick={() => {
-                      const doc = { id: 'd' + Date.now(), name: `${docRoom.company}_${type}_${Date.now()}.pdf`, type, size: `${(Math.random() * 2 + 0.5).toFixed(1)} MB`, uploaded: 'Just now' };
-                      setCardDocs(prev => ({ ...prev, [docRoom.cardId]: [...(prev[docRoom.cardId] || []), doc] }));
-                      toast.success(`${type} document uploaded!`, { icon: '📁' });
-                    }}>
-                    + {type}
-                  </button>
-                ))}
+              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
+                Files here are real and stored in your backend vault (S3 when configured).
               </div>
 
-              {(cardDocs[docRoom.cardId] || []).length === 0 ? (
+              {(cardDocs[String(docRoom.cardId)] || []).length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--color-text-tertiary)' }}>
                   <Folder size={40} style={{ opacity: 0.3, margin: '0 auto 1rem' }} />
                   <div>No documents yet. Upload the first file above.</div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {(cardDocs[docRoom.cardId] || []).map(doc => (
-                    <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', padding: '0.875rem 1rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'white' }}>
+                  {(cardDocs[String(docRoom.cardId)] || []).map(doc => (
+                    <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', padding: '0.875rem 1rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-card)' }}>
                       <FileText size={20} color="var(--color-primary)" />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{doc.type} • {doc.size} • {doc.uploaded}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                          {(doc.doc_type || doc.type || 'Document')} • {(doc.size_bytes ? `${Math.max(1, Math.round(doc.size_bytes / 1024))} KB` : doc.size || '')}
+                        </div>
                       </div>
                       <div className="flex gap-1">
-                        <button className="action-btn" onClick={() => toast(`Downloading ${doc.name}...`, { icon: '⬇️' })}><Download size={15} /></button>
+                        <button className="action-btn" onClick={() => downloadDoc(doc)}><Download size={15} /></button>
                         <button className="action-btn" style={{ color: 'var(--color-danger)' }} onClick={() => handleDocDelete(docRoom.cardId, doc.id)}><Trash2 size={15} /></button>
                       </div>
                     </div>
@@ -444,13 +571,21 @@ const CSR: React.FC = () => {
                 </div>
               )}
 
-              <button className="btn btn-secondary" style={{ width: '100%', marginTop: '1rem' }} onClick={() => handleDocUpload(docRoom.cardId)}>
-                <Upload size={15} /> Upload File
+              <button className="btn btn-secondary" style={{ width: '100%', marginTop: '1rem' }} onClick={() => handleDocUpload(docRoom.cardId)} disabled={docUploading}>
+                {docUploading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />} {docUploading ? 'Uploading…' : 'Upload File'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <input
+        ref={fileRef}
+        type="file"
+        style={{ display: 'none' }}
+        accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        onChange={onPickDocFile}
+      />
     </div>
   );
 };

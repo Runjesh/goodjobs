@@ -20,39 +20,43 @@ const DonationPage: React.FC = () => {
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [step, setStep] = useState<'form' | 'success'>('form');
   const [processing, setProcessing] = useState(false);
+  const [txId, setTxId] = useState<string | null>(null);
+  const [ngoName, setNgoName] = useState<string>('GoodJobs NGO');
 
   const finalAmount = customAmount ? Number(customAmount) : amount;
 
   const handleDonate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !email) { toast.error('Please fill in your name and email.'); return; }
+    if (!isAnonymous && (!name || !email)) { toast.error('Please fill in your name and email.'); return; }
     setProcessing(true);
     try {
-      // For now we simulate payment success, but we DO trigger the backend webhook
-      // so agent flows (receipts/nurture) can run in dev.
-      await new Promise(r => setTimeout(r, 1200));
-      await apiFetch('/webhook/donation', {
+      const res = await apiFetch('/public/donations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event_type: 'donation_received',
-          donor_id: email,
+          campaign_slug: campaignSlug || null,
+          cause,
           donor_name: isAnonymous ? 'Anonymous' : name,
-          donation_amount: finalAmount,
-          preferred_language: 'English',
+          donor_email: isAnonymous ? '' : email,
+          pan: pan || null,
+          amount: finalAmount,
+          method: payMethod === 'upi' ? 'UPI' : payMethod === 'card' ? 'Card' : 'NetBanking',
         }),
       });
+      if (!res.ok) throw new Error('donate');
+      const data = await res.json();
+      setTxId(data?.transaction?.id || null);
+      setNgoName(data?.ngo_name || 'GoodJobs NGO');
       setStep('success');
     } catch {
-      toast.error('Payment recorded, but backend agent trigger failed.');
-      setStep('success');
+      toast.error('Failed to record donation.');
     } finally {
       setProcessing(false);
     }
   };
 
   const handleDownload80G = () => {
-    toast.success('80G receipt PDF downloading...', { icon: '📄' });
+    toast('80G certificate download is not available yet.', { icon: '📄' });
   };
 
   if (step === 'success') {
@@ -61,9 +65,9 @@ const DonationPage: React.FC = () => {
         <div className="donation-success">
           <div className="success-icon">🎉</div>
           <h1>Thank you, {name}!</h1>
-          <p>Your donation of <strong>₹{finalAmount.toLocaleString()}</strong> to India NGO Trust has been received.</p>
+          <p>Your donation of <strong>₹{finalAmount.toLocaleString()}</strong> to {ngoName} has been recorded.</p>
           <div className="success-details">
-            <div className="success-detail-row"><span>Transaction ID</span><span style={{ fontFamily: 'monospace' }}>TRX-{Date.now().toString().slice(-6)}</span></div>
+            <div className="success-detail-row"><span>Transaction ID</span><span style={{ fontFamily: 'monospace' }}>{txId || '—'}</span></div>
             <div className="success-detail-row"><span>Campaign</span><span>{campaignSlug || 'General Fund'}</span></div>
             <div className="success-detail-row"><span>Fund</span><span>{cause}</span></div>
             <div className="success-detail-row"><span>80G Deduction</span><span style={{ color: 'var(--color-success)', fontWeight: 600 }}>₹{Math.round(finalAmount * 0.5).toLocaleString()} eligible</span></div>
@@ -85,8 +89,8 @@ const DonationPage: React.FC = () => {
         <div className="donation-ngo-brand">
           <div className="donation-logo">GJ</div>
           <div>
-            <div className="donation-ngo-name">India NGO Trust</div>
-            <div className="donation-ngo-reg">12A: 2019-20-R-1234 | 80G: AA/12345/2019</div>
+            <div className="donation-ngo-name">GoodJobs</div>
+            <div className="donation-ngo-reg">Infrastructure for Social Good</div>
           </div>
         </div>
         <div className="donation-verified-badge">
@@ -108,13 +112,13 @@ const DonationPage: React.FC = () => {
             </p>
             <div className="donation-progress-section">
               <div className="dp-stats">
-                <span style={{ fontWeight: 700, color: 'var(--color-primary)', fontSize: '1.25rem' }}>₹12,50,000</span>
-                <span style={{ color: 'var(--color-text-tertiary)' }}>of ₹20,00,000 goal</span>
+                <span style={{ fontWeight: 700, color: 'var(--color-primary)', fontSize: '1.25rem' }}>—</span>
+                <span style={{ color: 'var(--color-text-tertiary)' }}>Campaign stats not configured</span>
               </div>
               <div style={{ background: '#e2e8f0', height: 8, borderRadius: 999, overflow: 'hidden', marginTop: '0.5rem' }}>
-                <div style={{ width: '62.5%', height: '100%', background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', borderRadius: 999 }}></div>
+                <div style={{ width: '0%', height: '100%', background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', borderRadius: 999 }}></div>
               </div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-tertiary)', marginTop: '0.25rem' }}>342 donors • 62.5% funded</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-tertiary)', marginTop: '0.25rem' }}>—</div>
             </div>
           </div>
 

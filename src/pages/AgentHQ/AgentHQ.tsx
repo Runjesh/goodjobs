@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Bot, CheckCircle, ShieldAlert, Activity, Cpu, XCircle, Check, Eye,
   Search, Settings, Sliders, Pause, Play, BarChart2
@@ -6,17 +7,6 @@ import {
 import toast from 'react-hot-toast';
 import './AgentHQ.css';
 import { apiFetch } from '../../api/client';
-
-const agents = [
-  { id: 1, name: 'Donor Nurture Agent', module: 'Fundraising + CRM', status: 'Active' },
-  { id: 2, name: 'Campaign Intelligence Agent', module: 'Fundraising', status: 'Active' },
-  { id: 3, name: 'Finance & Compliance Agent', module: 'Finance + FCRA', status: 'Active' },
-  { id: 4, name: 'Grant Report Agent', module: 'Finance + MIS', status: 'Active' },
-  { id: 5, name: 'CSR Pipeline Agent', module: 'CSR Pipeline', status: 'Active' },
-  { id: 6, name: 'Field MIS Agent', module: 'Programs MIS', status: 'Active' },
-  { id: 7, name: 'Volunteer Ops Agent', module: 'Volunteer Operations', status: 'Active' },
-  { id: 8, name: 'Board Briefing Agent', module: 'Compliance HQ', status: 'Active' },
-];
 
 type QueueItem = {
   id: string;
@@ -26,43 +16,25 @@ type QueueItem = {
   status: string;
   action_card?: any;
   created_at?: string;
+  agent_confidence?: number;
+  auto_resolve_hours?: number | null;
 };
-
-const auditLogs = [
-  { id: 'LOG-1200', time: '10:45 AM', agent: 'Donor Nurture', action: 'Sent 80G Receipt', details: 'Auto-generated and sent to rahul@example.com for TRX-1090.', status: 'Success' },
-  { id: 'LOG-1199', time: '09:30 AM', agent: 'Field MIS', action: 'Data Validation', details: 'Flagged 3 duplicate attendance records in Nashik block.', status: 'Flagged' },
-  { id: 'LOG-1198', time: '06:00 AM', agent: 'Board Briefing', action: 'Morning Brief', details: 'Generated and emailed daily leadership brief to 4 trustees.', status: 'Success' },
-  { id: 'LOG-1197', time: 'Yesterday', agent: 'Campaign Intelligence', action: 'Boost Copy Generated', details: 'Detected underperforming campaign — A/B copy queued for approval.', status: 'Pending' },
-  { id: 'LOG-1196', time: 'Yesterday', agent: 'Finance & Compliance', action: 'FCRA Check', details: 'All 14 transactions for Oct validated against FCRA 2010 rules.', status: 'Success' },
-];
-
-const agentConfigs = [
-  { id: 1, name: 'Donor Nurture Agent', autoThreshold: 100000, requiresApprovalAbove: 100000, paused: false },
-  { id: 2, name: 'Campaign Intelligence Agent', autoThreshold: 0, requiresApprovalAbove: 0, paused: false },
-  { id: 3, name: 'Finance & Compliance Agent', autoThreshold: 50000, requiresApprovalAbove: 500000, paused: false },
-  { id: 4, name: 'Grant Report Agent', autoThreshold: 0, requiresApprovalAbove: 0, paused: false },
-  { id: 5, name: 'CSR Pipeline Agent', autoThreshold: 0, requiresApprovalAbove: 0, paused: false },
-  { id: 6, name: 'Field MIS Agent', autoThreshold: 0, requiresApprovalAbove: 100000, paused: false },
-  { id: 7, name: 'Volunteer Ops Agent', autoThreshold: 0, requiresApprovalAbove: 0, paused: false },
-  { id: 8, name: 'Board Briefing Agent', autoThreshold: 0, requiresApprovalAbove: 0, paused: false },
-];
-
-const agentMetrics = [
-  { name: 'Donor Nurture', actions: 4820, success: 98.2, timeSaved: '120h' },
-  { name: 'Campaign Intelligence', actions: 1240, success: 94.5, timeSaved: '42h' },
-  { name: 'Finance & Compliance', actions: 3100, success: 99.8, timeSaved: '88h' },
-  { name: 'Grant Report', actions: 48, success: 100, timeSaved: '36h' },
-  { name: 'CSR Pipeline', actions: 890, success: 91.2, timeSaved: '28h' },
-  { name: 'Field MIS', actions: 2200, success: 96.0, timeSaved: '60h' },
-  { name: 'Volunteer Ops', actions: 560, success: 97.5, timeSaved: '18h' },
-  { name: 'Board Briefing', actions: 30, success: 100, timeSaved: '15h' },
-];
 
 const AgentHQ: React.FC = () => {
   const [approvals, setApprovals] = useState<QueueItem[]>([]);
   const [approvalsLoading, setApprovalsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'queue' | 'metrics' | 'config'>('queue');
-  const [configs, setConfigs] = useState(agentConfigs);
+  const [configs, setConfigs] = useState<any[]>([]);
+  const [agents, setAgents] = useState<string[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [summary, setSummary] = useState<{
+    pending_approvals: number;
+    agent_streaks?: { name: string; correct_in_row: number; rejections_30d: number }[];
+    alerts?: { severity: string; message: string }[];
+    auto_approve_max_inr?: number | null;
+  } | null>(null);
+  const [thresholdInr, setThresholdInr] = useState('');
+  const [batchRunning, setBatchRunning] = useState(false);
   const [logSearch, setLogSearch] = useState('');
 
   const loadApprovals = async () => {
@@ -81,6 +53,30 @@ const AgentHQ: React.FC = () => {
 
   useEffect(() => {
     loadApprovals();
+    (async () => {
+      try {
+        const res = await apiFetch('/agent-hq/summary');
+        if (res.ok) {
+          const data = await res.json();
+          setAgents(Array.isArray(data.agents) ? data.agents : []);
+          setSummary(data);
+          if (data.auto_approve_max_inr != null) setThresholdInr(String(data.auto_approve_max_inr));
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        const res = await apiFetch('/agent-hq/audit');
+        if (res.ok) {
+          const data = await res.json();
+          setAuditLogs(Array.isArray(data.logs) ? data.logs : []);
+        }
+      } catch {
+        // ignore
+      }
+      // config is not persisted yet; keep empty state rather than dummy values
+      setConfigs([]);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -107,6 +103,55 @@ const AgentHQ: React.FC = () => {
     }
   };
 
+  const handleBatchApprove = async () => {
+    if (approvals.length === 0) return;
+    setBatchRunning(true);
+    let ok = 0;
+    try {
+      for (const a of approvals) {
+        try {
+          const res = await apiFetch(`/intent/queue/${encodeURIComponent(a.id)}/decision`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ decision: 'approved' }),
+          });
+          if (!res.ok) continue;
+          const execRes = await apiFetch(`/intent/queue/${encodeURIComponent(a.id)}/execute`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: false }),
+          });
+          if (execRes.ok) ok += 1;
+        } catch {
+          /* continue */
+        }
+      }
+      toast.success(`Approved & executed ${ok} / ${approvals.length}.`);
+      await loadApprovals();
+    } finally {
+      setBatchRunning(false);
+    }
+  };
+
+  const saveThreshold = async () => {
+    const n = parseInt(thresholdInr.replace(/,/g, ''), 10);
+    if (Number.isNaN(n) || n < 0) {
+      toast.error('Enter a valid rupee amount.');
+      return;
+    }
+    try {
+      const res = await apiFetch('/agent-hq/prefs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auto_approve_max_inr: n }),
+      });
+      if (!res.ok) throw new Error('prefs');
+      toast.success('Auto-approve threshold saved (session).');
+    } catch {
+      toast.error('Could not save threshold.');
+    }
+  };
+
   const handleReject = async (id: string) => {
     try {
       const res = await apiFetch(`/intent/queue/${encodeURIComponent(id)}/decision`, {
@@ -122,22 +167,39 @@ const AgentHQ: React.FC = () => {
     }
   };
 
-  const togglePause = (id: number) => {
-    const agent = configs.find(c => c.id === id);
-    setConfigs(prev => prev.map(c => c.id === id ? { ...c, paused: !c.paused } : c));
-    toast(agent?.paused ? `${agent.name} resumed.` : `${agent?.name} paused.`, { icon: agent?.paused ? '▶️' : '⏸️' });
-  };
-
-  const updateThreshold = (id: number, field: string, value: number) => {
-    setConfigs(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
-  };
-
-  const filteredLogs = auditLogs.filter(l =>
-    !logSearch || l.agent.toLowerCase().includes(logSearch.toLowerCase()) || l.action.toLowerCase().includes(logSearch.toLowerCase())
+  const filteredLogs = auditLogs.filter((l: any) =>
+    !logSearch ||
+    (l.type || '').toString().toLowerCase().includes(logSearch.toLowerCase()) ||
+    (l.created_at || '').toString().toLowerCase().includes(logSearch.toLowerCase())
   );
+
+  const auditScrollRef = useRef<HTMLDivElement>(null);
+  const auditVirtualizer = useVirtualizer({
+    count: filteredLogs.length,
+    getScrollElement: () => auditScrollRef.current,
+    estimateSize: () => 44,
+    overscan: 14,
+  });
 
   return (
     <div className="agent-hq-container">
+      {summary?.alerts && summary.alerts.length > 0 && (
+        <div
+          className="card"
+          style={{
+            marginBottom: '1rem',
+            padding: '0.75rem 1rem',
+            borderLeft: '4px solid var(--color-warning)',
+            background: 'var(--color-bg-card)',
+          }}
+        >
+          {summary.alerts.map((al, i) => (
+            <div key={i} style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
+              <strong style={{ color: 'var(--color-warning)' }}>Agent check:</strong> {al.message}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="page-header">
         <div>
           <h1 className="page-title text-gradient flex items-center gap-2">
@@ -165,11 +227,11 @@ const AgentHQ: React.FC = () => {
       <div className="agent-stats-grid">
         <div className="agent-stat-card">
           <div className="stat-label"><Activity size={16} color="var(--color-primary)" /> Autonomous Actions (30d)</div>
-          <div className="stat-value">12,888</div>
+          <div className="stat-value">—</div>
         </div>
         <div className="agent-stat-card">
           <div className="stat-label"><CheckCircle size={16} color="var(--color-success)" /> Admin Hours Saved</div>
-          <div className="stat-value">407h</div>
+          <div className="stat-value">—</div>
         </div>
         <div className="agent-stat-card">
           <div className="stat-label"><ShieldAlert size={16} color="var(--color-warning)" /> Pending Approvals</div>
@@ -177,7 +239,7 @@ const AgentHQ: React.FC = () => {
         </div>
         <div className="agent-stat-card">
           <div className="stat-label"><Bot size={16} color="#8b5cf6" /> Active Agents</div>
-          <div className="stat-value">{configs.filter(c => !c.paused).length} / 8</div>
+          <div className="stat-value">{agents.length || 0}</div>
         </div>
       </div>
 
@@ -208,7 +270,16 @@ const AgentHQ: React.FC = () => {
                 <h3 className="card-title flex items-center gap-2">
                   <ShieldAlert size={18} color="var(--color-warning)" /> Human-in-the-Loop (HITL) Action Queue
                 </h3>
-                <div style={{ marginLeft: 'auto' }}>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
+                    type="button"
+                    disabled={batchRunning || approvals.length === 0}
+                    onClick={() => void handleBatchApprove()}
+                  >
+                    {batchRunning ? 'Working…' : `Approve & run all (${approvals.length})`}
+                  </button>
                   <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={loadApprovals} disabled={approvalsLoading}>
                     {approvalsLoading ? 'Loading…' : 'Refresh'}
                   </button>
@@ -223,7 +294,19 @@ const AgentHQ: React.FC = () => {
                         <div className="approval-meta">{approval.created_at ? new Date(approval.created_at).toLocaleString() : ''} • {approval.id}</div>
                       </div>
                       <div className="flex items-center gap-2" style={{ fontSize: '0.75rem', color: 'var(--color-primary)', fontWeight: 600 }}>
-                        <Bot size={12} /> {approval.intent_type || approval.action_card?.intent_type || 'intent'} • Risk: {approval.risk_level || approval.action_card?.risk_level || '—'}
+                        <Bot size={12} /> {approval.intent_type || approval.action_card?.intent_type || 'intent'} • Risk:{' '}
+                        {approval.risk_level || approval.action_card?.risk_level || '—'}
+                        {typeof approval.agent_confidence === 'number' && (
+                          <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                            · {(approval.agent_confidence * 100).toFixed(0)}% confident
+                            {approval.agent_confidence >= 0.9
+                              ? ' — low risk; safe to batch-approve with peers above'
+                              : ''}
+                            {approval.auto_resolve_hours != null
+                              ? ` · auto-resolves in ~${approval.auto_resolve_hours}h if no one touches it`
+                              : ''}
+                          </span>
+                        )}
                       </div>
                       <div className="approval-body" style={{ whiteSpace: 'pre-wrap' }}>
                         {approval.directive}
@@ -266,28 +349,22 @@ const AgentHQ: React.FC = () => {
           {activeTab === 'metrics' && (
             <div className="card">
               <div className="card-header"><h3 className="card-title flex items-center gap-2"><BarChart2 size={18} color="var(--color-primary)" /> Agent Performance Metrics</h3></div>
-              <div style={{ overflowX: 'auto' }}>
-                <table className="audit-log-table">
-                  <thead><tr><th>Agent</th><th>Actions (30d)</th><th>Success Rate</th><th>Time Saved</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {agentMetrics.map(m => (
-                      <tr key={m.name}>
-                        <td style={{ fontWeight: 500 }}><span className="flex items-center gap-1"><Bot size={12} /> {m.name}</span></td>
-                        <td>{m.actions.toLocaleString()}</td>
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <div style={{ width: 60, height: 6, background: 'var(--color-bg-main)', borderRadius: 999, overflow: 'hidden' }}>
-                              <div style={{ width: `${m.success}%`, height: '100%', background: m.success > 97 ? 'var(--color-success)' : m.success > 93 ? 'var(--color-warning)' : 'var(--color-danger)', borderRadius: 999 }}></div>
-                            </div>
-                            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{m.success}%</span>
-                          </div>
-                        </td>
-                        <td style={{ fontWeight: 600, color: 'var(--color-success)' }}>{m.timeSaved}</td>
-                        <td><span className={`badge ${configs.find(c => c.name.includes(m.name.split(' ')[0]))?.paused ? 'badge-outline' : 'badge-success'}`}>{configs.find(c => c.name.includes(m.name.split(' ')[0]))?.paused ? 'Paused' : 'Active'}</span></td>
-                      </tr>
+              <div style={{ padding: '0 1.5rem 1.5rem', color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
+                {summary?.agent_streaks && summary.agent_streaks.length > 0 ? (
+                  <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
+                    {summary.agent_streaks.map((s, i) => (
+                      <li key={i} style={{ marginBottom: 8 }}>
+                        <strong>{s.name}</strong>: {s.correct_in_row} successful runs (heuristic) · rejections (30d):{' '}
+                        {s.rejections_30d}
+                      </li>
                     ))}
-                  </tbody>
-                </table>
+                  </ul>
+                ) : (
+                  <span style={{ color: 'var(--color-text-tertiary)' }}>Streaks will appear as intents execute.</span>
+                )}
+                <p style={{ marginTop: 12, fontSize: '0.85rem', color: 'var(--color-text-tertiary)' }}>
+                  Full metrics pipeline not wired — audit log below is authoritative.
+                </p>
               </div>
             </div>
           )}
@@ -298,48 +375,25 @@ const AgentHQ: React.FC = () => {
               <div className="card-header">
                 <h3 className="card-title flex items-center gap-2"><Sliders size={18} color="var(--color-primary)" /> Agent Configuration & Thresholds</h3>
               </div>
-              <div style={{ padding: '0 1.5rem 1.5rem' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem', padding: '0.75rem 1rem', background: '#eff6ff', borderRadius: 'var(--radius-md)', border: '1px solid #bfdbfe' }}>
-                  💡 Configure when agents act autonomously vs. when they require human approval. Lower thresholds = more autonomy.
+              <div style={{ padding: '0 1.5rem 1.5rem', color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
+                <p style={{ marginBottom: 12 }}>Auto-approve lightweight gifts below this threshold (session-only demo):</p>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <span style={{ fontSize: '0.85rem' }}>₹</span>
+                  <input
+                    type="text"
+                    className="input-field"
+                    style={{ maxWidth: 140 }}
+                    value={thresholdInr}
+                    onChange={e => setThresholdInr(e.target.value)}
+                    placeholder="e.g. 25000"
+                  />
+                  <button className="btn btn-primary" type="button" onClick={() => void saveThreshold()}>
+                    Save threshold
+                  </button>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {configs.map(cfg => (
-                    <div key={cfg.id} style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', padding: '1rem 1.25rem', background: cfg.paused ? '#fff7ed' : 'white' }}>
-                      <div className="flex justify-between items-center" style={{ marginBottom: cfg.autoThreshold > 0 ? '0.75rem' : 0 }}>
-                        <div className="flex items-center gap-2">
-                          <Bot size={16} color={cfg.paused ? 'var(--color-warning)' : 'var(--color-primary)'} />
-                          <span style={{ fontWeight: 600 }}>{cfg.name}</span>
-                          {cfg.paused && <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>Paused</span>}
-                        </div>
-                        <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.625rem' }} onClick={() => togglePause(cfg.id)}>
-                          {cfg.paused ? <><Play size={13} /> Resume</> : <><Pause size={13} /> Pause</>}
-                        </button>
-                      </div>
-                      {cfg.autoThreshold > 0 && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                          <div className="input-group" style={{ marginBottom: 0 }}>
-                            <label className="input-label">Auto-execute below (₹)</label>
-                            <input type="number" className="input-field" value={cfg.autoThreshold}
-                              onChange={e => updateThreshold(cfg.id, 'autoThreshold', Number(e.target.value))}
-                              onBlur={() => toast.success(`${cfg.name} threshold updated!`)} />
-                          </div>
-                          <div className="input-group" style={{ marginBottom: 0 }}>
-                            <label className="input-label">Require approval above (₹)</label>
-                            <input type="number" className="input-field" value={cfg.requiresApprovalAbove}
-                              onChange={e => updateThreshold(cfg.id, 'requiresApprovalAbove', Number(e.target.value))}
-                              onBlur={() => toast.success(`${cfg.name} threshold updated!`)} />
-                          </div>
-                        </div>
-                      )}
-                      {cfg.autoThreshold === 0 && (
-                        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-tertiary)' }}>All actions require human approval for this agent.</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => toast.success('Agent configuration saved!', { icon: '✅' })}>
-                  <Settings size={16} /> Save All Configurations
-                </button>
+                <p style={{ marginTop: 12, fontSize: '0.8rem', color: 'var(--color-text-tertiary)' }}>
+                  Production would persist per-agent rules; this stores an in-memory hint for the current backend process.
+                </p>
               </div>
             </div>
           )}
@@ -355,21 +409,84 @@ const AgentHQ: React.FC = () => {
                   style={{ padding: '0.5rem 1rem 0.5rem 2rem', fontSize: '0.75rem', width: '200px' }} />
               </div>
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="audit-log-table">
-                <thead><tr><th>Log ID</th><th>Time</th><th>Agent</th><th>Action Taken</th><th>Result</th></tr></thead>
-                <tbody>
-                  {filteredLogs.map(log => (
-                    <tr key={log.id}>
-                      <td style={{ fontFamily: 'monospace', color: 'var(--color-text-tertiary)' }}>{log.id}</td>
-                      <td>{log.time}</td>
-                      <td style={{ fontWeight: 500 }}><span className="flex items-center gap-1"><Bot size={12} /> {log.agent}</span></td>
-                      <td>{log.action}</td>
-                      <td><span className={`badge ${log.status === 'Success' ? 'badge-success' : log.status === 'Pending' ? 'badge-outline' : 'badge-warning'}`}>{log.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div
+              ref={auditScrollRef}
+              style={{
+                maxHeight: 'min(55vh, 440px)',
+                overflow: 'auto',
+                border: '1px solid var(--color-border-light)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '72px minmax(120px, 140px) minmax(72px, 100px) 1fr',
+                  gap: '0.5rem',
+                  padding: '0.55rem 0.75rem',
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.03em',
+                  color: 'var(--color-text-tertiary)',
+                  borderBottom: '1px solid var(--color-border-light)',
+                  position: 'sticky',
+                  top: 0,
+                  background: 'var(--color-bg-card)',
+                  zIndex: 1,
+                }}
+              >
+                <span>ID</span>
+                <span>Time</span>
+                <span>Type</span>
+                <span>Payload</span>
+              </div>
+              {filteredLogs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '1.25rem', color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
+                  No logs yet.
+                </div>
+              ) : (
+                <div style={{ height: auditVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                  {auditVirtualizer.getVirtualItems().map(vr => {
+                    const log = filteredLogs[vr.index];
+                    return (
+                      <div
+                        key={log.id}
+                        data-index={vr.index}
+                        ref={auditVirtualizer.measureElement}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          transform: `translateY(${vr.start}px)`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '72px minmax(120px, 140px) minmax(72px, 100px) 1fr',
+                            gap: '0.5rem',
+                            padding: '0.45rem 0.75rem',
+                            alignItems: 'center',
+                            fontSize: '0.78rem',
+                            borderBottom: '1px solid var(--color-border-light)',
+                          }}
+                        >
+                          <span style={{ fontFamily: 'monospace', color: 'var(--color-text-tertiary)' }}>{log.id}</span>
+                          <span style={{ whiteSpace: 'nowrap', fontSize: '0.72rem' }}>
+                            {log.created_at ? new Date(log.created_at).toLocaleString() : '—'}
+                          </span>
+                          <span style={{ fontWeight: 500 }}>{log.type || 'event'}</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {(log.payload || '').toString()}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -379,14 +496,17 @@ const AgentHQ: React.FC = () => {
             <div className="card-header"><h3 className="card-title">Active Agent Roster</h3></div>
             <div className="card-body">
               <div className="agent-roster-list">
-                {agents.map(agent => {
-                  const cfg = configs.find(c => c.name === agent.name);
+                {agents.map((agent: string | { id?: string; name?: string; module?: string }, idx: number) => {
+                  const name = typeof agent === 'string' ? agent : agent?.name || 'Agent';
+                  const id = typeof agent === 'string' ? `${agent}-${idx}` : agent?.id || `${idx}`;
+                  const moduleLabel = typeof agent === 'string' ? 'Copilot' : agent?.module || '—';
+                  const cfg = configs.find((c: any) => c.name === name);
                   return (
-                    <div key={agent.id} className="agent-roster-item">
+                    <div key={id} className="agent-roster-item">
                       <div className="agent-avatar"><Bot size={18} /></div>
                       <div className="flex-1">
-                        <div className="agent-name">{agent.name}</div>
-                        <div className="agent-module">{agent.module}</div>
+                        <div className="agent-name">{name}</div>
+                        <div className="agent-module">{moduleLabel}</div>
                       </div>
                       <div className={`agent-status-indicator`} style={{ background: cfg?.paused ? 'var(--color-warning)' : '' }} title={cfg?.paused ? 'Paused' : 'Online & Active'}></div>
                     </div>

@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Search, Filter, MessageCircle, Mail, Phone, MapPin,
   IndianRupee, Clock, CheckCircle, X, UserPlus,
@@ -7,11 +8,12 @@ import {
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
+import { parseCsvToRecords } from '../../utils/csvParse';
 import './CRM.css';
 
 const WA_TEMPLATES = [
-  { id: 'thank', label: 'Thank You', body: 'Namaste {name}! 🙏 Thank you for your generous donation of ₹{amount} to India NGO Trust. Your support directly helps {cause}. Your 80G certificate has been sent to your email.' },
-  { id: 'reactivate', label: 'Re-engagement', body: 'Namaste {name}! We miss you 💙 It\'s been a while since your last gift. Children in our programs still need your support. Even ₹500 makes a difference. Give today: sevasuite.in/give/india-ngo' },
+  { id: 'thank', label: 'Thank You', body: 'Namaste {name}! 🙏 Thank you for your generous donation of ₹{amount}. Your support directly helps {cause}. Your 80G certificate has been sent to your email.' },
+  { id: 'reactivate', label: 'Re-engagement', body: 'Namaste {name}! We miss you. It\'s been a while since your last gift. Even ₹500 makes a difference — reply if you\'d like an update or a giving link.' },
   { id: 'impact', label: 'Impact Update', body: 'Dear {name}, your donations have helped 450 girls get digital literacy training this year 🎓 See the full impact report: [link]. Thank you for being part of this journey!' },
   { id: 'event', label: 'Event Invite', body: 'Dear {name}, you\'re invited to our Annual Gala on Dec 15th in Mumbai 🌟 As a valued donor, your seat is reserved. RSVP: [link]' },
 ];
@@ -100,10 +102,36 @@ const CRM: React.FC = () => {
     fetchAiInsights();
   }, [activeDonorId, viewMode]);
 
-  const [nurtureQueue, setNurtureQueue] = useState<any[]>([
-    { id: 'd1', name: 'Rahul Mehta', reason: 'High Propensity (₹50K)', action: 'WhatsApp Update' },
-    { id: 'd2', name: 'Sunita Rao', reason: 'Lapse Risk (90 days)', action: 'Re-engagement Call' }
-  ]);
+  const nurtureQueue = useMemo(() => {
+    // Best-effort: derive from actual donors in store (no hardcoded names).
+    const lapsing = donors.filter(d => d.type === 'Lapsing');
+    const major = donors.filter(d => d.type === 'Major Donor');
+    const out: any[] = [];
+    for (const d of major.slice(0, 1)) out.push({ id: d.id, name: d.name, reason: 'Major donor', action: 'WhatsApp Update' });
+    for (const d of lapsing.slice(0, 2 - out.length)) out.push({ id: d.id, name: d.name, reason: 'Lapse risk', action: 'Re-engagement' });
+    return out;
+  }, [donors]);
+
+  const handleNurtureAction = async (donorId: string, action: string) => {
+    try {
+      const template = action.toLowerCase().includes('re-engagement') ? WA_TEMPLATES.find(t => t.id === 'reactivate') : WA_TEMPLATES.find(t => t.id === 'impact');
+      const res = await apiFetch('/crm/outreach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'draft',
+          channel: 'whatsapp',
+          donor_ids: [donorId],
+          template_id: template?.id,
+          message: (template?.body || '').toString(),
+        }),
+      });
+      if (!res.ok) throw new Error('draft');
+      toast.success('Draft queued for review.');
+    } catch {
+      toast.error('Failed to create draft.');
+    }
+  };
 
   const activeDonor = useMemo(() => donors.find(d => d.id === activeDonorId) || donors[0], [donors, activeDonorId]);
   const donorTransactions = useMemo(() => transactions.filter(t => t.donorId === activeDonor?.id), [transactions, activeDonor]);
@@ -119,6 +147,38 @@ const CRM: React.FC = () => {
       return matchesSearch && matchesFilter;
     });
   }, [donors, searchQuery, activeFilter]);
+
+  const donorListRef = useRef<HTMLDivElement>(null);
+  const donorVirtualizer = useVirtualizer({
+    count: filteredDonors.length,
+    getScrollElement: () => donorListRef.current,
+    estimateSize: () => 72,
+    overscan: 10,
+  });
+
+  const scrollDonorListTop = useCallback(() => {
+    donorVirtualizer.scrollToOffset(0);
+  }, [donorVirtualizer]);
+
+  useEffect(() => {
+    scrollDonorListTop();
+  }, [searchQuery, activeFilter, scrollDonorListTop]);
+
+  const donorTxTimelineRef = useRef<HTMLDivElement>(null);
+  const donorTxVirtualizer = useVirtualizer({
+    count: donorTransactions.length,
+    getScrollElement: () => donorTxTimelineRef.current,
+    estimateSize: () => 92,
+    overscan: 8,
+  });
+
+  const scrollTimelineTop = useCallback(() => {
+    donorTxVirtualizer.scrollToOffset(0);
+  }, [donorTxVirtualizer]);
+
+  useEffect(() => {
+    scrollTimelineTop();
+  }, [activeDonorId, scrollTimelineTop]);
 
   const handleAddContact = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,17 +198,15 @@ const CRM: React.FC = () => {
         const data = await res.json();
         if (data?.donor?.id) {
           useStore.getState().addDonorWithId(data.donor);
-        } else {
-          addDonor({ name: newContact.name, type: newContact.type, pan: newContact.pan, location: newContact.location, tags: ['New'] });
         }
         toast.success(`${newContact.name} added to CRM!`);
       } else {
-        addDonor({ name: newContact.name, type: newContact.type, pan: newContact.pan, location: newContact.location, tags: ['New'] });
-        toast.success(`${newContact.name} added to CRM!`);
+        toast.error('Failed to add donor (backend rejected).');
+        return;
       }
     } catch {
-      addDonor({ name: newContact.name, type: newContact.type, pan: newContact.pan, location: newContact.location, tags: ['New'] });
-      toast.success(`${newContact.name} added to CRM!`);
+      toast.error('Failed to add donor (backend not reachable).');
+      return;
     }
     setShowAddContact(false);
     setNewContact({ name: '', type: 'Recurring', pan: '', location: '' });
@@ -170,13 +228,29 @@ const CRM: React.FC = () => {
     }
   };
 
-  const handleSendComposer = () => {
-    const recipients = bulkMode ? selectedIds.size : 1;
-    const name = bulkMode ? `${recipients} donors` : activeDonor?.name;
-    toast.success(`${composerChannel === 'whatsapp' ? 'WhatsApp' : 'Email'} sent to ${name}!`, { icon: composerChannel === 'whatsapp' ? '📲' : '📧' });
-    setShowComposer(false);
-    setSelectedIds(new Set());
-    setBulkMode(false);
+  const handleSendComposer = async () => {
+    const donorIds = bulkMode ? Array.from(selectedIds) : (activeDonor?.id ? [activeDonor.id] : []);
+    if (donorIds.length === 0) { toast.error('Select at least one donor.'); return; }
+    try {
+      const res = await apiFetch('/crm/outreach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'send',
+          channel: composerChannel,
+          donor_ids: donorIds,
+          template_id: selectedTemplate?.id,
+          message: (customMessage || selectedTemplate.body || '').toString(),
+        }),
+      });
+      if (!res.ok) throw new Error('send');
+      toast.success('Queued for sending.', { icon: composerChannel === 'whatsapp' ? '📲' : '📧' });
+      setShowComposer(false);
+      setSelectedIds(new Set());
+      setBulkMode(false);
+    } catch {
+      toast.error('Failed to send (backend not reachable).');
+    }
   };
 
   const openBulkCompose = (channel: 'whatsapp' | 'email') => {
@@ -210,24 +284,46 @@ const CRM: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
-      const lines = text.trim().split('\n');
-      const headers = lines[0].split(',');
-      const preview = lines.slice(1, 6).map(line => {
-        const vals = line.split(',');
-        return Object.fromEntries(headers.map((h, i) => [h.trim(), (vals[i] || '').replace(/^"|"$/g, '').trim()]));
-      });
-      setCsvPreview(preview);
+      setCsvPreview(parseCsvToRecords(text));
     };
     reader.readAsText(file);
   };
 
-  const handleCSVImport = () => {
-    csvPreview.forEach(row => {
-      if (row.name) addDonor({ name: row.name, type: row.type || 'Recurring', pan: row.pan || '', location: row.location || '', tags: ['Imported'] });
-    });
-    toast.success(`${csvPreview.length} donors imported successfully!`);
-    setCsvPreview([]);
-    setShowCSVImport(false);
+  const handleCSVImport = async () => {
+    if (!csvPreview.length) return;
+    const donors = csvPreview
+      .map((row: any) => ({
+        name: (row.name || '').trim(),
+        type: ((row.type || 'Recurring').trim() || 'Recurring'),
+        pan: (row.pan || '').trim(),
+        location: (row.location || '').trim(),
+        tags: ['Imported'],
+      }))
+      .filter((d: { name: string }) => d.name);
+    if (!donors.length) {
+      toast.error('No valid rows — CSV needs a name column.');
+      return;
+    }
+    try {
+      const res = await apiFetch('/crm/donors/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ donors }),
+      });
+      if (!res.ok) throw new Error('bulk');
+      const data = await res.json();
+      const n = typeof data.imported === 'number' ? data.imported : donors.length;
+      const listRes = await apiFetch('/crm/donors');
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        if (Array.isArray(listData.donors)) useStore.getState().setDonors(listData.donors);
+      }
+      toast.success(`Imported ${n} donors.`);
+      setCsvPreview([]);
+      setShowCSVImport(false);
+    } catch {
+      toast.error('Failed to import (backend not reachable).');
+    }
   };
 
   const handleDownloadTemplate = () => {
@@ -318,29 +414,64 @@ const CRM: React.FC = () => {
               <div key={item.id} className="card" style={{ padding: '0.75rem', marginBottom: '0.5rem', border: '1px solid var(--color-border-light)' }}>
                 <div style={{ fontWeight: 600, fontSize: '0.8125rem' }}>{item.name}</div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', marginBottom: '0.5rem' }}>{item.reason}</div>
-                <button className="btn btn-primary" style={{ width: '100%', padding: '0.25rem', fontSize: '0.7rem' }} onClick={() => toast(`Drafting ${item.action}...`)}>
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', padding: '0.25rem', fontSize: '0.7rem' }}
+                  onClick={() => handleNurtureAction(item.id, item.action)}
+                >
                   {item.action}
                 </button>
               </div>
             ))}
           </div>
 
-          <div className="donor-list">
-            {filteredDonors.map(donor => (
-              <div key={donor.id}
-                className={`donor-item ${activeDonorId === donor.id ? 'active' : ''} ${selectedIds.has(donor.id) ? 'selected' : ''}`}
-                onClick={() => setActiveDonorId(donor.id)}>
-                <input type="checkbox" checked={selectedIds.has(donor.id)} onClick={e => e.stopPropagation()}
-                  onChange={() => toggleSelect(donor.id)} style={{ flexShrink: 0 }} />
-                <div className="donor-avatar">{donor.initial}</div>
-                <div className="donor-info">
-                  <div className="donor-name">{donor.name}</div>
-                  <div className="donor-meta">{donor.type}</div>
-                </div>
-              </div>
-            ))}
-            {filteredDonors.length === 0 && (
+          <div ref={donorListRef} className="donor-list">
+            {filteredDonors.length === 0 ? (
               <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-tertiary)' }}>No donors found.</div>
+            ) : (
+              <div
+                style={{
+                  height: donorVirtualizer.getTotalSize(),
+                  width: '100%',
+                  position: 'relative',
+                }}
+              >
+                {donorVirtualizer.getVirtualItems().map(vi => {
+                  const donor = filteredDonors[vi.index];
+                  return (
+                    <div
+                      key={donor.id}
+                      data-index={vi.index}
+                      ref={donorVirtualizer.measureElement}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${vi.start}px)`,
+                      }}
+                    >
+                      <div
+                        className={`donor-item ${activeDonorId === donor.id ? 'active' : ''} ${selectedIds.has(donor.id) ? 'selected' : ''}`}
+                        onClick={() => setActiveDonorId(donor.id)}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(donor.id)}
+                          onClick={e => e.stopPropagation()}
+                          onChange={() => toggleSelect(donor.id)}
+                          style={{ flexShrink: 0 }}
+                        />
+                        <div className="donor-avatar">{donor.initial}</div>
+                        <div className="donor-info">
+                          <div className="donor-name">{donor.name}</div>
+                          <div className="donor-meta">{donor.type}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
@@ -415,7 +546,29 @@ const CRM: React.FC = () => {
                 <button className="btn btn-secondary" title="Email" onClick={() => openSingleCompose('email')}>
                   <Mail size={16} />
                 </button>
-                <button className="btn btn-secondary" title="Call" onClick={() => toast(`Calling ${activeDonor.name}...`, { icon: '📞' })}>
+                <button
+                  className="btn btn-secondary"
+                  title="Log a call attempt"
+                  onClick={async () => {
+                    if (!activeDonor?.id) return;
+                    try {
+                      const res = await apiFetch('/crm/outreach', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          mode: 'voice_event',
+                          channel: 'phone',
+                          donor_ids: [activeDonor.id],
+                          message: `Call attempt logged for ${activeDonor.name}.`,
+                        }),
+                      });
+                      if (!res.ok) throw new Error('call');
+                      toast.success('Call attempt logged.', { icon: '📞' });
+                    } catch {
+                      toast.error('Failed to log call.');
+                    }
+                  }}
+                >
                   <Phone size={16} />
                 </button>
               </div>
@@ -424,18 +577,49 @@ const CRM: React.FC = () => {
             <div className="detail-body">
               <div className="timeline-section">
                 <h3 style={{ marginBottom: '1.5rem', fontSize: '1.125rem' }}>Activity Timeline</h3>
-                {donorTransactions.map(tx => (
-                  <div className="timeline-item" key={tx.id}>
-                    <div className="timeline-icon" style={{ borderColor: 'var(--color-primary)' }}>
-                      <IndianRupee size={10} color="var(--color-primary)" />
-                    </div>
-                    <div className="timeline-content">
-                      <div className="timeline-date">{tx.date} • {tx.method}</div>
-                      <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Donation: ₹{tx.amount.toLocaleString()}</div>
-                      <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>Campaign: {tx.campaignTitle}</p>
+                {donorTransactions.length === 0 ? null : (
+                  <div
+                    ref={donorTxTimelineRef}
+                    style={{ maxHeight: 'min(45vh, 360px)', overflow: 'auto', marginBottom: '0.75rem' }}
+                  >
+                    <div style={{ height: donorTxVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                      {donorTxVirtualizer.getVirtualItems().map(vi => {
+                        const tx = donorTransactions[vi.index];
+                        return (
+                          <div
+                            key={tx.id}
+                            data-index={vi.index}
+                            ref={donorTxVirtualizer.measureElement}
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              transform: `translateY(${vi.start}px)`,
+                            }}
+                          >
+                            <div className="timeline-item">
+                              <div className="timeline-icon" style={{ borderColor: 'var(--color-primary)' }}>
+                                <IndianRupee size={10} color="var(--color-primary)" />
+                              </div>
+                              <div className="timeline-content">
+                                <div className="timeline-date">
+                                  {tx.date} • {tx.method}
+                                </div>
+                                <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>
+                                  Donation: ₹{tx.amount.toLocaleString()}
+                                </div>
+                                <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
+                                  Campaign: {tx.campaignTitle}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                ))}
+                )}
                 <div className="timeline-item">
                   <div className="timeline-icon" style={{ borderColor: 'var(--color-warning)' }}>
                     <Clock size={10} color="var(--color-warning)" />
@@ -500,7 +684,25 @@ const CRM: React.FC = () => {
                   <div className="stat-label flex justify-between items-center">
                     Relationship Notes
                     <button className="text-primary flex items-center gap-1" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem' }} 
-                      onClick={() => toast('Voice Note Capture Active... Speak now.', { icon: '🎙️' })}>
+                      onClick={async () => {
+                        try {
+                          const donorId = activeDonor?.id ? String(activeDonor.id) : '';
+                          const res = await apiFetch('/crm/outreach', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              mode: 'voice_event',
+                              channel: 'whatsapp',
+                              donor_ids: donorId ? [donorId] : [],
+                              message: 'Voice note capture requested from UI.',
+                            }),
+                          });
+                          if (!res.ok) throw new Error('voice');
+                          toast.success('Voice note request logged.', { icon: '🎙️' });
+                        } catch {
+                          toast.error('Failed to log voice note request.');
+                        }
+                      }}>
                       <Mic size={14} /> Voice Note
                     </button>
                   </div>
@@ -557,7 +759,27 @@ const CRM: React.FC = () => {
             )}
 
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => toast('Draft saved!', { icon: '💾' })}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={async () => {
+                const donorIds = bulkMode ? Array.from(selectedIds) : (activeDonor?.id ? [activeDonor.id] : []);
+                if (donorIds.length === 0) { toast.error('Select at least one donor.'); return; }
+                try {
+                  const res = await apiFetch('/crm/outreach', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      mode: 'draft',
+                      channel: composerChannel,
+                      donor_ids: donorIds,
+                      template_id: selectedTemplate?.id,
+                      message: (customMessage || selectedTemplate.body || '').toString(),
+                    }),
+                  });
+                  if (!res.ok) throw new Error('draft');
+                  toast.success('Draft saved.', { icon: '💾' });
+                } catch {
+                  toast.error('Failed to save draft.');
+                }
+              }}>
                 Save Draft
               </button>
               <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSendComposer}>
@@ -597,7 +819,9 @@ const CRM: React.FC = () => {
 
             {csvPreview.length > 0 && (
               <>
-                <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>Preview ({csvPreview.length} rows)</div>
+                <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+                  Preview (first {Math.min(15, csvPreview.length)} of {csvPreview.length} rows)
+                </div>
                 <div className="table-scroll-wrap" style={{ marginBottom: '1rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)' }}>
                   <div className="table-scroll">
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -609,7 +833,7 @@ const CRM: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {csvPreview.map((row, i) => (
+                      {csvPreview.slice(0, 15).map((row, i) => (
                         <tr key={i} style={{ borderTop: '1px solid var(--color-border-light)' }}>
                           <td style={{ padding: '0.5rem 0.75rem' }}>{row.name}</td>
                           <td style={{ padding: '0.5rem 0.75rem' }}>{row.type}</td>
@@ -622,7 +846,7 @@ const CRM: React.FC = () => {
                   </div>
                 </div>
                 <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleCSVImport}>
-                  <Users size={16} /> Import {csvPreview.length} Donors
+                  <Users size={16} /> Import all {csvPreview.length} donors
                 </button>
               </>
             )}

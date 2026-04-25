@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Shield, UserCheck, Trash2, AlertOctagon, FileText, Plus, X, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
@@ -18,22 +19,6 @@ interface BreachRecord {
   affectedRecords: number; discovered: string; notificationDue: string;
   notified: boolean; description: string;
 }
-
-// ── Seed data ─────────────────────────────────────────────────────────────────
-const SEED_CONSENTS: ConsentRecord[] = [
-  { id:'c1', subject:'Priya Sharma', type:'donor', email:'priya@example.com', purpose:'Fundraising comms', given:true, date:'2026-01-15' },
-  { id:'c2', subject:'Amit Patel', type:'donor', email:'amit@example.com', purpose:'WhatsApp outreach', given:true, date:'2026-02-10' },
-  { id:'c3', subject:'Sunita Verma', type:'beneficiary', email:'sunita@example.com', purpose:'Operational reporting', given:false, date:'2026-03-01', withdrawn:'2026-03-20' },
-  { id:'c4', subject:'Ravi Kumar', type:'volunteer', email:'ravi@example.com', purpose:'Fundraising comms', given:true, date:'2026-03-15' },
-];
-const SEED_ERASURES: ErasureRequest[] = [
-  { id:'e1', name:'Sunita Verma', email:'sunita@example.com', reason:'No longer wishes to be contacted', status:'in_review', received:'2026-04-01', deadline:'2026-05-01' },
-  { id:'e2', name:'Nikhil Bose', email:'nikhil@example.com', reason:'Data accuracy concern', status:'received', received:'2026-04-18', deadline:'2026-05-18' },
-  { id:'e3', name:'Asha Iyer', email:'asha@example.com', reason:'Right to erasure', status:'completed', received:'2026-03-01', deadline:'2026-03-31', completed:'2026-03-25' },
-];
-const SEED_BREACHES: BreachRecord[] = [
-  { id:'b1', title:'Donor email list exposed in misconfigured S3 bucket', severity:'high', affectedRecords:142, discovered:'2026-03-10T09:00:00Z', notificationDue:'2026-03-13T09:00:00Z', notified:true, description:'A public-read ACL was accidentally set on a backup bucket. Immediately revoked and audit log reviewed.' },
-];
 
 const SEVERITY_COLORS: Record<string, string> = {
   low:'#d1fae5', medium:'#fef3c7', high:'#fee2e2', critical:'#fce7f3',
@@ -57,9 +42,9 @@ const DPDP_TABS = [
 
 const DPDPModule: React.FC = () => {
   const [activeTab, setActiveTab] = useState('consent');
-  const [consents, setConsents] = useState<ConsentRecord[]>(SEED_CONSENTS);
-  const [erasures, setErasures] = useState<ErasureRequest[]>(SEED_ERASURES);
-  const [breaches, setBreaches] = useState<BreachRecord[]>(SEED_BREACHES);
+  const [consents, setConsents] = useState<ConsentRecord[]>([]);
+  const [erasures, setErasures] = useState<ErasureRequest[]>([]);
+  const [breaches, setBreaches] = useState<BreachRecord[]>([]);
   const [showErasureModal, setShowErasureModal] = useState(false);
   const [showBreachModal, setShowBreachModal] = useState(false);
   const [erasureForm, setErasureForm] = useState({ name:'', email:'', reason:'' });
@@ -67,6 +52,58 @@ const DPDPModule: React.FC = () => {
   const [noticeMd, setNoticeMd] = useState<string>('');
   const [noticeVersion, setNoticeVersion] = useState<number | null>(null);
   const [noticeLoading, setNoticeLoading] = useState(false);
+
+  const consentScrollRef = useRef<HTMLDivElement>(null);
+  const consentVirtualizer = useVirtualizer({
+    count: consents.length,
+    getScrollElement: () => consentScrollRef.current,
+    estimateSize: () => 58,
+    overscan: 14,
+  });
+
+  const erasureScrollRef = useRef<HTMLDivElement>(null);
+  const erasureVirtualizer = useVirtualizer({
+    count: erasures.length,
+    getScrollElement: () => erasureScrollRef.current,
+    estimateSize: () => 112,
+    overscan: 8,
+  });
+
+  const breachScrollRef = useRef<HTMLDivElement>(null);
+  const breachVirtualizer = useVirtualizer({
+    count: breaches.length,
+    getScrollElement: () => breachScrollRef.current,
+    estimateSize: () => 168,
+    overscan: 6,
+  });
+
+  const refresh = async () => {
+    try {
+      const [cRes, eRes, bRes] = await Promise.all([
+        apiFetch('/compliance/consents'),
+        apiFetch('/compliance/erasures'),
+        apiFetch('/compliance/breaches'),
+      ]);
+      if (cRes.ok) {
+        const data = await cRes.json();
+        setConsents(Array.isArray(data.consents) ? data.consents : []);
+      }
+      if (eRes.ok) {
+        const data = await eRes.json();
+        setErasures(Array.isArray(data.requests) ? data.requests : []);
+      }
+      if (bRes.ok) {
+        const data = await bRes.json();
+        setBreaches(Array.isArray(data.breaches) ? data.breaches : []);
+      }
+    } catch {
+      // keep empty
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
 
   const handleWithdrawConsent = async (id: string) => {
     try {
@@ -76,7 +113,7 @@ const DPDPModule: React.FC = () => {
         body: JSON.stringify({ consent_id: id })
       });
       if (res.ok) {
-        setConsents(prev => prev.map(c => c.id === id ? { ...c, given:false, withdrawn: new Date().toISOString().slice(0,10) } : c));
+        await refresh();
         toast('Consent withdrawn. Subject will not receive further communications.', { icon:'📋', duration:4000 });
       }
     } catch (e) { toast.error("Failed to withdraw consent."); }
@@ -92,8 +129,7 @@ const DPDPModule: React.FC = () => {
       });
       const data = await res.json();
       if (res.ok) {
-        const received = new Date().toISOString().slice(0,10);
-        setErasures(prev => [...prev, { id: data.request_id || `e${Date.now()}`, ...erasureForm, status:'received', received, deadline: data.deadline }]);
+        await refresh();
         setErasureForm({ name:'', email:'', reason:'' });
         setShowErasureModal(false);
         toast.success(data.message || 'Erasure request logged. Must be completed within 30 days (DPDP §12).', { duration:5000 });
@@ -101,9 +137,15 @@ const DPDPModule: React.FC = () => {
     } catch (e) { toast.error("Failed to log erasure request."); }
   };
 
-  const handleCompleteErasure = (id: string) => {
-    setErasures(prev => prev.map(r => r.id === id ? { ...r, status:'completed', completed: new Date().toISOString().slice(0,10) } : r));
-    toast.success('Erasure completed and logged.', { icon:'✅' });
+  const handleCompleteErasure = async (id: string) => {
+    try {
+      const res = await apiFetch(`/compliance/erasure/${encodeURIComponent(id)}/complete`, { method: 'POST' });
+      if (!res.ok) throw new Error('complete');
+      await refresh();
+      toast.success('Erasure completed and logged.', { icon:'✅' });
+    } catch {
+      toast.error('Failed to mark complete.');
+    }
   };
 
   const handleAddBreach = async (e: React.FormEvent) => {
@@ -121,8 +163,7 @@ const DPDPModule: React.FC = () => {
       });
       const data = await res.json();
       if (res.ok) {
-        const discovered = new Date().toISOString();
-        setBreaches(prev => [...prev, { id: data.breach_id || `b${Date.now()}`, ...breachForm, discovered, notificationDue: data.notification_due, notified:false }]);
+        await refresh();
         setBreachForm({ title:'', severity:'medium', affectedRecords:0, description:'' });
         setShowBreachModal(false);
         toast('⚠️ ' + (data.message || 'Breach logged. You must notify the DPB within 72 hours (DPDP §8).'), { duration:6000 });
@@ -130,9 +171,15 @@ const DPDPModule: React.FC = () => {
     } catch (e) { toast.error("Failed to log breach."); }
   };
 
-  const handleNotifyDPB = (id: string) => {
-    setBreaches(prev => prev.map(b => b.id === id ? { ...b, notified:true } : b));
-    toast.success('DPB notification sent and logged.', { icon:'📨' });
+  const handleNotifyDPB = async (id: string) => {
+    try {
+      const res = await apiFetch(`/compliance/breaches/${encodeURIComponent(id)}/notify`, { method: 'POST' });
+      if (!res.ok) throw new Error('notify');
+      await refresh();
+      toast.success('DPB notification sent and logged.', { icon:'📨' });
+    } catch {
+      toast.error('Failed to notify DPB.');
+    }
   };
 
   const card: React.CSSProperties = {
@@ -172,40 +219,138 @@ const DPDPModule: React.FC = () => {
               ✅ {consents.filter(c=>c.given).length} active &nbsp;·&nbsp; ❌ {consents.filter(c=>!c.given).length} withdrawn
             </div>
           </div>
-          <div className="table-scroll-wrap">
-            <div className="table-scroll">
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.85rem' }}>
-                <thead>
-              <tr style={{ background:'var(--color-bg-main)' }}>
-                {['Data Subject','Type','Purpose','Status','Consent Date','Action'].map(h=>(
-                  <th key={h} style={{ textAlign:'left', padding:'0.6rem 0.75rem', fontSize:'0.72rem', fontWeight:600, color:'var(--color-text-secondary)', borderBottom:'1px solid var(--color-border-light)' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {consents.map(c=>(
-                <tr key={c.id} style={{ borderBottom:'1px solid var(--color-border-light)' }}>
-                  <td style={{ padding:'0.75rem', fontWeight:600 }}>{c.subject}<div style={{ fontSize:'0.72rem', color:'var(--color-text-tertiary)' }}>{c.email}</div></td>
-                  <td style={{ padding:'0.75rem' }}><span style={{ fontSize:'0.72rem', padding:'2px 8px', borderRadius:'99px', background:'var(--color-bg-main)', border:'1px solid var(--color-border)' }}>{c.type}</span></td>
-                  <td style={{ padding:'0.75rem', fontSize:'0.8rem', color:'var(--color-text-secondary)' }}>{c.purpose}</td>
-                  <td style={{ padding:'0.75rem' }}>
-                    <span style={{ fontSize:'0.72rem', padding:'2px 8px', borderRadius:'99px', background: c.given?'#d1fae5':'#fee2e2', color: c.given?'#065f46':'#991b1b', fontWeight:600 }}>
-                      {c.given ? '✅ Given' : '❌ Withdrawn'}
-                    </span>
-                  </td>
-                  <td style={{ padding:'0.75rem', fontSize:'0.8rem', color:'var(--color-text-secondary)' }}>{c.date}{c.withdrawn && <div style={{ fontSize:'0.72rem', color:'#991b1b' }}>Withdrawn: {c.withdrawn}</div>}</td>
-                  <td style={{ padding:'0.75rem' }}>
-                    {c.given && (
-                      <button onClick={()=>handleWithdrawConsent(c.id)} style={{ fontSize:'0.72rem', padding:'3px 8px', border:'1px solid var(--color-border)', borderRadius:'var(--radius-sm)', background:'none', cursor:'pointer', color:'var(--color-text-secondary)' }}>
-                        Withdraw
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              </tbody>
-              </table>
+          <div
+            ref={consentScrollRef}
+            className="table-scroll-wrap"
+            style={{
+              maxHeight: 'min(52vh, 500px)',
+              overflow: 'auto',
+              border: '1px solid var(--color-border-light)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(100px,1.1fr) minmax(72px,0.75fr) minmax(100px,1.2fr) minmax(80px,0.85fr) minmax(88px,0.85fr) 72px',
+                gap: '0.4rem',
+                padding: '0.55rem 0.65rem',
+                fontSize: '0.65rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.03em',
+                color: 'var(--color-text-secondary)',
+                borderBottom: '1px solid var(--color-border-light)',
+                position: 'sticky',
+                top: 0,
+                background: 'var(--color-bg-main)',
+                zIndex: 1,
+              }}
+            >
+              <span>Subject</span>
+              <span>Type</span>
+              <span>Purpose</span>
+              <span>Status</span>
+              <span>Date</span>
+              <span>Act</span>
             </div>
+            {consents.length === 0 ? (
+              <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
+                No consent records yet.
+              </div>
+            ) : (
+              <div style={{ height: consentVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                {consentVirtualizer.getVirtualItems().map(vr => {
+                  const c = consents[vr.index];
+                  return (
+                    <div
+                      key={c.id}
+                      data-index={vr.index}
+                      ref={consentVirtualizer.measureElement}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${vr.start}px)`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(100px,1.1fr) minmax(72px,0.75fr) minmax(100px,1.2fr) minmax(80px,0.85fr) minmax(88px,0.85fr) 72px',
+                          gap: '0.4rem',
+                          padding: '0.5rem 0.65rem',
+                          alignItems: 'center',
+                          fontSize: '0.8rem',
+                          borderBottom: '1px solid var(--color-border-light)',
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600 }}>{c.subject}</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>{c.email}</div>
+                        </div>
+                        <span>
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '2px 6px',
+                              borderRadius: 99,
+                              background: 'var(--color-bg-main)',
+                              border: '1px solid var(--color-border)',
+                            }}
+                          >
+                            {c.type}
+                          </span>
+                        </span>
+                        <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.76rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {c.purpose}
+                        </span>
+                        <span>
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '2px 6px',
+                              borderRadius: 99,
+                              background: c.given ? '#d1fae5' : '#fee2e2',
+                              color: c.given ? '#065f46' : '#991b1b',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {c.given ? 'Given' : 'Out'}
+                          </span>
+                        </span>
+                        <div style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
+                          {c.date}
+                          {c.withdrawn && (
+                            <div style={{ fontSize: '0.68rem', color: '#991b1b' }}>W: {c.withdrawn}</div>
+                          )}
+                        </div>
+                        <span>
+                          {c.given && (
+                            <button
+                              type="button"
+                              onClick={() => handleWithdrawConsent(c.id)}
+                              style={{
+                                fontSize: '0.68rem',
+                                padding: '3px 6px',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: 'var(--radius-sm)',
+                                background: 'none',
+                                cursor: 'pointer',
+                                color: 'var(--color-text-secondary)',
+                              }}
+                            >
+                              Withdraw
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -219,33 +364,88 @@ const DPDPModule: React.FC = () => {
               <Plus size={14}/> Log Request
             </button>
           </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:'0.75rem' }}>
-            {erasures.map(r=>{
-              const s = STATUS_STYLE[r.status];
-              const overdue = r.status !== 'completed' && r.status !== 'rejected' && new Date(r.deadline) < new Date();
-              return (
-                <div key={r.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'1rem', border: overdue?'1px solid #fca5a5':'1px solid var(--color-border-light)', borderRadius:'var(--radius-md)', background: overdue?'#fff5f5':'var(--color-bg-card)' }}>
-                  <div>
-                    <div style={{ fontWeight:600, fontSize:'0.875rem' }}>{r.name} <span style={{ fontSize:'0.8rem', color:'var(--color-text-secondary)', fontWeight:400 }}>— {r.email}</span></div>
-                    <div style={{ fontSize:'0.78rem', color:'var(--color-text-secondary)', margin:'0.25rem 0' }}>{r.reason}</div>
-                    <div style={{ display:'flex', gap:'0.75rem', fontSize:'0.72rem', color:'var(--color-text-tertiary)' }}>
-                      <span>Received: {r.received}</span>
-                      <span style={{ color: overdue?'#dc2626':'inherit' }}><Clock size={11} style={{ display:'inline', verticalAlign:'middle' }}/> Deadline: {r.deadline}{overdue?' ⚠️ OVERDUE':''}</span>
-                      {r.completed && <span style={{ color:'#059669' }}>Completed: {r.completed}</span>}
+          {erasures.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '1.5rem' }}>No erasure requests logged.</div>
+          ) : (
+            <div
+              ref={erasureScrollRef}
+              style={{ maxHeight: 'min(52vh, 520px)', overflow: 'auto', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)' }}
+            >
+              <div style={{ height: erasureVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                {erasureVirtualizer.getVirtualItems().map(vr => {
+                  const r = erasures[vr.index];
+                  const s = STATUS_STYLE[r.status];
+                  const overdue = r.status !== 'completed' && r.status !== 'rejected' && new Date(r.deadline) < new Date();
+                  return (
+                    <div
+                      key={r.id}
+                      data-index={vr.index}
+                      ref={erasureVirtualizer.measureElement}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${vr.start}px)`,
+                        paddingBottom: '0.65rem',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '1rem',
+                          border: overdue ? '1px solid #fca5a5' : '1px solid var(--color-border-light)',
+                          borderRadius: 'var(--radius-md)',
+                          background: overdue ? '#fff5f5' : 'var(--color-bg-card)',
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: 1, paddingRight: '0.75rem' }}>
+                          <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                            {r.name}{' '}
+                            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', fontWeight: 400 }}>— {r.email}</span>
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', margin: '0.25rem 0' }}>{r.reason}</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
+                            <span>Received: {r.received}</span>
+                            <span style={{ color: overdue ? '#dc2626' : 'inherit' }}>
+                              <Clock size={11} style={{ display: 'inline', verticalAlign: 'middle' }} /> Deadline: {r.deadline}
+                              {overdue ? ' OVERDUE' : ''}
+                            </span>
+                            {r.completed && <span style={{ color: '#059669' }}>Completed: {r.completed}</span>}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+                          <span style={{ fontSize: '0.72rem', padding: '3px 10px', borderRadius: 99, background: s.bg, color: s.color, fontWeight: 600 }}>
+                            {r.status.replace('_', ' ')}
+                          </span>
+                          {(r.status === 'received' || r.status === 'in_review') && (
+                            <button
+                              type="button"
+                              onClick={() => handleCompleteErasure(r.id)}
+                              style={{
+                                fontSize: '0.72rem',
+                                padding: '4px 10px',
+                                borderRadius: 'var(--radius-sm)',
+                                border: '1px solid #059669',
+                                background: 'none',
+                                color: '#059669',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                              }}
+                            >
+                              Mark Complete
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ display:'flex', alignItems:'center', gap:'0.75rem' }}>
-                    <span style={{ fontSize:'0.72rem', padding:'3px 10px', borderRadius:'99px', background:s.bg, color:s.color, fontWeight:600 }}>{r.status.replace('_',' ')}</span>
-                    {(r.status==='received'||r.status==='in_review') && (
-                      <button onClick={()=>handleCompleteErasure(r.id)} style={{ fontSize:'0.72rem', padding:'4px 10px', borderRadius:'var(--radius-sm)', border:'1px solid #059669', background:'none', color:'#059669', cursor:'pointer', fontWeight:600 }}>
-                        Mark Complete
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -258,40 +458,115 @@ const DPDPModule: React.FC = () => {
               <AlertOctagon size={14}/> Log Breach
             </button>
           </div>
-          {breaches.map(b=>{
-            const notifDue = new Date(b.notificationDue);
-            const overdue = !b.notified && notifDue < new Date();
-            return (
-              <div key={b.id} style={{ padding:'1rem', border:`1px solid ${SEVERITY_COLORS[b.severity]}`, borderLeft:`4px solid ${SEVERITY_TEXT[b.severity]}`, borderRadius:'var(--radius-md)', marginBottom:'0.75rem', background: overdue?'#fff5f5':'var(--color-bg-card)' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-                  <div>
-                    <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', marginBottom:'0.35rem' }}>
-                      <span style={{ fontSize:'0.72rem', padding:'2px 8px', borderRadius:'99px', background:SEVERITY_COLORS[b.severity], color:SEVERITY_TEXT[b.severity], fontWeight:700, textTransform:'uppercase' }}>{b.severity}</span>
-                      <span style={{ fontWeight:700, fontSize:'0.875rem' }}>{b.title}</span>
+          {breaches.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '2rem' }}>No breaches logged — great!</div>
+          ) : (
+            <div
+              ref={breachScrollRef}
+              style={{ maxHeight: 'min(55vh, 560px)', overflow: 'auto', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)' }}
+            >
+              <div style={{ height: breachVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                {breachVirtualizer.getVirtualItems().map(vr => {
+                  const b = breaches[vr.index];
+                  const notifDue = new Date(b.notificationDue);
+                  const overdue = !b.notified && notifDue < new Date();
+                  return (
+                    <div
+                      key={b.id}
+                      data-index={vr.index}
+                      ref={breachVirtualizer.measureElement}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${vr.start}px)`,
+                        paddingBottom: '0.65rem',
+                      }}
+                    >
+                      <div
+                        style={{
+                          padding: '1rem',
+                          border: `1px solid ${SEVERITY_COLORS[b.severity]}`,
+                          borderLeft: `4px solid ${SEVERITY_TEXT[b.severity]}`,
+                          borderRadius: 'var(--radius-md)',
+                          background: overdue ? '#fff5f5' : 'var(--color-bg-card)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem', flexWrap: 'wrap' }}>
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  padding: '2px 8px',
+                                  borderRadius: 99,
+                                  background: SEVERITY_COLORS[b.severity],
+                                  color: SEVERITY_TEXT[b.severity],
+                                  fontWeight: 700,
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {b.severity}
+                              </span>
+                              <span style={{ fontWeight: 700, fontSize: '0.875rem' }}>{b.title}</span>
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '0.5rem' }}>{b.description}</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
+                              <span>Discovered: {new Date(b.discovered).toLocaleString('en-IN')}</span>
+                              <span>Affected: {b.affectedRecords.toLocaleString()} records</span>
+                              <span style={{ color: overdue ? '#dc2626' : '#92400e' }}>
+                                <Clock size={11} style={{ display: 'inline', verticalAlign: 'middle' }} /> DPB notify by:{' '}
+                                {notifDue.toLocaleString('en-IN')}
+                                {overdue ? ' OVERDUE' : ''}
+                              </span>
+                            </div>
+                          </div>
+                          <div style={{ flexShrink: 0 }}>
+                            {b.notified ? (
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  padding: '4px 10px',
+                                  borderRadius: 99,
+                                  background: '#d1fae5',
+                                  color: '#065f46',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                }}
+                              >
+                                <CheckCircle2 size={12} />
+                                DPB Notified
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleNotifyDPB(b.id)}
+                                style={{
+                                  fontSize: '0.72rem',
+                                  padding: '5px 12px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  border: '1px solid #dc2626',
+                                  background: '#dc2626',
+                                  color: 'white',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Notify DPB
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ fontSize:'0.8rem', color:'var(--color-text-secondary)', marginBottom:'0.5rem' }}>{b.description}</div>
-                    <div style={{ display:'flex', gap:'1rem', fontSize:'0.72rem', color:'var(--color-text-tertiary)' }}>
-                      <span>📅 Discovered: {new Date(b.discovered).toLocaleString('en-IN')}</span>
-                      <span>👥 Affected: {b.affectedRecords.toLocaleString()} records</span>
-                      <span style={{ color: overdue?'#dc2626':'#92400e' }}>
-                        <Clock size={11} style={{ display:'inline', verticalAlign:'middle' }}/> DPB notify by: {notifDue.toLocaleString('en-IN')} {overdue?'⚠️ OVERDUE':''}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    {b.notified ? (
-                      <span style={{ fontSize:'0.72rem', padding:'4px 10px', borderRadius:'99px', background:'#d1fae5', color:'#065f46', fontWeight:600, display:'flex', alignItems:'center', gap:'4px' }}><CheckCircle2 size={12}/>DPB Notified</span>
-                    ) : (
-                      <button onClick={()=>handleNotifyDPB(b.id)} style={{ fontSize:'0.72rem', padding:'5px 12px', borderRadius:'var(--radius-sm)', border:'1px solid #dc2626', background:'#dc2626', color:'white', cursor:'pointer', fontWeight:600 }}>
-                        Notify DPB
-                      </button>
-                    )}
-                  </div>
-                </div>
+                  );
+                })}
               </div>
-            );
-          })}
-          {breaches.length===0 && <div style={{ textAlign:'center', color:'var(--color-text-tertiary)', padding:'2rem' }}>No breaches logged — great!</div>}
+            </div>
+          )}
         </div>
       )}
 

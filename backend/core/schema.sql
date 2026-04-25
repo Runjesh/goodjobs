@@ -117,7 +117,25 @@ CREATE TABLE IF NOT EXISTS csr_pipeline_cards (
     created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS win_probability INTEGER NOT NULL DEFAULT 55;
+
 CREATE INDEX IF NOT EXISTS idx_csr_pipeline_ngo ON csr_pipeline_cards(ngo_id);
+
+-- CSR: Document rooms per pipeline card (ngo_id scoped)
+CREATE TABLE IF NOT EXISTS csr_card_documents (
+    id         TEXT PRIMARY KEY,
+    ngo_id     TEXT NOT NULL,
+    card_id    TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    doc_type   TEXT,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    s3_key     TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_csr_card_docs_ngo ON csr_card_documents(ngo_id);
+CREATE INDEX IF NOT EXISTS idx_csr_card_docs_card ON csr_card_documents(card_id);
 
 -- ── 3d. Volunteers: Shifts + Signups (ngo_id scoped) ───────────────────────
 CREATE TABLE IF NOT EXISTS volunteer_shifts (

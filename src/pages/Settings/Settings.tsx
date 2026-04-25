@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRight } from 'lucide-react';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -23,22 +23,129 @@ const Settings: React.FC = () => {
   const [panNo, setPanNo] = useState('AABCI1234C');
   const [notifs, setNotifs] = useState({ agentApprovals: true, complianceDue: true, donorLapse: true, dailyBrief: false, weeklyReport: true });
   const [consentGiven, setConsentGiven] = useState(true);
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNext, setPwNext] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [loadingSettings, setLoadingSettings] = useState(false);
 
   const meta = user ? ROLE_META[user.role] : null;
 
-  const handleSaveProfile = () => {
-    if (user) {
-      login({ ...user, name, ngoName });
-      toast.success('Profile updated!', { icon: '✅' });
+  useEffect(() => {
+    const load = async () => {
+      if (!user) return;
+      setLoadingSettings(true);
+      try {
+        const res = await apiFetch('/settings');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.profile?.full_name) setName(data.profile.full_name);
+        if (data?.ngo?.name) setNgoName(data.ngo.name);
+        if (typeof data?.ngo?.reg_no !== 'undefined') setRegNo(data.ngo.reg_no || '');
+        if (typeof data?.ngo?.fcra_reg !== 'undefined') setFcraReg(data.ngo.fcra_reg || '');
+        if (typeof data?.ngo?.pan !== 'undefined') setPanNo(data.ngo.pan || '');
+        if (data?.notification_prefs && typeof data.notification_prefs === 'object') {
+          setNotifs(prev => ({ ...prev, ...data.notification_prefs }));
+        }
+      } finally {
+        setLoadingSettings(false);
+      }
+    };
+    load();
+  }, [user]);
+
+  const handleSaveProfile = async () => {
+    if (!user) return;
+    try {
+      const res = await apiFetch('/settings/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: name }),
+      });
+      if (!res.ok) throw new Error('profile');
+      const data = await res.json().catch(() => ({}));
+      login({ ...user, name: data?.profile?.full_name || name, ngoName });
+      toast.success('Profile updated.');
+    } catch {
+      toast.error('Failed to update profile.');
     }
   };
 
-  const handleExportData = () => {
-    const data = JSON.stringify({ user, ngoName, regNo, fcraReg, panNo }, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'sevasuite_data_export.json'; a.click();
-    toast.success('Your data exported (DPDP §12 right to portability).', { icon: '📦', duration: 4000 });
+  const handleExportData = async () => {
+    try {
+      const res = await apiFetch('/dpdp/export');
+      if (!res.ok) throw new Error('export');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'goodjobs_data_export.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Your data exported (DPDP §12 right to portability).', { duration: 3500 });
+    } catch {
+      toast.error('Failed to export your data.');
+    }
+  };
+
+  const handleSaveNgo = async () => {
+    if (!user) return;
+    try {
+      const res = await apiFetch('/settings/ngo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: ngoName, reg_no: regNo || null, fcra_reg: fcraReg || null, pan: panNo || null, state: null }),
+      });
+      if (!res.ok) throw new Error('ngo');
+      const data = await res.json().catch(() => ({}));
+      login({ ...user, ngoName: data?.ngo?.name || ngoName, name });
+      toast.success('NGO details saved.');
+    } catch {
+      toast.error('Failed to save NGO details.');
+    }
+  };
+
+  const handleSaveNotifs = async () => {
+    try {
+      const res = await apiFetch('/settings/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefs: notifs }),
+      });
+      if (!res.ok) throw new Error('notifs');
+      toast.success('Notification preferences saved.');
+    } catch {
+      toast.error('Failed to save preferences.');
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (pwNext.length < 8) return toast.error('Password must be at least 8 characters.');
+    if (pwNext !== pwConfirm) return toast.error('New passwords do not match.');
+    try {
+      const res = await apiFetch('/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: pwCurrent, new_password: pwNext }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || 'pw');
+      setPwCurrent(''); setPwNext(''); setPwConfirm('');
+      toast.success('Password updated.');
+    } catch {
+      toast.error('Failed to update password.');
+    }
+  };
+
+  const handleRevokeOtherSessions = async () => {
+    try {
+      const res = await apiFetch('/auth/sessions/revoke-other', { method: 'POST' });
+      if (!res.ok) throw new Error('revoke');
+      const data = await res.json().catch(() => ({}));
+      toast(data?.note || 'Requested session revocation.', { icon: '🔒' });
+    } catch {
+      toast.error('Failed to revoke sessions.');
+    }
   };
 
   return (
@@ -82,6 +189,9 @@ const Settings: React.FC = () => {
           {activeTab === 'profile' && (
             <div>
               <h3 className="settings-section-title">Your Profile</h3>
+              {loadingSettings && (
+                <div className="settings-info-box">Loading settings…</div>
+              )}
               {user && meta && (
                 <div className="settings-user-hero">
                   <div style={{ width: 56, height: 56, borderRadius: '50%', background: `linear-gradient(135deg, ${meta.color}, ${meta.color}99)`, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', fontWeight: 700 }}>
@@ -127,7 +237,7 @@ const Settings: React.FC = () => {
                   <input className="input-field" value={panNo} onChange={e => setPanNo(e.target.value)} /></div>
                 <div className="input-group"><label className="input-label">State of Registration</label>
                   <select className="input-field"><option>Maharashtra</option><option>Delhi</option><option>Karnataka</option><option>Tamil Nadu</option></select></div>
-                <button className="btn btn-primary" onClick={() => toast.success('NGO details saved!')}><Save size={16} /> Save NGO Details</button>
+                <button className="btn btn-primary" onClick={handleSaveNgo}><Save size={16} /> Save NGO Details</button>
               </div>
             </div>
           )}
@@ -141,17 +251,17 @@ const Settings: React.FC = () => {
                   🔐 You are signed in using a <strong>JWT session token</strong>. Token expires in 24 hours.
                 </div>
                 <div className="input-group"><label className="input-label">Current Password</label>
-                  <input type="password" className="input-field" placeholder="••••••••" /></div>
+                  <input type="password" className="input-field" placeholder="••••••••" value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} /></div>
                 <div className="input-group"><label className="input-label">New Password</label>
-                  <input type="password" className="input-field" placeholder="Min. 8 characters" /></div>
+                  <input type="password" className="input-field" placeholder="Min. 8 characters" value={pwNext} onChange={e => setPwNext(e.target.value)} /></div>
                 <div className="input-group"><label className="input-label">Confirm Password</label>
-                  <input type="password" className="input-field" placeholder="••••••••" /></div>
-                <button className="btn btn-primary" onClick={() => toast.success('Password updated!')}><Key size={16} /> Change Password</button>
+                  <input type="password" className="input-field" placeholder="••••••••" value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} /></div>
+                <button className="btn btn-primary" onClick={handleChangePassword}><Key size={16} /> Change Password</button>
                 <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#fff7ed', borderRadius: 'var(--radius-md)', border: '1px solid #fed7aa' }}>
                   <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#c2410c' }}>Active Sessions</div>
                   <div style={{ fontSize: '0.8rem', color: '#9a3412' }}>MacBook Pro • Mumbai, India • Active now</div>
                   <button className="btn btn-secondary" style={{ marginTop: '0.75rem', fontSize: '0.75rem', color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
-                    onClick={() => toast('All other sessions terminated.', { icon: '🔒' })}>Revoke All Other Sessions</button>
+                    onClick={handleRevokeOtherSessions}>Revoke All Other Sessions</button>
                 </div>
               </div>
             </div>
@@ -239,7 +349,7 @@ const Settings: React.FC = () => {
                       onChange={e => { setNotifs(prev => ({ ...prev, [n.key]: e.target.checked })); toast(`${n.label} ${e.target.checked ? 'enabled' : 'disabled'}.`, { duration: 1500 }); }} />
                   </div>
                 ))}
-                <button className="btn btn-primary" onClick={() => toast.success('Notification preferences saved!')}><Save size={16} /> Save Preferences</button>
+                <button className="btn btn-primary" onClick={handleSaveNotifs}><Save size={16} /> Save Preferences</button>
               </div>
             </div>
           )}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Plus, GripVertical, Trash2, ChevronDown, ChevronUp,
   Eye, Save, Send, X, Type, Hash, ToggleLeft,
@@ -38,11 +38,8 @@ const DEFAULT_FIELDS: FormField[] = [
 
 const uid = () => 'f' + Math.random().toString(36).slice(2, 8);
 
-const SAVED_FORMS = [
-  { id: 'form1', name: 'Beneficiary Enrollment Form', fields: 5, submissions: 342 },
-  { id: 'form2', name: 'Health Camp Attendance', fields: 7, submissions: 178 },
-  { id: 'form3', name: 'Post-Training Assessment', fields: 8, submissions: 94 },
-];
+type SavedForm = { id: string; name: string; fields: FormField[]; createdAt: string };
+const LS_KEY = 'goodjobs.saved_forms.v1';
 
 const FormBuilder: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'builder' | 'forms' | 'preview'>('forms');
@@ -51,6 +48,27 @@ const FormBuilder: React.FC = () => {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [lang, setLang] = useState<'en' | 'hi' | 'mr' | 'ta'>('en');
+  const [savedForms, setSavedForms] = useState<SavedForm[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) setSavedForms(parsed);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const persistSavedForms = (next: SavedForm[]) => {
+    setSavedForms(next);
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
 
   const LANG_LABELS: Record<string, Record<string, string>> = {
     en: { save: 'Save Form', preview: 'Preview', deploy: 'Deploy to Field App' },
@@ -84,12 +102,15 @@ const FormBuilder: React.FC = () => {
   };
 
   const handleDeploy = () => {
-    toast.success(`"${formName}" deployed to Field App! ${fields.length} fields, available offline.`, { icon: '📱', duration: 4000 });
-    setActiveTab('forms');
+    toast('Deploy is not available yet.', { icon: '📱', duration: 2500 });
   };
 
   const handleSave = () => {
-    toast.success(`Form "${formName}" saved with ${fields.length} fields.`, { icon: '💾' });
+    const id = 'form_' + Date.now().toString(36);
+    const item: SavedForm = { id, name: formName.trim() || 'Untitled form', fields, createdAt: new Date().toISOString() };
+    persistSavedForms([item, ...savedForms]);
+    toast.success(`Saved locally: "${item.name}"`, { icon: '💾' });
+    setActiveTab('forms');
   };
 
   return (
@@ -132,19 +153,27 @@ const FormBuilder: React.FC = () => {
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {SAVED_FORMS.map(form => (
+            {savedForms.length === 0 ? (
+              <div className="card" style={{ padding: '1.25rem', color: 'var(--color-text-tertiary)' }}>
+                No forms yet. Create one with “New Form”.
+              </div>
+            ) : savedForms.map(form => (
               <div key={form.id} className="card" style={{ padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ fontWeight: 600 }}>{form.name}</div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                    {form.fields} fields • {form.submissions} submissions
+                    {form.fields.length} fields • saved locally
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => { setFormName(form.name); setActiveTab('builder'); }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem' }}
+                    onClick={() => { setFormName(form.name); setFields(form.fields); setActiveTab('builder'); }}
+                  >
                     <ChevronDown size={14} /> Edit
                   </button>
-                  <button className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => toast.success(`${form.name} deployed to Field App!`, { icon: '📱' })}>
+                  <button className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={handleDeploy}>
                     <Send size={14} /> Deploy
                   </button>
                 </div>

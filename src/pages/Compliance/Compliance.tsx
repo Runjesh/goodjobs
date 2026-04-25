@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ShieldCheck, Upload, Calendar, Users, X, CheckCircle2, AlertTriangle, Download, Plus, Shield, Trash2, RefreshCw } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
@@ -11,17 +12,12 @@ const PAGE_TABS = [
   { id: 'dpdp',   label: '🛡️ DPDP Act 2023' },
 ];
 
-const filings = [
-  { id: 1, name: 'TDS Return (Q3)', due: 'Nov 30, 2026', assignee: 'CA Mehta', status: 'Due Soon' },
-  { id: 2, name: 'IT Form 10B', due: 'Dec 15, 2026', assignee: 'CA Mehta', status: 'Pending' },
-  { id: 3, name: 'FCRA Annual Return', due: 'Dec 31, 2026', assignee: 'CFO', status: 'Pending' },
-  { id: 4, name: 'Darpan NGO Renewal', due: 'Mar 31, 2027', assignee: 'Admin', status: 'Pending' },
-];
+type Filing = { id: number; name: string; due: string; assignee: string; status: string };
 
 type BoardMember = { id: string; name: string; role: string; din: string; tenure?: string };
 
 const Compliance: React.FC = () => {
-  const { complianceDocs, addComplianceDoc } = useStore();
+  const { complianceDocs } = useStore();
   const [pageTab, setPageTab] = useState('vault');
   const [showDocModal, setShowDocModal] = useState(false);
   const [docForm, setDocForm] = useState({ name: '', type: 'Tax Exemption', status: 'Valid' as 'Valid' | 'Expiring Soon' | 'Expired', expiry: '' });
@@ -34,6 +30,24 @@ const Compliance: React.FC = () => {
   const [boardLoading, setBoardLoading] = useState(false);
   const [showBoardModal, setShowBoardModal] = useState(false);
   const [boardForm, setBoardForm] = useState({ name: '', role: 'Trustee', din: '', tenure: '' });
+  const [filings, setFilings] = useState<Filing[]>([]);
+  const [filingsLoading, setFilingsLoading] = useState(false);
+
+  const regDocScrollRef = useRef<HTMLDivElement>(null);
+  const regDocVirtualizer = useVirtualizer({
+    count: complianceDocs.length,
+    getScrollElement: () => regDocScrollRef.current,
+    estimateSize: () => 56,
+    overscan: 12,
+  });
+
+  const vaultTableScrollRef = useRef<HTMLDivElement>(null);
+  const vaultRowVirtualizer = useVirtualizer({
+    count: vaultFiles.length,
+    getScrollElement: () => vaultTableScrollRef.current,
+    estimateSize: () => 56,
+    overscan: 12,
+  });
 
   const refreshVault = async () => {
     setVaultLoading(true);
@@ -72,6 +86,26 @@ const Compliance: React.FC = () => {
   useEffect(() => {
     if (pageTab !== 'vault') return;
     refreshBoard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageTab]);
+
+  const refreshFilings = async () => {
+    setFilingsLoading(true);
+    try {
+      const res = await apiFetch('/compliance/filings');
+      if (!res.ok) throw new Error('filings');
+      const data = await res.json();
+      setFilings(Array.isArray(data.filings) ? data.filings : []);
+    } catch {
+      setFilings([]);
+    } finally {
+      setFilingsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (pageTab !== 'vault') return;
+    refreshFilings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageTab]);
 
@@ -137,27 +171,19 @@ const Compliance: React.FC = () => {
       });
       if (!putRes.ok) throw new Error('upload failed');
 
-    addComplianceDoc({
-      name: docForm.name || selectedFile.name,
-      type: docForm.type,
-      status: docForm.status,
-      expiry: docForm.expiry,
-    });
-
-      // Persist metadata for unified Inbox/reporting (non-blocking for UX)
-      try {
-        await apiFetch('/compliance/documents', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: docForm.name || selectedFile.name,
-            doc_type: docForm.type,
-            status: docForm.status,
-            expiry_date: docForm.expiry || null,
-            s3_key: presign.key,
-          }),
-        });
-      } catch {}
+      // Persist metadata for unified Inbox/reporting (required so UI isn't fake)
+      const metaRes = await apiFetch('/compliance/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: docForm.name || selectedFile.name,
+          doc_type: docForm.type,
+          status: docForm.status,
+          expiry_date: docForm.expiry || null,
+          s3_key: presign.key,
+        }),
+      });
+      if (!metaRes.ok) throw new Error('metadata failed');
 
       toast.success('Uploaded to Compliance Vault.');
     setDocForm({ name: '', type: 'Tax Exemption', status: 'Valid', expiry: '' });
@@ -197,8 +223,20 @@ const Compliance: React.FC = () => {
     }
   };
 
-  const handleFilingAction = (filing: typeof filings[0]) => {
-    toast(`Preparing data package for "${filing.name}"...`, { icon: '📋' });
+  const handleFilingAction = async (filing: typeof filings[0]) => {
+    try {
+      const res = await apiFetch(`/compliance/filings/${encodeURIComponent(String(filing.id))}/package.pdf`);
+      if (!res.ok) throw new Error('package');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `filing_package_${filing.id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to prepare filing package.');
+    }
   };
 
   const validDocs = complianceDocs.filter(d => d.status === 'Valid').length;
@@ -290,38 +328,103 @@ const Compliance: React.FC = () => {
             </button>
           </div>
         </div>
-        <div className="table-scroll-wrap">
-          <div className="table-scroll">
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: 'var(--color-bg-main)' }}>
-                  {['Document', 'Type', 'Status', 'Expiry', 'Action'].map(h => (
-                    <th key={h} style={{ textAlign: 'left', padding: '0.75rem 1rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-light)' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {complianceDocs.map(doc => (
-                  <tr key={doc.id} style={{ borderBottom: '1px solid var(--color-border-light)' }}>
-                    <td style={{ padding: '1rem', fontWeight: 500 }}>{doc.name}</td>
-                    <td style={{ padding: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>{doc.type}</td>
-                    <td style={{ padding: '1rem' }}>
-                      <span className={`badge ${doc.status === 'Valid' ? 'badge-success' : doc.status === 'Expiring Soon' ? '' : ''}`}
-                        style={doc.status === 'Expiring Soon' ? { background: '#fef3c7', color: '#92400e' } : doc.status === 'Expired' ? { background: '#fee2e2', color: '#991b1b' } : {}}>
-                        {doc.status}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>{doc.expiry}</td>
-                    <td style={{ padding: '1rem' }}>
-                      <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => toast('This table is metadata-only. Download from Cloud Vault below.', { icon: '☁️' })}>
-                        <Download size={14} /> Download
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div
+          ref={regDocScrollRef}
+          className="table-scroll-wrap"
+          style={{
+            maxHeight: 'min(50vh, 480px)',
+            overflow: 'auto',
+            border: '1px solid var(--color-border-light)',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(120px,1.4fr) minmax(88px,1fr) minmax(88px,0.9fr) minmax(72px,0.75fr) minmax(100px,0.9fr)',
+              gap: '0.5rem',
+              padding: '0.6rem 0.75rem',
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+              color: 'var(--color-text-secondary)',
+              borderBottom: '1px solid var(--color-border-light)',
+              position: 'sticky',
+              top: 0,
+              background: 'var(--color-bg-main)',
+              zIndex: 1,
+            }}
+          >
+            <span>Document</span>
+            <span>Type</span>
+            <span>Status</span>
+            <span>Expiry</span>
+            <span>Action</span>
           </div>
+          {complianceDocs.length === 0 ? (
+            <div style={{ padding: '1.25rem', color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>No registration documents.</div>
+          ) : (
+            <div style={{ height: regDocVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+              {regDocVirtualizer.getVirtualItems().map(vr => {
+                const doc = complianceDocs[vr.index];
+                return (
+                  <div
+                    key={doc.id}
+                    data-index={vr.index}
+                    ref={regDocVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${vr.start}px)`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(120px,1.4fr) minmax(88px,1fr) minmax(88px,0.9fr) minmax(72px,0.75fr) minmax(100px,0.9fr)',
+                        gap: '0.5rem',
+                        padding: '0.65rem 0.75rem',
+                        alignItems: 'center',
+                        fontSize: '0.82rem',
+                        borderBottom: '1px solid var(--color-border-light)',
+                      }}
+                    >
+                      <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.name}</span>
+                      <span style={{ color: 'var(--color-text-secondary)' }}>{doc.type}</span>
+                      <span>
+                        <span
+                          className={`badge ${doc.status === 'Valid' ? 'badge-success' : ''}`}
+                          style={
+                            doc.status === 'Expiring Soon'
+                              ? { background: '#fef3c7', color: '#92400e' }
+                              : doc.status === 'Expired'
+                                ? { background: '#fee2e2', color: '#991b1b' }
+                                : {}
+                          }
+                        >
+                          {doc.status}
+                        </span>
+                      </span>
+                      <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>{doc.expiry}</span>
+                      <span>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.72rem' }}
+                          disabled
+                          title="Download from Cloud Vault below"
+                        >
+                          <Download size={14} /> Download
+                        </button>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -333,45 +436,101 @@ const Compliance: React.FC = () => {
             Stored per-NGO in S3 (or mock mode)
           </div>
         </div>
-        <div className="table-scroll-wrap">
-          <div className="table-scroll">
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: 'var(--color-bg-main)' }}>
-                  {['Filename', 'Size', 'Last Modified', 'Actions'].map(h => (
-                    <th key={h} style={{ textAlign: 'left', padding: '0.75rem 1rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-light)' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {vaultLoading ? (
-                  <tr><td colSpan={4} style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>Loading…</td></tr>
-                ) : vaultFiles.length === 0 ? (
-                  <tr><td colSpan={4} style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>No files yet. Upload one above.</td></tr>
-                ) : (
-                  vaultFiles.map(f => (
-                    <tr key={f.key} style={{ borderBottom: '1px solid var(--color-border-light)' }}>
-                      <td style={{ padding: '1rem', fontWeight: 500 }}>{f.filename}</td>
-                      <td style={{ padding: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-                        {(f.size / 1024 / 1024).toFixed(2)} MB
-                      </td>
-                      <td style={{ padding: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>{f.last_modified}</td>
-                      <td style={{ padding: '1rem' }}>
-                        <div className="flex gap-2">
-                          <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => handleDownload(f)}>
-                            <Download size={14} /> Download
-                          </button>
-                          <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }} onClick={() => handleDelete(f.key)}>
-                            <Trash2 size={14} /> Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+        <div
+          ref={vaultTableScrollRef}
+          className="table-scroll-wrap"
+          style={{
+            maxHeight: 'min(50vh, 480px)',
+            overflow: 'auto',
+            border: '1px solid var(--color-border-light)',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(140px,1.5fr) minmax(72px,0.6fr) minmax(100px,1fr) minmax(160px,1.1fr)',
+              gap: '0.5rem',
+              padding: '0.6rem 0.75rem',
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+              color: 'var(--color-text-secondary)',
+              borderBottom: '1px solid var(--color-border-light)',
+              position: 'sticky',
+              top: 0,
+              background: 'var(--color-bg-main)',
+              zIndex: 1,
+            }}
+          >
+            <span>Filename</span>
+            <span>Size</span>
+            <span>Modified</span>
+            <span>Actions</span>
           </div>
+          {vaultLoading ? (
+            <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>Loading…</div>
+          ) : vaultFiles.length === 0 ? (
+            <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>No files yet. Upload one above.</div>
+          ) : (
+            <div style={{ height: vaultRowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+              {vaultRowVirtualizer.getVirtualItems().map(vr => {
+                const f = vaultFiles[vr.index];
+                return (
+                  <div
+                    key={f.key}
+                    data-index={vr.index}
+                    ref={vaultRowVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${vr.start}px)`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(140px,1.5fr) minmax(72px,0.6fr) minmax(100px,1fr) minmax(160px,1.1fr)',
+                        gap: '0.5rem',
+                        padding: '0.65rem 0.75rem',
+                        alignItems: 'center',
+                        fontSize: '0.82rem',
+                        borderBottom: '1px solid var(--color-border-light)',
+                      }}
+                    >
+                      <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.filename}</span>
+                      <span style={{ color: 'var(--color-text-secondary)' }}>{(f.size / 1024 / 1024).toFixed(2)} MB</span>
+                      <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>{f.last_modified}</span>
+                      <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.72rem' }}
+                          onClick={() => handleDownload(f)}
+                        >
+                          <Download size={14} /> Download
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.72rem',
+                            color: 'var(--color-danger)',
+                            borderColor: 'var(--color-danger)',
+                          }}
+                          onClick={() => handleDelete(f.key)}
+                        >
+                          <Trash2 size={14} /> Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 

@@ -35,7 +35,7 @@ export interface Transaction {
 }
 
 export interface CSRCard {
-  id: number;
+  id: number | string;
   company: string;
   amount: number;
   project: string;
@@ -43,6 +43,12 @@ export interface CSRCard {
   agent: string;
   col: string;
   date: string;
+  /** Deal health heuristic (0–100). */
+  win_probability?: number;
+  /** ISO timestamp — last pipeline activity (aligned with backend updated_at in DB mode). */
+  last_activity_at?: string;
+  updated_at?: string;
+  created_at?: string;
 }
 
 export interface Beneficiary {
@@ -98,7 +104,7 @@ interface AppState {
   addDonorWithId: (donor: Donor) => void;
   addTransaction: (transaction: Omit<Transaction, 'id' | 'timestamp'>) => void;
   addTransactionWithId: (transaction: Transaction) => void;
-  moveCSRCard: (cardId: number, newCol: string) => void;
+  moveCSRCard: (cardId: number | string, newCol: string) => void;
   addCSRCard: (card: Omit<CSRCard, 'id'>) => void;
   addCSRCardWithId: (card: CSRCard) => void;
   addBeneficiary: (b: Omit<Beneficiary, 'id'>) => void;
@@ -158,13 +164,14 @@ const initialComplianceDocs: ComplianceDocument[] = [
 ];
 
 export const useStore = create<AppState>((set) => ({
-  donors: initialDonors,
-  campaigns: initialCampaigns,
-  transactions: initialTransactions,
-  csrCards: initialCSRCards,
-  beneficiaries: initialBeneficiaries,
-  volunteers: initialVolunteers,
-  complianceDocs: initialComplianceDocs,
+  // Start empty; hydrate from backend on app load.
+  donors: [],
+  campaigns: [],
+  transactions: [],
+  csrCards: [],
+  beneficiaries: [],
+  volunteers: [],
+  complianceDocs: [],
 
   setDonors: (donors) => set(() => ({ donors })),
   setTransactions: (transactions) => set(() => ({ transactions })),
@@ -223,7 +230,7 @@ export const useStore = create<AppState>((set) => ({
   }),
 
   moveCSRCard: (cardId, newCol) => set((state) => ({
-    csrCards: state.csrCards.map(c => c.id === cardId ? { ...c, col: newCol } : c)
+    csrCards: state.csrCards.map(c => (String(c.id) === String(cardId) ? { ...c, col: newCol } : c)),
   })),
 
   addCSRCard: (card) => set((state) => ({

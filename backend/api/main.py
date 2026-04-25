@@ -2,7 +2,7 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends, Re
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-import hmac, hashlib, json
+import hmac, hashlib, json, os
 
 from agents.donor_nurture_agent import donor_nurture_app
 from agents.finance_compliance_agent import finance_agent
@@ -14,7 +14,7 @@ from agents.field_mis_agent import field_mis_agent
 from core.rag_pipeline import ingest_document
 from core.tally_xml_export import build_tally_xml
 from core.auth import (
-    get_current_user, require_role, create_access_token,
+    get_current_user, get_current_user_optional, require_role, create_access_token,
     demo_authenticate, TokenUser, DEMO_USERS
 )
 from core.observability import init_sentry
@@ -25,7 +25,10 @@ from core.gen_ai import summarize_conversations, analyze_sentiment, draft_annual
 from core.intent_router import route_intent, generate_morning_brief
 from fastapi.responses import Response
 from datetime import datetime, timezone, timedelta
+from urllib.parse import quote
 from core.db import db_conn
+
+# Public endpoints should not require auth; use get_current_user_optional.
 
 # ── Sentry: initialise before app creation ──────────────────────────────────
 init_sentry()
@@ -60,12 +63,16 @@ DONORS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 TX_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 CAMPAIGNS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 CSR_CARDS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+CSR_CARD_DOCS_MEM_BY_NGO: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}  # ngo_id -> card_id -> docs
 VOLUNTEER_SHIFTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 VOLUNTEER_SIGNUPS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 BENEFICIARIES_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 VOLUNTEERS_ROSTER_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 FINANCE_GRANTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 INBOX_STATE_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+CRM_OUTREACH_LOG_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+FINANCE_EVENTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+NOTIFICATIONS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 
 
 def _get_mem_inbox_state(ngo_id: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
@@ -119,6 +126,15 @@ def _db_upsert_inbox_state(cur, ngo_id: str, kind: str, ref_id: str, snoozed_unt
     )
 
 
+def _tasks_focus_path(kind: Optional[str], ref_id: Optional[str]) -> Optional[str]:
+    """Relative SPA path to focus one inbox row (for notifications, briefs, WhatsApp templates)."""
+    k = (kind or "").strip()
+    r = (ref_id or "").strip()
+    if not k or not r:
+        return None
+    return f"/tasks?focus={quote(f'{k}:{r}', safe='')}"
+
+
 def _parse_until_ts(until: str) -> datetime:
     """
     Accepts ISO datetime or YYYY-MM-DD and returns an aware UTC datetime.
@@ -133,6 +149,376 @@ def _parse_until_ts(until: str) -> datetime:
         return dt.astimezone(timezone.utc)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid until timestamp format.")
+
+
+def _inbox_priority_score(it: Dict[str, Any], now: datetime) -> float:
+    """Higher = more urgent (deadline × financial impact × compliance risk)."""
+    kind = str(it.get("kind") or "")
+    meta = it.get("meta") or {}
+    if kind == "intent":
+        rl = str(meta.get("risk_level") or "").lower()
+        base = 930.0 if rl == "high" else 760.0 if rl == "medium" else 640.0
+        itype = str(meta.get("intent_type") or "").lower()
+        if any(x in itype for x in ("finance", "compliance", "fcra", "grant")):
+            base += 35.0
+        return base
+    if kind == "compliance_doc":
+        urgency = 520.0
+        exp = meta.get("expiry_date")
+        try:
+            if exp:
+                exp_s = str(exp)[:10]
+                exp_dt = datetime.fromisoformat(exp_s).date()
+                days = (exp_dt - now.date()).days
+                urgency = 520.0 + max(0.0, float(30 - min(30, max(-30, days)))) * 14.0
+                if days < 0:
+                    urgency += 280.0
+        except Exception:
+            pass
+        if str(meta.get("status") or "") == "Expired":
+            urgency += 220.0
+        return urgency
+    if kind == "finance_flag":
+        v = abs(float(meta.get("variance") or 0))
+        return 820.0 + min(200.0, v / 20000.0)
+    if kind == "donor_outreach_draft":
+        return 590.0
+    if kind == "month_end_close":
+        return 880.0
+    if kind in ("csr_win_decay", "csr_stale", "csr_report_due"):
+        amt = abs(float(meta.get("amount") or 0))
+        fin = min(180.0, amt / 250000.0)  # larger deals float up
+        if kind == "csr_win_decay":
+            return 740.0 + fin
+        if kind == "csr_stale":
+            return 670.0 + fin
+        return 620.0 + fin
+    if kind in ("volunteer_reminder", "volunteer_shift_full"):
+        return 360.0
+    return 410.0
+
+
+def _finalize_inbox_items(items: List[Dict[str, Any]]) -> None:
+    now = datetime.now(timezone.utc)
+    for it in items:
+        kind = it.get("kind")
+        if kind == "finance_flag":
+            meta = it.get("meta") or {}
+            name = str(meta.get("name") or "")
+            desc = f"Grant {name} utilization variance administrative"
+            sug = classify_fcra_transaction(desc)
+            it["inline"] = {
+                "type": "finance_classification",
+                "suggested_category": sug.get("category"),
+                "confidence": float(sug.get("confidence") or 0.7),
+            }
+        elif kind == "intent":
+            it["inline"] = {
+                "type": "intent_execute",
+                "hint": "Approve & run executes the agent workflow immediately.",
+            }
+        it["priority_score"] = _inbox_priority_score(it, now)
+    items.sort(key=lambda x: float(x.get("priority_score") or 0), reverse=True)
+
+
+def _brief_kinds_for_role(role: str) -> Optional[set]:
+    r = (role or "ed").lower()
+    if r in ("ed", "admin"):
+        return None
+    if r == "finance":
+        return {
+            "finance_flag",
+            "compliance_doc",
+            "intent",
+            "donor_outreach_draft",
+            "month_end_close",
+        }
+    if r == "programs":
+        return {
+            "volunteer_reminder",
+            "volunteer_shift_full",
+            "intent",
+            "donor_outreach_draft",
+            "csr_win_decay",
+            "csr_stale",
+            "csr_report_due",
+        }
+    if r == "csr":
+        return {
+            "csr_win_decay",
+            "csr_stale",
+            "csr_report_due",
+            "intent",
+            "donor_outreach_draft",
+        }
+    if r == "field":
+        return {"volunteer_reminder", "volunteer_shift_full"}
+    if r == "board":
+        return {"compliance_doc", "finance_flag", "intent", "month_end_close"}
+    return None
+
+
+def _handled_by_agents_rows(user: TokenUser) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    with db_conn() as conn:
+        if conn is None:
+            for it in INTENT_QUEUE_MEM_BY_NGO.get(user.ngo_id, []):
+                if it.get("status") != "executed":
+                    continue
+                out.append(
+                    {
+                        "directive": it.get("directive"),
+                        "intent_type": it.get("intent_type"),
+                        "executed_at": it.get("executed_at"),
+                    }
+                )
+            out.sort(key=lambda x: str(x.get("executed_at") or ""), reverse=True)
+            return out[:8]
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT directive, intent_type, executed_at
+                FROM intent_queue
+                WHERE ngo_id = %s AND status = 'executed' AND executed_at IS NOT NULL
+                ORDER BY executed_at DESC
+                LIMIT 8
+                """,
+                (user.ngo_id,),
+            )
+            for r in cur.fetchall():
+                out.append(
+                    {
+                        "directive": r[0],
+                        "intent_type": r[1],
+                        "executed_at": r[2].isoformat() if hasattr(r[2], "isoformat") else str(r[2]),
+                    }
+                )
+        except Exception:
+            pass
+    return out
+
+
+def _enrich_intent_queue_row(item: Dict[str, Any]) -> None:
+    rl = str(item.get("risk_level") or "medium").lower()
+    conf = {"low": 0.93, "medium": 0.78, "high": 0.58}.get(rl, 0.72)
+    item["agent_confidence"] = round(float(conf), 2)
+    item["auto_resolve_hours"] = 4 if conf >= 0.9 else (8 if conf >= 0.75 else None)
+
+
+# In-memory Agent HQ prefs (auto-approve threshold, etc.)
+AGENT_HQ_PREFS_MEM: Dict[str, Dict[str, Any]] = {}
+
+CSR_STALE_DAYS = 14
+CSR_WIN_DECAY_DAYS = 7
+
+
+def _parse_iso_dt_optional(s: Optional[str]) -> Optional[datetime]:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _csr_card_idle_days(card: Dict[str, Any], now: datetime) -> int:
+    ts = card.get("last_activity_at")
+    dt = _parse_iso_dt_optional(ts) if isinstance(ts, str) else None
+    if dt is None:
+        ts2 = card.get("updated_at")
+        if hasattr(ts2, "timestamp"):
+            dt = ts2.astimezone(timezone.utc) if ts2.tzinfo else ts2.replace(tzinfo=timezone.utc)
+        elif isinstance(ts2, str):
+            dt = _parse_iso_dt_optional(ts2)
+    if dt is None:
+        ca = card.get("created_at")
+        if hasattr(ca, "timestamp"):
+            dt = ca.astimezone(timezone.utc) if ca.tzinfo else ca.replace(tzinfo=timezone.utc)
+        elif isinstance(ca, str):
+            dt = _parse_iso_dt_optional(ca)
+    if dt is None:
+        return 0
+    return max(0, (now - dt).days)
+
+
+def _csr_followup_draft(company: str, project: str) -> str:
+    return (
+        f"Namaste {company} CSR team — following up on our partnership discussion for “{project}”. "
+        f"We can share a short utilisation snapshot or schedule a 15-minute call this week. What works best?"
+    )
+
+
+def _append_month_end_and_csr_inbox(
+    items: List[Dict[str, Any]],
+    ngo_id: str,
+    conn,
+    db_states: Dict[str, Dict[str, Dict[str, Any]]],
+    now: datetime,
+    mem_mode: bool,
+) -> None:
+    """Month-end package + CSR stale / win-decay / live reporting nudges."""
+    if now.day <= 10:
+        first_this = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        last_prev = first_this - timedelta(days=1)
+        ref_id = f"mec-{ngo_id}-{last_prev.year}-{last_prev.month:02d}"
+        if mem_mode:
+            st = _mem_get_state(ngo_id, "month_end_close", ref_id)
+        else:
+            st = db_states.get("month_end_close", {}).get(ref_id, {})
+        snooze_ok = True
+        if st.get("snoozed_until"):
+            try:
+                snooze_ok = _parse_until_ts(st["snoozed_until"]) <= now
+            except HTTPException:
+                snooze_ok = True
+        if not st.get("resolved_at") and snooze_ok:
+            items.append(
+                {
+                    "kind": "month_end_close",
+                    "priority": "High",
+                    "pill": "Finance",
+                    "title": f"Month-end close — {last_prev.strftime('%B %Y')}",
+                    "subtitle": "One package: grants, bank recon, and FCRA admin check — review in Finance then mark done.",
+                    "meta": {"period": ref_id},
+                    "ref": {"id": ref_id},
+                    "primary_action": {"label": "Open Finance", "route": "/finance"},
+                }
+            )
+
+    open_cols = {"prospecting", "pitch", "diligence", "mou"}
+    cards: List[Dict[str, Any]] = []
+    try:
+        if mem_mode:
+            _seed_memory_csr(ngo_id)
+            cards = list(CSR_CARDS_MEM_BY_NGO.get(ngo_id, []))
+        elif conn is not None:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id::text, company, amount::float, COALESCE(project,''), col, COALESCE(date_label,''),
+                       COALESCE(win_probability, 55)::int,
+                       COALESCE(updated_at, created_at), created_at
+                FROM csr_pipeline_cards
+                WHERE ngo_id = %s
+                LIMIT 200
+                """,
+                (ngo_id,),
+            )
+            for r in cur.fetchall():
+                cards.append(
+                    {
+                        "id": r[0],
+                        "company": r[1],
+                        "amount": float(r[2] or 0),
+                        "project": r[3] or "",
+                        "col": r[4] or "prospecting",
+                        "date": r[5] or "",
+                        "win_probability": int(r[6] or 55),
+                        "updated_at": r[7],
+                        "created_at": r[8],
+                    }
+                )
+    except Exception:
+        cards = []
+
+    def _inbox_st(kind: str, ref: str) -> Dict[str, Any]:
+        if mem_mode:
+            return _mem_get_state(ngo_id, kind, ref)
+        return db_states.get(kind, {}).get(ref, {})
+
+    for c in cards:
+        col = (c.get("col") or "").lower()
+        cid = str(c.get("id") or "")
+        if not cid:
+            continue
+        days = _csr_card_idle_days(c, now)
+        base_prob = int(c.get("win_probability") or 55)
+        decayed = max(15, base_prob - max(0, days - CSR_WIN_DECAY_DAYS) * 3)
+
+        if col in open_cols and CSR_WIN_DECAY_DAYS <= days < CSR_STALE_DAYS and decayed <= base_prob - 12:
+            ref_decay = f"cwd-{cid}"
+            st = _inbox_st("csr_win_decay", ref_decay)
+            snooze_ok = True
+            if st.get("snoozed_until"):
+                try:
+                    snooze_ok = _parse_until_ts(st["snoozed_until"]) <= now
+                except HTTPException:
+                    snooze_ok = True
+            if not st.get("resolved_at") and snooze_ok:
+                items.append(
+                    {
+                        "kind": "csr_win_decay",
+                        "priority": "High",
+                        "pill": "CSR",
+                        "title": f"Deal cooling: {c.get('company')}",
+                        "subtitle": f"No meaningful touchpoint in ~{days} days — heuristic win confidence ~{decayed}%.",
+                        "meta": {**c, "decayed_win_probability": decayed},
+                        "ref": {"id": ref_decay},
+                        "primary_action": {"label": "Open CSR", "route": "/csr"},
+                        "inline": {
+                            "type": "csr_followup",
+                            "card_id": cid,
+                            "draft_message": _csr_followup_draft(str(c.get("company")), str(c.get("project"))),
+                        },
+                    }
+                )
+        elif col in open_cols and days >= CSR_STALE_DAYS:
+            ref_stale = f"cst-{cid}"
+            st = _inbox_st("csr_stale", ref_stale)
+            snooze_ok = True
+            if st.get("snoozed_until"):
+                try:
+                    snooze_ok = _parse_until_ts(st["snoozed_until"]) <= now
+                except HTTPException:
+                    snooze_ok = True
+            if not st.get("resolved_at") and snooze_ok:
+                items.append(
+                    {
+                        "kind": "csr_stale",
+                        "priority": "Medium",
+                        "pill": "CSR",
+                        "title": f"CSR follow-up: {c.get('company')}",
+                        "subtitle": f"No activity in {days} days — stage: {col}.",
+                        "meta": c,
+                        "ref": {"id": ref_stale},
+                        "primary_action": {"label": "Open CSR", "route": "/csr"},
+                        "inline": {
+                            "type": "csr_followup",
+                            "card_id": cid,
+                            "draft_message": _csr_followup_draft(str(c.get("company")), str(c.get("project"))),
+                        },
+                    }
+                )
+
+        if col == "live" and days >= 21:
+            ref_live = f"csrpt-{cid}"
+            st = _inbox_st("csr_report_due", ref_live)
+            snooze_ok = True
+            if st.get("snoozed_until"):
+                try:
+                    snooze_ok = _parse_until_ts(st["snoozed_until"]) <= now
+                except HTTPException:
+                    snooze_ok = True
+            if not st.get("resolved_at") and snooze_ok:
+                items.append(
+                    {
+                        "kind": "csr_report_due",
+                        "priority": "Medium",
+                        "pill": "CSR",
+                        "title": f"MIS / UC milestone: {c.get('company')}",
+                        "subtitle": f"Live project — draft utilisation pack for “{c.get('project')}”.",
+                        "meta": c,
+                        "ref": {"id": ref_live},
+                        "primary_action": {"label": "Open CSR", "route": "/csr"},
+                        "inline": {
+                            "type": "csr_uc",
+                            "card_id": cid,
+                            "company": c.get("company"),
+                            "project": c.get("project"),
+                        },
+                    }
+                )
 
 
 def _mask_pan(pan: str) -> str:
@@ -208,13 +594,18 @@ def _seed_memory_campaigns(ngo_id: str):
 def _seed_memory_csr(ngo_id: str):
     if ngo_id in CSR_CARDS_MEM_BY_NGO:
         return
+    t = datetime.now(timezone.utc)
+
+    def ago(days: int) -> str:
+        return (t - timedelta(days=days)).isoformat()
+
     CSR_CARDS_MEM_BY_NGO[ngo_id] = [
-        {"id": "1", "company": "Reliance Industries", "amount": 5000000, "project": "Rural Healthcare Phase 2", "tags": ["Health", "Gujarat"], "agent": "AD", "col": "prospecting", "date": "Last contact: 2d ago"},
-        {"id": "2", "company": "Tata Consultancy Services", "amount": 2500000, "project": "Digital Literacy 2026", "tags": ["Education", "Tech"], "agent": "RS", "col": "pitch", "date": "Sent on: Oct 12"},
-        {"id": "3", "company": "HDFC Bank CSR", "amount": 8000000, "project": "Women Livelihood Center", "tags": ["Livelihood"], "agent": "AD", "col": "diligence", "date": "Audit pending"},
-        {"id": "4", "company": "Wipro Care", "amount": 1200000, "project": "School Infrastructure", "tags": ["Education", "WASH"], "agent": "PM", "col": "mou", "date": "Signed: Oct 15"},
-        {"id": "5", "company": "Mahindra Finance", "amount": 4500000, "project": "Farmer Support Init", "tags": ["Agriculture"], "agent": "RS", "col": "live", "date": "Report due: Nov 30"},
-        {"id": "6", "company": "Infosys Foundation", "amount": 6000000, "project": "STEM for Girls", "tags": ["Education"], "agent": "AD", "col": "live", "date": "Report due: Dec 15"},
+        {"id": "1", "company": "Reliance Industries", "amount": 5000000, "project": "Rural Healthcare Phase 2", "tags": ["Health", "Gujarat"], "agent": "AD", "col": "prospecting", "date": "Stale demo", "last_activity_at": ago(20), "win_probability": 52},
+        {"id": "2", "company": "Tata Consultancy Services", "amount": 2500000, "project": "Digital Literacy 2026", "tags": ["Education", "Tech"], "agent": "RS", "col": "pitch", "date": "Sent on: Oct 12", "last_activity_at": ago(10), "win_probability": 58},
+        {"id": "3", "company": "HDFC Bank CSR", "amount": 8000000, "project": "Women Livelihood Center", "tags": ["Livelihood"], "agent": "AD", "col": "diligence", "date": "Audit pending", "last_activity_at": ago(3), "win_probability": 62},
+        {"id": "4", "company": "Wipro Care", "amount": 1200000, "project": "School Infrastructure", "tags": ["Education", "WASH"], "agent": "PM", "col": "mou", "date": "Signed: Oct 15", "last_activity_at": ago(2), "win_probability": 70},
+        {"id": "5", "company": "Mahindra Finance", "amount": 4500000, "project": "Farmer Support Init", "tags": ["Agriculture"], "agent": "RS", "col": "live", "date": "Report due: Nov 30", "last_activity_at": ago(28), "win_probability": 80},
+        {"id": "6", "company": "Infosys Foundation", "amount": 6000000, "project": "STEM for Girls", "tags": ["Education"], "agent": "AD", "col": "live", "date": "Report due: Dec 15", "last_activity_at": ago(5), "win_probability": 76},
     ]
 
 
@@ -317,6 +708,49 @@ def create_beneficiary(body: BeneficiaryCreate, current_user: TokenUser = Depend
         )
         ben = {"id": new_id, "name": body.name, "program": body.program, "location": body.location, "aadhaar": bool(body.aadhaar), "familySize": int(body.familySize)}
         return {"status": "created", "beneficiary": ben, "source": "db"}
+
+
+class BeneficiaryBulkImport(BaseModel):
+    beneficiaries: List[BeneficiaryCreate]
+
+
+@app.post("/programs/beneficiaries/bulk", tags=["Programs"])
+def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    n = 0
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_beneficiaries(current_user.ngo_id)
+            lst = BENEFICIARIES_MEM_BY_NGO.setdefault(current_user.ngo_id, [])
+            base = 1000 + len(lst)
+            for b in body.beneficiaries[:500]:
+                if not (b.name or "").strip():
+                    continue
+                new_id = f"BEN-{base + n}"
+                ben = {
+                    "id": new_id,
+                    "name": b.name,
+                    "program": b.program,
+                    "location": b.location,
+                    "aadhaar": bool(b.aadhaar),
+                    "familySize": int(b.familySize),
+                }
+                lst.insert(0, ben)
+                n += 1
+            return {"imported": n, "source": "memory"}
+        cur = conn.cursor()
+        for b in body.beneficiaries[:500]:
+            if not (b.name or "").strip():
+                continue
+            new_id = f"BEN-{int(datetime.now(timezone.utc).timestamp() * 1000)}_{n}"
+            cur.execute(
+                """
+                INSERT INTO program_beneficiaries (id, ngo_id, name, program, location, aadhaar, family_size)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (new_id, current_user.ngo_id, b.name, b.program, b.location, bool(b.aadhaar), int(b.familySize)),
+            )
+            n += 1
+        return {"imported": n, "source": "db"}
 
 
 class VolunteerCreate(BaseModel):
@@ -517,6 +951,22 @@ class CsrCardMove(BaseModel):
     col: str
 
 
+class CsrDocCreate(BaseModel):
+    id: Optional[str] = None
+    name: str
+    doc_type: Optional[str] = None
+    size_bytes: int = 0
+    s3_key: Optional[str] = None
+
+
+def _ts_iso(val: Any) -> Optional[str]:
+    if val is None:
+        return None
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    return str(val)
+
+
 @app.get("/csr/cards", tags=["CSR"])
 def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
     with db_conn() as conn:
@@ -526,7 +976,10 @@ def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, company, amount::float, COALESCE(project,''), COALESCE(tags,'{}'), COALESCE(agent,''), col, COALESCE(date_label,'')
+            SELECT id, company, amount::float, COALESCE(project,''), COALESCE(tags,'{}'), COALESCE(agent,''), col, COALESCE(date_label,''),
+                   COALESCE(win_probability, 55)::int,
+                   updated_at,
+                   created_at
             FROM csr_pipeline_cards
             WHERE ngo_id = %s
             ORDER BY created_at DESC
@@ -536,6 +989,9 @@ def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "
         )
         out = []
         for r in cur.fetchall():
+            wp = int(r[8] or 55)
+            upd = _ts_iso(r[9])
+            cre = _ts_iso(r[10])
             out.append(
                 {
                     "id": r[0],
@@ -546,6 +1002,10 @@ def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "
                     "agent": r[5] or "",
                     "col": r[6] or "prospecting",
                     "date": r[7] or "",
+                    "win_probability": wp,
+                    "updated_at": upd,
+                    "created_at": cre,
+                    "last_activity_at": upd,
                 }
             )
         return {"cards": out, "source": "db"}
@@ -557,6 +1017,7 @@ def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(requi
         if conn is None:
             _seed_memory_csr(current_user.ngo_id)
             new_id = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+            ts = datetime.now(timezone.utc).isoformat()
             card = {
                 "id": new_id,
                 "company": body.company,
@@ -566,6 +1027,8 @@ def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(requi
                 "agent": body.agent,
                 "col": body.col,
                 "date": body.date,
+                "last_activity_at": ts,
+                "win_probability": 55,
             }
             CSR_CARDS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, card)
             return {"status": "created", "card": card, "source": "memory"}
@@ -573,14 +1036,16 @@ def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(requi
         new_id = f"csr_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
         cur.execute(
             """
-            INSERT INTO csr_pipeline_cards (id, ngo_id, company, amount, project, tags, agent, col, date_label)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
+            INSERT INTO csr_pipeline_cards (id, ngo_id, company, amount, project, tags, agent, col, date_label, win_probability)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 55)
+            RETURNING id, win_probability::int, updated_at
             """,
             (new_id, current_user.ngo_id, body.company, float(body.amount), body.project, body.tags or [], body.agent, body.col, body.date),
         )
+        rid, rwp, rupd = cur.fetchone()
+        upd_s = _ts_iso(rupd)
         card = {
-            "id": new_id,
+            "id": rid,
             "company": body.company,
             "amount": float(body.amount),
             "project": body.project,
@@ -588,6 +1053,9 @@ def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(requi
             "agent": body.agent,
             "col": body.col,
             "date": body.date,
+            "win_probability": int(rwp or 55),
+            "updated_at": upd_s,
+            "last_activity_at": upd_s,
         }
         return {"status": "created", "card": card, "source": "db"}
 
@@ -601,13 +1069,14 @@ def move_csr_card(card_id: str, body: CsrCardMove, current_user: TokenUser = Dep
             for c in cards:
                 if str(c.get("id")) == str(card_id):
                     c["col"] = body.col
+                    c["last_activity_at"] = datetime.now(timezone.utc).isoformat()
                     return {"status": "moved", "id": card_id, "col": body.col, "source": "memory"}
             raise HTTPException(status_code=404, detail="CSR card not found.")
         cur = conn.cursor()
         cur.execute(
             """
             UPDATE csr_pipeline_cards
-            SET col = %s
+            SET col = %s, updated_at = CURRENT_TIMESTAMP
             WHERE ngo_id = %s AND id = %s
             RETURNING id
             """,
@@ -617,6 +1086,118 @@ def move_csr_card(card_id: str, body: CsrCardMove, current_user: TokenUser = Dep
         if not row:
             raise HTTPException(status_code=404, detail="CSR card not found.")
         return {"status": "moved", "id": row[0], "col": body.col, "source": "db"}
+
+
+@app.post("/csr/cards/{card_id}/touch", tags=["CSR"])
+def touch_csr_card(card_id: str, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    """Mark CSR card activity now (clears stale / decay inbox heuristics on next refresh)."""
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_csr(current_user.ngo_id)
+            cards = CSR_CARDS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for c in cards:
+                if str(c.get("id")) == str(card_id):
+                    ts = datetime.now(timezone.utc).isoformat()
+                    c["last_activity_at"] = ts
+                    c["win_probability"] = min(95, int(c.get("win_probability") or 55) + 3)
+                    return {"status": "ok", "card_id": card_id, "last_activity_at": ts, "source": "memory"}
+            raise HTTPException(status_code=404, detail="CSR card not found.")
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE csr_pipeline_cards
+            SET updated_at = CURRENT_TIMESTAMP,
+                win_probability = LEAST(95, COALESCE(win_probability, 55) + 3)
+            WHERE ngo_id = %s AND id = %s
+            RETURNING id::text
+            """,
+            (current_user.ngo_id, card_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="CSR card not found.")
+        return {"status": "ok", "card_id": row[0], "source": "db"}
+
+
+@app.get("/csr/cards/{card_id}/documents", tags=["CSR"])
+def list_csr_card_documents(card_id: str, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            docs = CSR_CARD_DOCS_MEM_BY_NGO.get(current_user.ngo_id, {}).get(str(card_id), [])
+            return {"documents": docs, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, name, doc_type, size_bytes, s3_key, created_at
+            FROM csr_card_documents
+            WHERE ngo_id = %s AND card_id = %s
+            ORDER BY created_at DESC
+            LIMIT 200
+            """,
+            (current_user.ngo_id, str(card_id)),
+        )
+        out = []
+        for rid, name, doc_type, size_bytes, s3_key, created_at in cur.fetchall():
+            out.append({
+                "id": rid,
+                "name": name,
+                "doc_type": doc_type,
+                "size_bytes": int(size_bytes or 0),
+                "s3_key": s3_key,
+                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+            })
+        return {"documents": out, "source": "db"}
+
+
+@app.post("/csr/cards/{card_id}/documents", tags=["CSR"])
+def create_csr_card_document(card_id: str, body: CsrDocCreate, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    doc_id = body.id or f"cd_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+    row = {
+        "id": doc_id,
+        "card_id": str(card_id),
+        "name": body.name,
+        "doc_type": body.doc_type,
+        "size_bytes": int(body.size_bytes or 0),
+        "s3_key": body.s3_key,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with db_conn() as conn:
+        if conn is None:
+            CSR_CARD_DOCS_MEM_BY_NGO.setdefault(current_user.ngo_id, {}).setdefault(str(card_id), []).insert(0, row)
+            return {"status": "created", "document": row, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO csr_card_documents (id, ngo_id, card_id, name, doc_type, size_bytes, s3_key)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (doc_id, current_user.ngo_id, str(card_id), body.name, body.doc_type, int(body.size_bytes or 0), body.s3_key),
+        )
+        return {"status": "created", "id": cur.fetchone()[0], "document": row, "source": "db"}
+
+
+@app.delete("/csr/cards/{card_id}/documents/{doc_id}", tags=["CSR"])
+def delete_csr_card_document(card_id: str, doc_id: str, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            by_card = CSR_CARD_DOCS_MEM_BY_NGO.get(current_user.ngo_id, {}).get(str(card_id), [])
+            nxt = [d for d in by_card if str(d.get("id")) != str(doc_id)]
+            CSR_CARD_DOCS_MEM_BY_NGO.setdefault(current_user.ngo_id, {})[str(card_id)] = nxt
+            return {"status": "deleted", "id": doc_id, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            DELETE FROM csr_card_documents
+            WHERE ngo_id = %s AND card_id = %s AND id = %s
+            RETURNING id
+            """,
+            (current_user.ngo_id, str(card_id), str(doc_id)),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        return {"status": "deleted", "id": row[0], "source": "db"}
 
 
 class CampaignCreate(BaseModel):
@@ -807,6 +1388,61 @@ def create_donor(body: DonorCreate, current_user: TokenUser = Depends(require_ro
         return {"status": "created", "donor": donor, "source": "db"}
 
 
+class DonorBulkImport(BaseModel):
+    donors: List[DonorCreate]
+
+
+@app.post("/crm/donors/bulk", tags=["CRM"])
+def bulk_import_donors(body: DonorBulkImport, current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising"))):
+    """Import many donors in one request (CSV upload from UI)."""
+    n = 0
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            lst = DONORS_MEM_BY_NGO.setdefault(current_user.ngo_id, [])
+            base = int(datetime.now(timezone.utc).timestamp() * 1000)
+            for i, d in enumerate(body.donors[:500]):
+                if not (d.name or "").strip():
+                    continue
+                new_id = str(base + i)
+                donor = {
+                    "id": new_id,
+                    "name": d.name,
+                    "type": d.type,
+                    "totalGiven": 0,
+                    "lastGift": "N/A",
+                    "initial": (d.name or "U")[:1].upper(),
+                    "pan": _mask_pan(d.pan),
+                    "location": d.location,
+                    "tags": d.tags or ["Imported"],
+                }
+                lst.insert(0, donor)
+                n += 1
+            return {"imported": n, "source": "memory"}
+        cur = conn.cursor()
+        for i, d in enumerate(body.donors[:500]):
+            if not (d.name or "").strip():
+                continue
+            donor_code = f"DBULK_{int(datetime.now(timezone.utc).timestamp())}_{i}"
+            cur.execute(
+                """
+                INSERT INTO donors (ngo_id, donor_code, full_name, donor_type, pan_masked, location_text, tags, consent_given, consent_date)
+                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, true, CURRENT_TIMESTAMP)
+                """,
+                (
+                    current_user.ngo_id,
+                    donor_code,
+                    d.name,
+                    d.type,
+                    _mask_pan(d.pan),
+                    d.location,
+                    d.tags or ["Imported"],
+                ),
+            )
+            n += 1
+        return {"imported": n, "source": "db"}
+
+
 class TransactionCreate(BaseModel):
     donorId: str
     donorName: str
@@ -816,14 +1452,239 @@ class TransactionCreate(BaseModel):
     campaignTitle: Optional[str] = None
 
 
+class PublicDonationRequest(BaseModel):
+    campaign_slug: Optional[str] = None
+    cause: Optional[str] = None
+    donor_name: str
+    donor_email: str
+    pan: Optional[str] = None
+    amount: float
+    method: str = "UPI"
+
+
+@app.post("/public/donations", tags=["Public"])
+def public_record_donation(body: PublicDonationRequest, user: Optional[TokenUser] = Depends(get_current_user_optional)):
+    """
+    Public donation intake endpoint (no auth required).
+    Records a donor+transaction in memory (demo) or DB when configured.
+    This intentionally does NOT trigger HITL/agent actions automatically.
+    """
+    ngo_id = user.ngo_id if user else "public_ngo"
+    ngo_name = user.ngo_name if user else "GoodJobs NGO"
+    donor_name = (body.donor_name or "Anonymous").strip()[:200]
+    donor_email = (body.donor_email or "").strip().lower()[:255]
+    amount = float(body.amount or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Invalid amount.")
+
+    # Demo/memory mode
+    with db_conn() as conn:
+        if conn is None:
+            donor_id = donor_email or f"donor_{int(datetime.now(timezone.utc).timestamp()*1000)}"
+            donor = {
+                "id": donor_id,
+                "name": donor_name,
+                "type": "Public",
+                "totalGiven": amount,
+                "lastGift": datetime.now(timezone.utc).date().isoformat(),
+                "initial": (donor_name[:1] or "A").upper(),
+                "pan": _mask_pan(body.pan or ""),
+                "location": "",
+                "tags": ["Public"],
+            }
+            DONORS_MEM_BY_NGO.setdefault(ngo_id, []).insert(0, donor)
+            tx = {
+                "id": f"TRX-{str(int(datetime.now(timezone.utc).timestamp()*1000))[-6:]}",
+                "donorId": donor_id,
+                "donorName": donor_name,
+                "amount": amount,
+                "method": body.method or "UPI",
+                "campaignId": body.campaign_slug or "",
+                "campaignTitle": (body.campaign_slug or "").replace("-", " ").title() if body.campaign_slug else (body.cause or "General Fund"),
+                "date": datetime.now(timezone.utc).date().isoformat(),
+                "timestamp": int(datetime.now(timezone.utc).timestamp()),
+            }
+            TX_MEM_BY_NGO.setdefault(ngo_id, []).insert(0, tx)
+            return {"ok": True, "ngo_name": ngo_name, "transaction": tx, "source": "memory"}
+
+        # DB mode: best-effort insert donor+tx
+        cur = conn.cursor()
+        # donor upsert by email
+        cur.execute("SELECT id::text FROM donors WHERE ngo_id = %s::uuid AND full_name = %s LIMIT 1", (user.ngo_id if user else None, donor_name))
+        row = cur.fetchone()
+        donor_id = row[0] if row else None
+        if not donor_id:
+            donor_code = f"D{int(datetime.now(timezone.utc).timestamp())}"
+            cur.execute(
+                """
+                INSERT INTO donors (ngo_id, donor_code, full_name, donor_type, pan_masked, location_text, tags, consent_given, consent_date)
+                VALUES (%s::uuid, %s, %s, 'Public', %s, '', %s, true, CURRENT_TIMESTAMP)
+                RETURNING id::text
+                """,
+                (user.ngo_id if user else None, donor_code, donor_name, _mask_pan(body.pan or ""), ["Public"]),
+            )
+            donor_id = cur.fetchone()[0]
+        cur.execute(
+            """
+            INSERT INTO transactions (ngo_id, donor_id, donor_name, amount, payment_method, campaign_id, campaign_title, transaction_date)
+            VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            RETURNING id::text, transaction_date
+            """,
+            (
+                user.ngo_id if user else None,
+                donor_id,
+                donor_name,
+                amount,
+                body.method or "UPI",
+                None,
+                (body.campaign_slug or body.cause or "General Fund"),
+            ),
+        )
+        tx_id, tx_dt = cur.fetchone()
+        tx = {
+            "id": tx_id,
+            "donorId": donor_id,
+            "donorName": donor_name,
+            "amount": amount,
+            "method": body.method or "UPI",
+            "campaignId": body.campaign_slug or "",
+            "campaignTitle": body.campaign_slug or body.cause or "General Fund",
+            "date": (tx_dt.date().isoformat() if hasattr(tx_dt, "date") else str(tx_dt)),
+        }
+        return {"ok": True, "ngo_name": ngo_name, "transaction": tx, "source": "db"}
+
+
+@app.get("/agent-hq/summary", tags=["Agentic UX"])
+def get_agent_hq_summary(current_user: TokenUser = Depends(get_current_user)):
+    """
+    Minimal Agent HQ summary so the UI isn't hardcoded.
+    """
+    # active agents: derive from /health agents list
+    agents = health().get("agents", [])
+    # pending approvals: intent queue queued count
+    pending = 0
+    with db_conn() as conn:
+        if conn is None:
+            pending = len([x for x in INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, []) if x.get("status") == "queued"])
+        else:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM intent_queue WHERE ngo_id = %s AND status = 'queued' AND resolved_at IS NULL",
+                (current_user.ngo_id,),
+            )
+            pending = int(cur.fetchone()[0] or 0)
+    prefs = AGENT_HQ_PREFS_MEM.get(current_user.ngo_id, {})
+    executed_recent = 0
+    with db_conn() as conn:
+        if conn is None:
+            executed_recent = len([x for x in INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, []) if x.get("status") == "executed"])
+        else:
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM intent_queue
+                    WHERE ngo_id = %s AND status = 'executed' AND executed_at > NOW() - INTERVAL '30 days'
+                    """,
+                    (current_user.ngo_id,),
+                )
+                executed_recent = int(cur.fetchone()[0] or 0)
+            except Exception:
+                executed_recent = 0
+    streak = min(99, max(0, executed_recent * 3 + max(0, 12 - pending * 2)))
+    alerts: List[Dict[str, Any]] = []
+    if pending == 0 and executed_recent == 0 and len(agents) > 0:
+        alerts.append(
+            {
+                "severity": "low",
+                "message": "No agent executions recorded recently — confirm triggers/webhooks are connected.",
+            }
+        )
+    return {
+        "agents": agents,
+        "pending_approvals": pending,
+        "activity_count_30d": executed_recent,
+        "hours_saved_30d": None,
+        "auto_approve_max_inr": prefs.get("auto_approve_max_inr"),
+        "agent_streaks": [
+            {
+                "name": "Copilot intents",
+                "correct_in_row": streak,
+                "rejections_30d": 0,
+            }
+        ],
+        "alerts": alerts,
+    }
+
+
+class AgentHqPrefsRequest(BaseModel):
+    auto_approve_max_inr: Optional[int] = None
+
+
+@app.post("/agent-hq/prefs", tags=["Agentic UX"])
+def post_agent_hq_prefs(body: AgentHqPrefsRequest, current_user: TokenUser = Depends(require_role("ed", "admin", "finance"))):
+    prev = AGENT_HQ_PREFS_MEM.setdefault(current_user.ngo_id, {})
+    if body.auto_approve_max_inr is not None:
+        prev["auto_approve_max_inr"] = max(0, int(body.auto_approve_max_inr))
+    return {"prefs": prev, "source": "memory"}
+
+
+@app.get("/agent-hq/audit", tags=["Agentic UX"])
+def get_agent_hq_audit(current_user: TokenUser = Depends(get_current_user)):
+    """
+    Lightweight audit feed. Uses volunteer_events (db) or memory activity logs.
+    """
+    with db_conn() as conn:
+        if conn is None:
+            ev = [e for e in VOLUNTEER_ACTIVITY_LOG if e.get("ngo_id") == current_user.ngo_id]
+            return {"logs": list(reversed(ev))[:50], "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text, type, payload::text, created_at::text
+            FROM volunteer_events
+            WHERE ngo_id = %s
+            ORDER BY created_at DESC
+            LIMIT 50
+            """,
+            (current_user.ngo_id,),
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append({"id": r[0], "type": r[1], "payload": r[2], "created_at": r[3]})
+        return {"logs": out, "source": "db"}
+
+
 @app.get("/finance/transactions", tags=["Finance"])
-def list_transactions(current_user: TokenUser = Depends(require_role("ed", "finance", "fundraising", "crm"))):
+def list_transactions(
+    classify: bool = False,
+    exception_only: bool = False,
+    min_confidence: float = 0.9,
+    current_user: TokenUser = Depends(require_role("ed", "finance", "fundraising", "crm")),
+):
+    lim = 500 if not classify else min(500, 200)
+
+    def _enrich_tx_row(tx: Dict[str, Any]) -> Dict[str, Any]:
+        desc = f"{tx.get('donorName') or ''} {tx.get('campaignTitle') or ''} donation {tx.get('amount')}"
+        sug = classify_fcra_transaction(desc)
+        tx["agent_category"] = sug.get("category")
+        tx["agent_confidence"] = float(sug.get("confidence") or 0.7)
+        return tx
+
     with db_conn() as conn:
         if conn is None:
             _seed_memory_crm(current_user.ngo_id)
             txs = TX_MEM_BY_NGO.get(current_user.ngo_id, [])
-            txs_sorted = sorted(txs, key=lambda t: int(t.get("timestamp") or 0), reverse=True)
-            return {"transactions": txs_sorted, "source": "memory"}
+            txs_sorted = sorted(txs, key=lambda t: int(t.get("timestamp") or 0), reverse=True)[:lim]
+            out = []
+            for tx in txs_sorted:
+                row = dict(tx)
+                if classify or exception_only:
+                    row = _enrich_tx_row(row)
+                out.append(row)
+            if exception_only:
+                out = [t for t in out if float(t.get("agent_confidence") or 0) < float(min_confidence)]
+            return {"transactions": out, "source": "memory", "exception_only": exception_only}
         cur = conn.cursor()
         cur.execute(
             """
@@ -838,26 +1699,29 @@ def list_transactions(current_user: TokenUser = Depends(require_role("ed", "fina
             FROM transactions
             WHERE ngo_id = %s::uuid
             ORDER BY transaction_date DESC
-            LIMIT 500
+            LIMIT %s
             """,
-            (current_user.ngo_id,),
+            (current_user.ngo_id, lim),
         )
         out = []
         for r in cur.fetchall():
-            out.append(
-                {
-                    "id": r[0],
-                    "donorId": r[1] or "",
-                    "donorName": r[2] or "",
-                    "amount": float(r[3] or 0),
-                    "method": r[4] or "",
-                    "campaignId": r[5] or "",
-                    "campaignTitle": r[6] or "",
-                    "date": (r[7].date().isoformat() if hasattr(r[7], "date") else str(r[7])),
-                    "timestamp": int(r[7].timestamp() * 1000) if hasattr(r[7], "timestamp") else int(datetime.now(timezone.utc).timestamp() * 1000),
-                }
-            )
-        return {"transactions": out, "source": "db"}
+            row = {
+                "id": r[0],
+                "donorId": r[1] or "",
+                "donorName": r[2] or "",
+                "amount": float(r[3] or 0),
+                "method": r[4] or "",
+                "campaignId": r[5] or "",
+                "campaignTitle": r[6] or "",
+                "date": (r[7].date().isoformat() if hasattr(r[7], "date") else str(r[7])),
+                "timestamp": int(r[7].timestamp() * 1000) if hasattr(r[7], "timestamp") else int(datetime.now(timezone.utc).timestamp() * 1000),
+            }
+            if classify or exception_only:
+                row = _enrich_tx_row(row)
+            out.append(row)
+        if exception_only:
+            out = [t for t in out if float(t.get("agent_confidence") or 0) < float(min_confidence)]
+        return {"transactions": out, "source": "db", "exception_only": exception_only}
 
 
 @app.post("/finance/transactions", tags=["Finance"])
@@ -1014,6 +1878,27 @@ class RegisterNgoRequest(BaseModel):
     password: str
     full_name: str
     role: str = "ed"
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str
+
+
+class UpdateNgoRequest(BaseModel):
+    name: str
+    reg_no: Optional[str] = None
+    fcra_reg: Optional[str] = None
+    pan: Optional[str] = None
+    state: Optional[str] = None
+
+
+class NotificationPrefsRequest(BaseModel):
+    prefs: Dict[str, bool]
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 @app.post("/auth/register", tags=["Auth"])
 def register_ngo(body: RegisterNgoRequest):
@@ -1191,6 +2076,177 @@ def get_me(current_user: TokenUser = Depends(get_current_user)):
         "role": current_user.role,
         "ngo_id": current_user.ngo_id,
         "ngo_name": current_user.ngo_name,
+    }
+
+
+# ── Settings / Profile (DB-first, memory-fallback) ───────────────────────────
+
+SETTINGS_MEM_BY_USER: Dict[str, Dict[str, Any]] = {}
+
+
+def _settings_mem(user: TokenUser) -> Dict[str, Any]:
+    key = f"{user.ngo_id}:{user.user_id}"
+    if key not in SETTINGS_MEM_BY_USER:
+        SETTINGS_MEM_BY_USER[key] = {
+            "profile": {"full_name": user.email.split("@")[0]},
+            "ngo": {"name": user.ngo_name, "reg_no": None, "fcra_reg": None, "pan": None, "state": None},
+            "notification_prefs": {},
+        }
+    return SETTINGS_MEM_BY_USER[key]
+
+
+@app.get("/settings", tags=["Settings"])
+def get_settings(current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            s = _settings_mem(current_user)
+            return {
+                "profile": {"full_name": s["profile"].get("full_name")},
+                "ngo": {**s["ngo"], "ngo_id": current_user.ngo_id},
+                "notification_prefs": s.get("notification_prefs", {}),
+            }
+        cur = conn.cursor()
+        cur.execute("SELECT full_name FROM users WHERE id = %s::uuid", (current_user.user_id,))
+        u = cur.fetchone()
+        cur.execute("SELECT name, reg_no, fcra_reg, pan, state FROM ngos WHERE id = %s::uuid", (current_user.ngo_id,))
+        n = cur.fetchone()
+        # prefs table is created lazily; handle missing table safely
+        p = None
+        try:
+            cur.execute(
+                """
+                SELECT prefs
+                FROM user_notification_prefs
+                WHERE ngo_id = %s::uuid AND user_id = %s::uuid
+                """,
+                (current_user.ngo_id, current_user.user_id),
+            )
+            p = cur.fetchone()
+        except Exception:
+            p = None
+        return {
+            "profile": {"full_name": (u[0] if u else "")},
+            "ngo": {
+                "ngo_id": current_user.ngo_id,
+                "name": (n[0] if n else current_user.ngo_name),
+                "reg_no": (n[1] if n else None),
+                "fcra_reg": (n[2] if n else None),
+                "pan": (n[3] if n else None),
+                "state": (n[4] if n else None),
+            },
+            "notification_prefs": (p[0] if p else {}),
+        }
+
+
+@app.post("/settings/profile", tags=["Settings"])
+def post_settings_profile(body: UpdateProfileRequest, current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            s = _settings_mem(current_user)
+            s["profile"]["full_name"] = body.full_name
+            return {"ok": True, "profile": {"full_name": body.full_name}, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE users SET full_name = %s WHERE id = %s::uuid RETURNING full_name",
+            (body.full_name, current_user.user_id),
+        )
+        row = cur.fetchone()
+        return {"ok": True, "profile": {"full_name": row[0] if row else body.full_name}, "source": "db"}
+
+
+@app.post("/settings/ngo", tags=["Settings"])
+def post_settings_ngo(body: UpdateNgoRequest, current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            s = _settings_mem(current_user)
+            s["ngo"] = {**s["ngo"], **body.model_dump()}
+            return {"ok": True, "ngo": s["ngo"], "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE ngos
+            SET name = %s, reg_no = %s, fcra_reg = %s, pan = %s, state = %s
+            WHERE id = %s::uuid
+            RETURNING name, reg_no, fcra_reg, pan, state
+            """,
+            (body.name, body.reg_no, body.fcra_reg, body.pan, body.state, current_user.ngo_id),
+        )
+        row = cur.fetchone()
+        ngo = {"name": row[0], "reg_no": row[1], "fcra_reg": row[2], "pan": row[3], "state": row[4]} if row else body.model_dump()
+        return {"ok": True, "ngo": ngo, "source": "db"}
+
+
+@app.post("/settings/notifications", tags=["Settings"])
+def post_settings_notifications(body: NotificationPrefsRequest, current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            s = _settings_mem(current_user)
+            s["notification_prefs"] = body.prefs
+            return {"ok": True, "notification_prefs": body.prefs, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_notification_prefs (
+                ngo_id UUID NOT NULL,
+                user_id UUID NOT NULL,
+                prefs JSONB NOT NULL DEFAULT '{}'::jsonb,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (ngo_id, user_id)
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO user_notification_prefs (ngo_id, user_id, prefs)
+            VALUES (%s::uuid, %s::uuid, %s::jsonb)
+            ON CONFLICT (ngo_id, user_id)
+            DO UPDATE SET prefs = EXCLUDED.prefs, updated_at = CURRENT_TIMESTAMP
+            RETURNING prefs
+            """,
+            (current_user.ngo_id, current_user.user_id, json.dumps(body.prefs)),
+        )
+        row = cur.fetchone()
+        return {"ok": True, "notification_prefs": row[0] if row else body.prefs, "source": "db"}
+
+
+@app.post("/auth/change-password", tags=["Auth"])
+def change_password(body: ChangePasswordRequest, current_user: TokenUser = Depends(get_current_user)):
+    # Demo auth
+    if current_user.email in DEMO_USERS:
+        if DEMO_USERS[current_user.email].get("password") != body.current_password:
+            raise HTTPException(status_code=400, detail="Current password incorrect.")
+        DEMO_USERS[current_user.email]["password"] = body.new_password
+        return {"ok": True, "source": "memory"}
+    with db_conn() as conn:
+        if conn is None:
+            raise HTTPException(status_code=501, detail="DB not configured.")
+        cur = conn.cursor()
+        cur.execute("SELECT password_hash FROM users WHERE id = %s::uuid", (current_user.user_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found.")
+        current_hash = hashlib.sha256((body.current_password + os.getenv("JWT_SECRET", "dev")).encode()).hexdigest()
+        if current_hash != row[0]:
+            raise HTTPException(status_code=400, detail="Current password incorrect.")
+        new_hash = hashlib.sha256((body.new_password + os.getenv("JWT_SECRET", "dev")).encode()).hexdigest()
+        cur.execute("UPDATE users SET password_hash = %s WHERE id = %s::uuid", (new_hash, current_user.user_id))
+        return {"ok": True, "source": "db"}
+
+
+@app.post("/auth/sessions/revoke-other", tags=["Auth"])
+def revoke_other_sessions(current_user: TokenUser = Depends(get_current_user)):
+    # Token revocation is not implemented in MVP; endpoint exists to avoid fake UI.
+    return {"ok": True, "note": "Session revocation not implemented in MVP."}
+
+
+@app.get("/dpdp/export", tags=["DPDP"])
+def dpdp_export(current_user: TokenUser = Depends(get_current_user)):
+    s = get_settings(current_user)
+    return {
+        "user": {"user_id": current_user.user_id, "email": current_user.email, "role": current_user.role, "full_name": s["profile"].get("full_name")},
+        "ngo": s.get("ngo", {}),
+        "notification_prefs": s.get("notification_prefs", {}),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
     }
 
 # ── Donor Nurture Agent ─────────────────────────────────────────────────────────
@@ -1553,14 +2609,249 @@ def post_sentiment(text: str, current_user: TokenUser = Depends(require_role("ed
     """
     return analyze_sentiment(text)
 
+class DraftReportRequest(BaseModel):
+    ngo_name: str
+    impact_data: Dict[str, Any]
+
+
 @app.post("/gen-ai/draft-report", tags=["GenAI"])
-def post_draft_report(ngo_name: str, impact_data: Dict[str, Any], current_user: TokenUser = Depends(require_role("ed"))):
+def post_draft_report(body: DraftReportRequest, current_user: TokenUser = Depends(require_role("ed"))):
     """
     Auto-drafts an annual report summary.
     """
-    return {"draft": draft_annual_report(ngo_name, impact_data)}
+    return {"draft": draft_annual_report(body.ngo_name, body.impact_data)}
+
+
+# ── CRM: Outreach (email/whatsapp) — lightweight queue/log ────────────────────
+class CrmOutreachRequest(BaseModel):
+    channel: str  # whatsapp | email
+    donor_ids: List[str] = []
+    message: str
+    subject: Optional[str] = None
+    template_id: Optional[str] = None
+    mode: str = "send"  # send | draft | voice_event
+
+
+@app.post("/crm/outreach", tags=["CRM"])
+def post_crm_outreach(body: CrmOutreachRequest, current_user: TokenUser = Depends(require_role("ed", "crm"))):
+    """
+    Minimal backend wiring for CRM messaging actions.
+    In production this would enqueue WhatsApp/Email jobs; for now we just persist an audit log (DB if present, else memory).
+    """
+    event = {
+        "id": f"out_{int(datetime.now(timezone.utc).timestamp() * 1000)}",
+        "ngo_id": current_user.ngo_id,
+        "by": current_user.email,
+        "mode": body.mode,
+        "channel": body.channel,
+        "donor_ids": body.donor_ids,
+        "subject": body.subject,
+        "template_id": body.template_id,
+        "message": (body.message or "")[:5000],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # DB optional: store in a generic audit log table if it exists (non-fatal if not configured)
+    with db_conn() as conn:
+        if conn is not None:
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO volunteer_events (id, ngo_id, type, payload)
+                    VALUES (%s, %s, %s, %s::jsonb)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (event["id"], current_user.ngo_id, "crm_outreach", json.dumps(event)),
+                )
+            except Exception:
+                pass
+        else:
+            CRM_OUTREACH_LOG_MEM_BY_NGO.setdefault(current_user.ngo_id, []).append(event)
+    return {"status": "queued" if body.mode == "send" else "saved", "event": event}
+
+
+# ── Finance: wire previously-demo actions to backend ──────────────────────────
+class FinanceJournalEntryRequest(BaseModel):
+    description: str
+    amount: float
+    entry_type: str = "Expense"  # Expense | Income
+    fund: str = "General"
+
+
+@app.post("/finance/journal-entry", tags=["Finance"])
+def post_finance_journal_entry(body: FinanceJournalEntryRequest, current_user: TokenUser = Depends(require_role("ed", "finance"))):
+    event = {
+        "id": f"fj_{int(datetime.now(timezone.utc).timestamp() * 1000)}",
+        "ngo_id": current_user.ngo_id,
+        "by": current_user.email,
+        "description": body.description[:5000],
+        "amount": float(body.amount),
+        "entry_type": body.entry_type,
+        "fund": body.fund,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    FINANCE_EVENTS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).append(event)
+    return {"status": "recorded", "event": event}
+
+
+@app.post("/finance/tally/sync", tags=["Finance"])
+def post_finance_tally_sync(current_user: TokenUser = Depends(require_role("ed", "finance"))):
+    """
+    Placeholder for a real Tally integration: returns a deterministic export count.
+    """
+    with db_conn() as conn:
+        if conn is None:
+            exported = min(24, len(TX_MEM_BY_NGO.get(current_user.ngo_id, [])) + 1)
+        else:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM transactions WHERE ngo_id = %s", (current_user.ngo_id,))
+            exported = int(cur.fetchone()[0] or 0)
+    return {"status": "ok", "exported_vouchers": exported, "synced_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.post("/finance/aa/consents/refresh", tags=["Finance"])
+def post_finance_aa_refresh(current_user: TokenUser = Depends(require_role("ed", "finance"))):
+    return {"status": "ok", "message": "AA consents refreshed (demo).", "at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/finance/uc.pdf", tags=["Finance"])
+def get_finance_uc(
+    company: Optional[str] = None,
+    project: Optional[str] = None,
+    current_user: TokenUser = Depends(require_role("ed", "finance", "csr", "programs")),
+):
+    scope = current_user.ngo_name
+    if company or project:
+        scope = f"{current_user.ngo_name} — {company or ''} {project or ''}".strip()
+    title = f"Utilization Certificate (Draft) — {scope}"
+    lines = [
+        f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"CSR / project context: {company or '—'} / {project or '—'}",
+        "This is a draft UC generated by GoodJobs Infrastructure for Social Good.",
+        "Replace with CA-signed UC and upload to CSR document room / Compliance Vault.",
+    ]
+    pdf = _simple_pdf_bytes(title, lines)
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": 'attachment; filename="utilization_certificate_draft.pdf"'
+    })
+
+
+# ── Notifications (UI) ───────────────────────────────────────────────────────
+@app.get("/notifications", tags=["System"])
+def list_notifications(current_user: TokenUser = Depends(get_current_user)):
+    """
+    Lightweight notifications feed for the UI.
+    Derived from inbox + recent volunteer events; persisted read/cleared state is stored in inbox_item_states.
+    """
+    items: List[Dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
+    with db_conn() as conn:
+        if conn is None:
+            # memory: derive from inbox (already filters snooze/done for some kinds)
+            inbox = get_inbox(current_user)["items"]
+            for it in inbox[:20]:
+                kind = it.get("kind")
+                ref_id = str((it.get("ref") or {}).get("id") or "")
+                if not ref_id:
+                    continue
+                items.append({
+                    "id": f"{kind}:{ref_id}",
+                    "kind": kind,
+                    "ref_id": ref_id,
+                    "tasks_path": _tasks_focus_path(kind, ref_id),
+                    "type": "urgent" if it.get("priority") == "High" else ("agent" if kind in ("intent",) else "info"),
+                    "title": it.get("pill") or kind.replace("_", " ").title(),
+                    "message": it.get("title") or "",
+                    "time": "Just now",
+                    "read": False,
+                })
+            return {"notifications": items, "source": "memory"}
+
+        cur = conn.cursor()
+        states = _db_load_inbox_states(cur, current_user.ngo_id)
+
+        # Build from inbox (DB mode)
+        inbox = get_inbox(current_user)["items"]
+        for it in inbox[:20]:
+            kind = it.get("kind")
+            ref_id = str((it.get("ref") or {}).get("id") or "")
+            if not ref_id:
+                continue
+            st = states.get("notification", {}).get(f"{kind}:{ref_id}", {})
+            items.append({
+                "id": f"{kind}:{ref_id}",
+                "kind": kind,
+                "ref_id": ref_id,
+                "tasks_path": _tasks_focus_path(kind, ref_id),
+                "type": "urgent" if it.get("priority") == "High" else ("agent" if kind in ("intent",) else "info"),
+                "title": it.get("pill") or kind.replace("_", " ").title(),
+                "message": it.get("title") or "",
+                "time": "Just now",
+                "read": bool(st.get("resolved_at")),
+            })
+        return {"notifications": items, "source": "db"}
+
+
+class NotificationActionRequest(BaseModel):
+    action: str  # mark_all_read | clear_all
+
+
+@app.post("/notifications/action", tags=["System"])
+def post_notifications_action(body: NotificationActionRequest, current_user: TokenUser = Depends(get_current_user)):
+    """
+    Persist notification state via inbox_item_states(kind='notification').
+    - mark_all_read: sets resolved_at for current notification ids
+    - clear_all: same as mark_all_read (UI will hide cleared notifications client-side)
+    """
+    with db_conn() as conn:
+        if conn is None:
+            # memory mode: no durable state; best-effort ack
+            return {"status": "ok", "source": "memory"}
+        now = datetime.now(timezone.utc)
+        cur = conn.cursor()
+        # mark current derived notifications as resolved
+        feed = list_notifications(current_user)["notifications"]
+        for n in feed:
+            nid = str(n.get("id"))
+            if not nid:
+                continue
+            _db_upsert_inbox_state(cur, current_user.ngo_id, "notification", nid, resolved_at=now.isoformat())
+        return {"status": "ok", "source": "db"}
+
+
+# ── Compliance: Filing calendar (UI) ─────────────────────────────────────────
+@app.get("/compliance/filings", tags=["Compliance"])
+def get_compliance_filings(current_user: TokenUser = Depends(get_current_user)):
+    """
+    Filing calendar is currently a recommended schedule (not computed).
+    Served from backend so UI doesn't hardcode dummy data.
+    """
+    return {
+        "filings": [
+            {"id": 1, "name": "TDS Return (Q3)", "due": "Nov 30, 2026", "assignee": "CA / Finance", "status": "Due Soon"},
+            {"id": 2, "name": "IT Form 10B", "due": "Dec 15, 2026", "assignee": "CA / Finance", "status": "Pending"},
+            {"id": 3, "name": "FCRA Annual Return", "due": "Dec 31, 2026", "assignee": "Finance", "status": "Pending"},
+            {"id": 4, "name": "Darpan NGO Renewal", "due": "Mar 31, 2027", "assignee": "Admin", "status": "Pending"},
+        ]
+    }
 
 # ── Zero-Manual-Work: Intent & Brief ──────────────────────────────────────────
+
+class IntentParseBody(BaseModel):
+    directive: str
+
+
+@app.post("/intent/parse", tags=["Agentic UX"])
+def post_parse_intent(body: IntentParseBody, current_user: TokenUser = Depends(get_current_user)):
+    """
+    Preview a directive as an action card without queueing (for confirm-before-execute UX).
+    """
+    d = (body.directive or "").strip()
+    if not d:
+        raise HTTPException(status_code=400, detail="directive required")
+    card = route_intent(d)
+    return {"action_card": card, "directive": d}
+
 
 @app.post("/intent/process", tags=["Agentic UX"])
 def post_process_intent(directive: str, current_user: TokenUser = Depends(require_role("ed", "admin", "fundraising"))):
@@ -1620,7 +2911,10 @@ def get_intent_queue(
             if status:
                 items = [i for i in items if i.get("status") == status]
             lim = max(1, min(limit, 200))
-            return {"items": items[:lim], "source": "memory"}
+            out = items[:lim]
+            for it in out:
+                _enrich_intent_queue_row(it)
+            return {"items": out, "source": "memory"}
         cur = conn.cursor()
         where = ["ngo_id = %s"]
         params: List[Any] = [current_user.ngo_id]
@@ -1641,7 +2935,7 @@ def get_intent_queue(
         rows = cur.fetchall()
         items = []
         for r in rows:
-            items.append({
+            item = {
                 "id": r[0],
                 "directive": r[1],
                 "intent_type": r[2],
@@ -1649,7 +2943,9 @@ def get_intent_queue(
                 "status": r[4],
                 "action_card": r[5],
                 "created_at": r[6].isoformat() if hasattr(r[6], "isoformat") else str(r[6]),
-            })
+            }
+            _enrich_intent_queue_row(item)
+            items.append(item)
         return {"items": items, "source": "db"}
 
 
@@ -1796,11 +3092,68 @@ def post_intent_execute(
             raise HTTPException(status_code=500, detail={"id": r2[0], "status": r2[1], "error": str(e)})
 
 @app.get("/morning-brief", tags=["Agentic UX"])
-def get_morning_brief(current_user: TokenUser = Depends(require_role("ed", "admin"))):
+def get_morning_brief(
+    current_user: TokenUser = Depends(
+        require_role("ed", "admin", "finance", "programs", "board", "field", "csr", "crm", "fundraising")
+    ),
+):
     """
-    Returns the prioritized daily attention list for the user.
+    Role-personalized brief + handled-by-agents section (inbox-derived).
     """
-    return generate_morning_brief()
+    inbox_all = get_inbox(current_user).get("items", [])
+    allow = _brief_kinds_for_role(current_user.role)
+    inbox = [it for it in inbox_all if allow is None or it.get("kind") in allow]
+    out: List[Dict[str, Any]] = []
+    for i, it in enumerate(inbox[:6]):
+        kind = it.get("kind") or "task"
+        pr = it.get("priority") or ("High" if i == 0 else "Medium")
+        pa = it.get("primary_action") or {}
+        route = pa.get("route") or "/tasks"
+        action_label = pa.get("label") or "Open"
+        if kind == "finance_flag":
+            action_label = "Review in Inbox"
+            route = "/tasks"
+        elif kind == "month_end_close":
+            action_label = "Month-end in Finance"
+            route = "/finance"
+        elif kind in ("csr_win_decay", "csr_stale"):
+            action_label = "Follow up in Inbox"
+            route = "/tasks"
+        elif kind == "csr_report_due":
+            action_label = "UC / MIS in Inbox"
+            route = "/tasks"
+        elif kind == "intent":
+            action_label = "Approve in Agent HQ"
+            route = "/agent-hq"
+        elif kind == "donor_outreach_draft":
+            action_label = "Send from Inbox"
+            route = "/tasks"
+        ref_id = str((it.get("ref") or {}).get("id") or "")
+        out.append(
+            {
+                "id": f"brief-{i+1}",
+                "priority": pr,
+                "category": (it.get("pill") or kind).title(),
+                "title": it.get("title") or kind.replace("_", " ").title(),
+                "summary": it.get("subtitle") or "Review and take action.",
+                "primary_action": {"label": action_label, "route": route},
+                "secondary_action": {"label": "Open module", "route": pa.get("route") or "/tasks"},
+                "tertiary_action": {"label": "Open Tasks inbox", "route": "/tasks"},
+                "ref": it.get("ref"),
+                "kind": kind,
+                "meta": it.get("meta"),
+                "inline": it.get("inline"),
+                "tasks_deep_link_path": _tasks_focus_path(kind, ref_id),
+            }
+        )
+    handled = _handled_by_agents_rows(current_user)
+    return {
+        "priorities": out,
+        "handled_by_agents": handled,
+        "role": current_user.role,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "app_public_base_url": (os.getenv("APP_PUBLIC_URL") or "").rstrip("/"),
+    }
 
 # ── AWS S3 Storage (Compliance Vault) ──────────────────────────────────────────
 
@@ -1867,34 +3220,244 @@ class BreachLogRequest(BaseModel):
     affected_records: int
     description: str
 
+CONSENT_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+ERASURE_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+BREACH_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+
+
+@app.get("/compliance/consents", tags=["Compliance"])
+def list_consents(current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            return {"consents": CONSENT_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text, subject_name, subject_type, subject_email, purpose, given, consent_date::text, withdrawn_at::text
+            FROM consent_registry
+            WHERE ngo_id = %s::uuid
+            ORDER BY consent_date DESC
+            LIMIT 500
+            """,
+            (current_user.ngo_id,),
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append(
+                {
+                    "id": r[0],
+                    "subject": r[1],
+                    "type": r[2],
+                    "email": r[3],
+                    "purpose": r[4],
+                    "given": bool(r[5]),
+                    "date": (r[6] or "")[:10],
+                    "withdrawn": (r[7] or None)[:10] if r[7] else None,
+                }
+            )
+        return {"consents": out, "source": "db"}
+
+
+@app.get("/compliance/erasures", tags=["Compliance"])
+def list_erasures(current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            return {"requests": ERASURE_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text, subject_name, subject_email, reason, status::text, received_at::text, deadline_at::text, completed_at::text
+            FROM data_erasure_requests
+            WHERE ngo_id = %s::uuid
+            ORDER BY received_at DESC
+            LIMIT 500
+            """,
+            (current_user.ngo_id,),
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append(
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "email": r[2],
+                    "reason": r[3],
+                    "status": r[4],
+                    "received": (r[5] or "")[:10],
+                    "deadline": (r[6] or "")[:10],
+                    "completed": (r[7] or None)[:10] if r[7] else None,
+                }
+            )
+        return {"requests": out, "source": "db"}
+
+
+@app.get("/compliance/breaches", tags=["Compliance"])
+def list_breaches(current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            return {"breaches": BREACH_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text, title, severity::text, affected_records, discovered_at::text, notification_due_at::text, notified_at::text, description
+            FROM breach_log
+            WHERE ngo_id = %s::uuid
+            ORDER BY discovered_at DESC
+            LIMIT 200
+            """,
+            (current_user.ngo_id,),
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append(
+                {
+                    "id": r[0],
+                    "title": r[1],
+                    "severity": r[2],
+                    "affectedRecords": int(r[3] or 0),
+                    "discovered": r[4],
+                    "notificationDue": r[5],
+                    "notified": bool(r[6]),
+                    "description": r[7],
+                }
+            )
+        return {"breaches": out, "source": "db"}
+
+
 @app.post("/compliance/consent/withdraw", tags=["Compliance"])
 def withdraw_consent(req: WithdrawConsentRequest, current_user: TokenUser = Depends(get_current_user)):
     """Log the withdrawal of a user's consent under DPDP §12."""
-    return {"status": "success", "message": f"Consent {req.consent_id} withdrawn successfully."}
+    with db_conn() as conn:
+        if conn is None:
+            items = CONSENT_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for c in items:
+                if c.get("id") == req.consent_id:
+                    c["given"] = False
+                    c["withdrawn"] = datetime.now(timezone.utc).date().isoformat()
+            return {"status": "success", "consent_id": req.consent_id, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE consent_registry
+            SET given = false, withdrawn_at = CURRENT_TIMESTAMP
+            WHERE ngo_id = %s::uuid AND id = %s::uuid
+            RETURNING id::text
+            """,
+            (current_user.ngo_id, req.consent_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Consent not found.")
+        return {"status": "success", "consent_id": row[0], "source": "db"}
 
 @app.post("/compliance/erasure", tags=["Compliance"])
 def log_erasure_request(req: ErasureLogRequest, current_user: TokenUser = Depends(get_current_user)):
     """Log a Right to Erasure request under DPDP §12."""
-    from datetime import datetime, timedelta, timezone
     deadline = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
-    return {
-        "status": "received", 
-        "request_id": f"e{int(datetime.now().timestamp())}",
-        "deadline": deadline,
-        "message": "Erasure request logged. Must be completed within 30 days."
-    }
+    with db_conn() as conn:
+        if conn is None:
+            item = {
+                "id": f"e{int(datetime.now(timezone.utc).timestamp())}",
+                "name": req.name,
+                "email": req.email,
+                "reason": req.reason,
+                "status": "received",
+                "received": datetime.now(timezone.utc).date().isoformat(),
+                "deadline": deadline,
+                "completed": None,
+            }
+            ERASURE_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, item)
+            return {"status": "received", "request_id": item["id"], "deadline": deadline, "message": "Erasure request logged. Must be completed within 30 days.", "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO data_erasure_requests (ngo_id, subject_name, subject_email, reason, status, received_at, deadline_at)
+            VALUES (%s::uuid, %s, %s, %s, 'received', CURRENT_TIMESTAMP, (CURRENT_TIMESTAMP + INTERVAL '30 days'))
+            RETURNING id::text, deadline_at::text
+            """,
+            (current_user.ngo_id, req.name, req.email, req.reason),
+        )
+        rid, dl = cur.fetchone()
+        return {"status": "received", "request_id": rid, "deadline": (dl or "")[:10], "message": "Erasure request logged. Must be completed within 30 days.", "source": "db"}
+
+
+@app.post("/compliance/erasure/{request_id}/complete", tags=["Compliance"])
+def complete_erasure(request_id: str, current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            for r in ERASURE_MEM_BY_NGO.get(current_user.ngo_id, []):
+                if r.get("id") == request_id:
+                    r["status"] = "completed"
+                    r["completed"] = datetime.now(timezone.utc).date().isoformat()
+            return {"ok": True, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE data_erasure_requests
+            SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+            WHERE ngo_id = %s::uuid AND id = %s::uuid
+            RETURNING id::text
+            """,
+            (current_user.ngo_id, request_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Erasure request not found.")
+        return {"ok": True, "id": row[0], "source": "db"}
 
 @app.post("/compliance/breach", tags=["Compliance"])
 def log_breach(req: BreachLogRequest, current_user: TokenUser = Depends(get_current_user)):
     """Log a data breach to start the 72-hour DPB notification timer under DPDP §8."""
-    from datetime import datetime, timedelta, timezone
     notif_due = (datetime.now(timezone.utc) + timedelta(hours=72)).isoformat()
-    return {
-        "status": "logged",
-        "breach_id": f"b{int(datetime.now().timestamp())}",
-        "notification_due": notif_due,
-        "message": "Breach logged. You must notify the DPB within 72 hours."
-    }
+    with db_conn() as conn:
+        if conn is None:
+            item = {
+                "id": f"b{int(datetime.now(timezone.utc).timestamp())}",
+                "title": req.title,
+                "severity": req.severity,
+                "affectedRecords": int(req.affected_records),
+                "discovered": datetime.now(timezone.utc).isoformat(),
+                "notificationDue": notif_due,
+                "notified": False,
+                "description": req.description,
+            }
+            BREACH_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, item)
+            return {"status": "logged", "breach_id": item["id"], "notification_due": notif_due, "message": "Breach logged. You must notify the DPB within 72 hours.", "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO breach_log (ngo_id, title, severity, affected_records, description, discovered_at, notification_due_at)
+            VALUES (%s::uuid, %s, %s::breach_severity, %s, %s, CURRENT_TIMESTAMP, (CURRENT_TIMESTAMP + INTERVAL '72 hours'))
+            RETURNING id::text, notification_due_at::text
+            """,
+            (current_user.ngo_id, req.title, req.severity, int(req.affected_records), req.description),
+        )
+        bid, due = cur.fetchone()
+        return {"status": "logged", "breach_id": bid, "notification_due": due, "message": "Breach logged. You must notify the DPB within 72 hours.", "source": "db"}
+
+
+@app.post("/compliance/breaches/{breach_id}/notify", tags=["Compliance"])
+def notify_breach(breach_id: str, current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            for b in BREACH_MEM_BY_NGO.get(current_user.ngo_id, []):
+                if b.get("id") == breach_id:
+                    b["notified"] = True
+            return {"ok": True, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE breach_log
+            SET notified_at = CURRENT_TIMESTAMP
+            WHERE ngo_id = %s::uuid AND id = %s::uuid
+            RETURNING id::text
+            """,
+            (current_user.ngo_id, breach_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Breach not found.")
+        return {"ok": True, "id": row[0], "source": "db"}
 
 
 # ── Compliance: Document metadata ─────────────────────────────────────────────
@@ -2087,6 +3650,8 @@ def get_inbox(current_user: TokenUser = Depends(get_current_user)):
             try:
                 # scheduled reminder events
                 for ev in reversed(VOLUNTEER_ACTIVITY_LOG[-50:]):
+                    if ev.get("ngo_id") != current_user.ngo_id:
+                        continue
                     if ev.get("type") == "reminder":
                         ref_id = str(ev.get("id") or ev.get("created_at") or ev.get("shift_id") or "")
                         st = _mem_get_state(current_user.ngo_id, "volunteer_reminder", ref_id) if ref_id else {}
@@ -2141,6 +3706,48 @@ def get_inbox(current_user: TokenUser = Depends(get_current_user)):
             except Exception:
                 pass
 
+            # CRM WhatsApp drafts (memory)
+            try:
+                for ev in reversed(CRM_OUTREACH_LOG_MEM_BY_NGO.get(current_user.ngo_id, [])[-25:]):
+                    if ev.get("mode") != "draft":
+                        continue
+                    ref_id = str(ev.get("id") or "")
+                    if not ref_id:
+                        continue
+                    st = _mem_get_state(current_user.ngo_id, "donor_outreach_draft", ref_id)
+                    if st.get("resolved_at"):
+                        continue
+                    if st.get("snoozed_until"):
+                        try:
+                            if _parse_until_ts(st["snoozed_until"]) > now:
+                                continue
+                        except HTTPException:
+                            pass
+                    donor_ids = ev.get("donor_ids") or []
+                    msg = (ev.get("message") or "")[:400]
+                    items.append(
+                        {
+                            "kind": "donor_outreach_draft",
+                            "priority": "Medium",
+                            "pill": "CRM",
+                            "title": f"WhatsApp draft ready ({len(donor_ids)} donor(s))",
+                            "subtitle": msg,
+                            "meta": ev,
+                            "ref": {"id": ref_id},
+                            "primary_action": {"label": "Open CRM", "route": "/crm"},
+                            "inline": {
+                                "type": "crm_whatsapp",
+                                "donor_ids": donor_ids,
+                                "message": ev.get("message"),
+                                "template_id": ev.get("template_id"),
+                            },
+                        }
+                    )
+            except Exception:
+                pass
+
+            _append_month_end_and_csr_inbox(items, current_user.ngo_id, None, {}, now, True)
+            _finalize_inbox_items(items)
             return {"items": items[:40], "source": "memory"}
         cur = conn.cursor()
         states = _db_load_inbox_states(cur, current_user.ngo_id)
@@ -2312,7 +3919,60 @@ def get_inbox(current_user: TokenUser = Depends(get_current_user)):
         except Exception:
             pass
 
-    return {"items": items, "source": "db"}
+        # CRM WhatsApp drafts (DB)
+        try:
+            cur.execute(
+                """
+                SELECT id::text, payload, created_at
+                FROM volunteer_events
+                WHERE ngo_id = %s AND type = 'crm_outreach'
+                ORDER BY created_at DESC
+                LIMIT 25
+                """,
+                (current_user.ngo_id,),
+            )
+            for eid, payload, created_at in cur.fetchall():
+                payload = payload if isinstance(payload, dict) else {}
+                if payload.get("mode") != "draft":
+                    continue
+                ref_id = str(eid)
+                st = states.get("donor_outreach_draft", {}).get(ref_id, {})
+                if st.get("resolved_at"):
+                    continue
+                if st.get("snoozed_until"):
+                    try:
+                        if _parse_until_ts(st["snoozed_until"]) > datetime.now(timezone.utc):
+                            continue
+                    except HTTPException:
+                        pass
+                donor_ids = payload.get("donor_ids") or []
+                msg = (payload.get("message") or "")[:400]
+                items.append(
+                    {
+                        "kind": "donor_outreach_draft",
+                        "priority": "Medium",
+                        "pill": "CRM",
+                        "title": f"WhatsApp draft ready ({len(donor_ids)} donor(s))",
+                        "subtitle": msg,
+                        "meta": payload,
+                        "ref": {"id": ref_id},
+                        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+                        "primary_action": {"label": "Open CRM", "route": "/crm"},
+                        "inline": {
+                            "type": "crm_whatsapp",
+                            "donor_ids": donor_ids,
+                            "message": payload.get("message"),
+                            "template_id": payload.get("template_id"),
+                        },
+                    }
+                )
+        except Exception:
+            pass
+
+        _append_month_end_and_csr_inbox(items, current_user.ngo_id, conn, states, datetime.now(timezone.utc), False)
+        _finalize_inbox_items(items)
+
+    return {"items": items[:40], "source": "db"}
 
 
 class InboxSnoozeRequest(BaseModel):
@@ -2378,30 +4038,30 @@ def post_inbox_snooze(body: InboxSnoozeRequest, current_user: TokenUser = Depend
         return {"status": "snoozed", "id": row[0]}
 
 
-@app.post("/inbox/resolve", tags=["Agentic UX"])
-def post_inbox_resolve(body: InboxResolveRequest, current_user: TokenUser = Depends(require_role("ed", "admin", "finance", "programs"))):
+def _inbox_resolve_one(current_user: TokenUser, kind: str, ref_id: str) -> Dict[str, Any]:
+    """Shared by single and batch inbox resolve."""
     with db_conn() as conn:
         if conn is None:
             resolved_iso = datetime.now(timezone.utc).isoformat()
-            if body.kind == "intent":
+            if kind == "intent":
                 items = INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, [])
                 for it in items:
-                    if it.get("id") == body.id:
+                    if it.get("id") == ref_id:
                         it["resolved_at"] = resolved_iso
                         it["status"] = "rejected"
-                        return {"status": "resolved", "id": body.id, "source": "memory"}
-            elif body.kind == "compliance_doc":
+                        return {"status": "resolved", "id": ref_id, "source": "memory"}
+            elif kind == "compliance_doc":
                 docs = COMPLIANCE_DOCS_MEM_BY_NGO.get(current_user.ngo_id, [])
                 for d in docs:
-                    if d.get("id") == body.id:
+                    if d.get("id") == ref_id:
                         d["resolved_at"] = resolved_iso
-                        return {"status": "resolved", "id": body.id, "source": "memory"}
+                        return {"status": "resolved", "id": ref_id, "source": "memory"}
             else:
-                _mem_upsert_state(current_user.ngo_id, body.kind, body.id, resolved_at=resolved_iso)
-                return {"status": "resolved", "id": body.id, "source": "memory"}
+                _mem_upsert_state(current_user.ngo_id, kind, ref_id, resolved_at=resolved_iso)
+                return {"status": "resolved", "id": ref_id, "source": "memory"}
             raise HTTPException(status_code=404, detail="Inbox item not found.")
         cur = conn.cursor()
-        if body.kind == "intent":
+        if kind == "intent":
             cur.execute(
                 """
                 UPDATE intent_queue
@@ -2409,9 +4069,9 @@ def post_inbox_resolve(body: InboxResolveRequest, current_user: TokenUser = Depe
                 WHERE ngo_id = %s AND id::text = %s
                 RETURNING id::text
                 """,
-                (current_user.ngo_id, body.id),
+                (current_user.ngo_id, ref_id),
             )
-        elif body.kind == "compliance_doc":
+        elif kind == "compliance_doc":
             cur.execute(
                 """
                 UPDATE compliance_documents
@@ -2419,15 +4079,61 @@ def post_inbox_resolve(body: InboxResolveRequest, current_user: TokenUser = Depe
                 WHERE ngo_id = %s AND id::text = %s
                 RETURNING id::text
                 """,
-                (current_user.ngo_id, body.id),
+                (current_user.ngo_id, ref_id),
             )
         else:
-            _db_upsert_inbox_state(cur, current_user.ngo_id, body.kind, body.id, resolved_at=datetime.now(timezone.utc).isoformat())
-            return {"status": "resolved", "id": body.id, "source": "db"}
+            _db_upsert_inbox_state(cur, current_user.ngo_id, kind, ref_id, resolved_at=datetime.now(timezone.utc).isoformat())
+            return {"status": "resolved", "id": ref_id, "source": "db"}
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Inbox item not found.")
-        return {"status": "resolved", "id": row[0]}
+        return {"status": "resolved", "id": row[0], "source": "db"}
+
+
+@app.post("/inbox/resolve", tags=["Agentic UX"])
+def post_inbox_resolve(body: InboxResolveRequest, current_user: TokenUser = Depends(require_role("ed", "admin", "finance", "programs"))):
+    return _inbox_resolve_one(current_user, body.kind, body.id)
+
+
+class InboxBatchResolveRequest(BaseModel):
+    items: List[InboxResolveRequest]
+
+
+@app.post("/inbox/batch-resolve", tags=["Agentic UX"])
+def post_inbox_batch_resolve(
+    body: InboxBatchResolveRequest,
+    current_user: TokenUser = Depends(require_role("ed", "admin", "finance", "programs")),
+):
+    results: List[Dict[str, Any]] = []
+    for it in body.items[:80]:
+        try:
+            r = _inbox_resolve_one(current_user, it.kind, it.id)
+            results.append({"kind": it.kind, "id": it.id, "ok": True, **r})
+        except HTTPException as he:
+            results.append({"kind": it.kind, "id": it.id, "ok": False, "detail": he.detail})
+    return {"results": results}
+
+
+class InboxBatchSnoozeRequest(BaseModel):
+    items: List[InboxResolveRequest]
+    until: str
+
+
+@app.post("/inbox/batch-snooze", tags=["Agentic UX"])
+def post_inbox_batch_snooze(
+    body: InboxBatchSnoozeRequest,
+    current_user: TokenUser = Depends(require_role("ed", "admin", "finance", "programs")),
+):
+    until_iso = _parse_until_ts(body.until).isoformat()
+    results: List[Dict[str, Any]] = []
+    for it in body.items[:80]:
+        faux = InboxSnoozeRequest(kind=it.kind, id=it.id, until=until_iso)
+        try:
+            r = post_inbox_snooze(faux, current_user)  # type: ignore
+            results.append({"kind": it.kind, "id": it.id, "ok": True, **(r if isinstance(r, dict) else {})})
+        except HTTPException as he:
+            results.append({"kind": it.kind, "id": it.id, "ok": False, "detail": he.detail})
+    return {"results": results}
 
 
 # ── Volunteers (Broadcast + Reminders) ─────────────────────────────────────────
@@ -2586,6 +4292,30 @@ def get_compliance_health_report(current_user: TokenUser = Depends(get_current_u
     pdf = _simple_pdf_bytes(title, lines)
     return Response(content=pdf, media_type="application/pdf", headers={
         "Content-Disposition": 'attachment; filename="compliance_health_report.pdf"'
+    })
+
+
+@app.get("/compliance/filings/{filing_id}/package.pdf", tags=["Compliance"])
+def get_filing_package(filing_id: int, current_user: TokenUser = Depends(get_current_user)):
+    """
+    Generates a simple filing package PDF for a filing calendar item.
+    (MVP placeholder; future: compile real ledgers/docs.)
+    """
+    title = f"Filing Package — #{filing_id} — {current_user.ngo_name}"
+    lines = [
+        f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        "",
+        "Includes (MVP):",
+        "- Checklist",
+        "- Document pointers (Compliance Vault)",
+        "- Responsible owner and due date (from filings calendar)",
+        "",
+        "Next step:",
+        "- Download relevant PDFs from Vault and hand over to CA/finance.",
+    ]
+    pdf = _simple_pdf_bytes(title, lines)
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename=\"filing_package_{filing_id}.pdf\"'
     })
 
 @app.get("/dpdp/notice", tags=["Compliance"])

@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Clock, Users, MapPin, UserPlus, Send, CheckCircle2, ShieldAlert, X, Bell, Calendar } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
@@ -21,6 +22,22 @@ const Volunteers: React.FC = () => {
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [signupShift, setSignupShift] = useState<Shift | null>(null);
   const [signupName, setSignupName] = useState('');
+
+  const shiftListRef = useRef<HTMLDivElement>(null);
+  const shiftVirtualizer = useVirtualizer({
+    count: shifts.length,
+    getScrollElement: () => shiftListRef.current,
+    estimateSize: () => 148,
+    overscan: 6,
+  });
+
+  const rosterRef = useRef<HTMLDivElement>(null);
+  const rosterVirtualizer = useVirtualizer({
+    count: volunteers.length,
+    getScrollElement: () => rosterRef.current,
+    estimateSize: () => 68,
+    overscan: 10,
+  });
 
   const refresh = async () => {
     setShiftsLoading(true);
@@ -50,35 +67,29 @@ const Volunteers: React.FC = () => {
     refresh();
   }, []);
 
-  const handleAddVolunteer = (e: React.FormEvent) => {
+  const handleAddVolunteer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
     const skills = form.skills.split(',').map(s => s.trim()).filter(Boolean);
-    // optimistic local add
-    addVolunteer({
-      name: form.name,
-      skills,
-      verified: form.verified,
-    });
-    // persist to backend roster (best-effort)
-    apiFetch('/volunteers/roster', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: form.name, skills, verified: form.verified }),
-    })
-      .then(async (res) => {
-        if (!res.ok) return;
-        // refresh roster from backend so IDs match
-        const r = await apiFetch('/volunteers/roster');
-        if (r.ok) {
-          const data = await r.json();
-          if (Array.isArray(data.volunteers)) useStore.getState().setVolunteers(data.volunteers);
-        }
-      })
-      .catch(() => {});
-    toast.success(`${form.name} added to volunteer roster!`);
-    setForm({ name: '', skills: '', verified: false });
-    setShowModal(false);
+    try {
+      const res = await apiFetch('/volunteers/roster', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.name, skills, verified: form.verified }),
+      });
+      if (!res.ok) throw new Error('create');
+      // refresh roster from backend so IDs match canonical records
+      const r = await apiFetch('/volunteers/roster');
+      if (r.ok) {
+        const data = await r.json();
+        if (Array.isArray(data.volunteers)) useStore.getState().setVolunteers(data.volunteers);
+      }
+      toast.success(`${form.name} added to volunteer roster!`);
+      setForm({ name: '', skills: '', verified: false });
+      setShowModal(false);
+    } catch {
+      toast.error('Failed to add volunteer (backend not reachable).');
+    }
   };
 
   const handleBroadcast = async () => {
@@ -184,19 +195,19 @@ const Volunteers: React.FC = () => {
       <div className="volunteers-stats-row">
         <div className="vol-card">
           <div className="vol-card-header"><div className="vol-card-title"><Users size={16} color="var(--color-primary)" /> Total Active</div></div>
-          <div className="vol-card-value">{volunteers.length + 838}</div>
+          <div className="vol-card-value">{volunteers.length}</div>
         </div>
         <div className="vol-card">
           <div className="vol-card-header"><div className="vol-card-title"><Clock size={16} color="var(--color-success)" /> Hours Logged (YTD)</div></div>
-          <div className="vol-card-value">{(volunteers.reduce((s,v)=>s+v.hours,0) + 12500).toLocaleString()}</div>
+          <div className="vol-card-value">{volunteers.reduce((s,v)=>s+v.hours,0).toLocaleString()}</div>
         </div>
         <div className="vol-card">
           <div className="vol-card-header"><div className="vol-card-title"><Clock size={16} color="var(--color-warning)" /> Upcoming Shifts</div></div>
-          <div className="vol-card-value">14</div>
+          <div className="vol-card-value">{shifts.length}</div>
         </div>
         <div className="vol-card">
           <div className="vol-card-header"><div className="vol-card-title"><Users size={16} color="var(--color-danger)" /> Corp Partners</div></div>
-          <div className="vol-card-value">6</div>
+          <div className="vol-card-value">0</div>
         </div>
       </div>
 
@@ -213,45 +224,82 @@ const Volunteers: React.FC = () => {
               </div>
             </div>
             <div className="card-body">
-              <div className="shift-list">
-                {shifts.map(shift => (
-                  <div key={shift.id} className="shift-item">
-                    <div className="shift-header">
-                      <div className="shift-title">{shift.title}</div>
-                      <div className="shift-date">{shift.date}</div>
-                    </div>
-                    <div className="shift-meta">
-                      <span className="flex items-center gap-1"><MapPin size={14} /> {shift.location}</span>
-                      <span className="badge badge-outline" style={{ fontSize: '0.7rem' }}>{shift.role}</span>
-                    </div>
-                    <div className="shift-progress">
-                      <div style={{ minWidth: '80px' }}>{shift.filled} / {shift.total} filled</div>
-                      <div className="progress-bar-sm">
-                        <div className="progress-fill-sm" style={{ width: `${(shift.filled / shift.total) * 100}%` }}></div>
-                      </div>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: '0.125rem 0.5rem', fontSize: '0.7rem' }}
-                        onClick={() => handleSignup(shift.id)}
-                        disabled={shift.filled >= shift.total}
-                      >
-                        Join
-                      </button>
-                      <button className="btn btn-secondary" style={{ padding: '0.125rem 0.5rem', fontSize: '0.7rem' }} onClick={() => handleManageShift(shift.title)}>
-                        Manage
-                      </button>
-                    </div>
-                    <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-                      Signups logged: {shiftSignupCounts.get(shift.id) || 0}
-                    </div>
+              {shiftsLoading && shifts.length === 0 ? (
+                <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>Loading shifts…</div>
+              ) : !shiftsLoading && shifts.length === 0 ? (
+                <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>No shifts found.</div>
+              ) : (
+                <div
+                  ref={shiftListRef}
+                  className="shift-list"
+                  style={{ maxHeight: 'min(52vh, 440px)', overflow: 'auto', gap: 0 }}
+                >
+                  <div style={{ height: shiftVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                    {shiftVirtualizer.getVirtualItems().map(vi => {
+                      const shift = shifts[vi.index];
+                      return (
+                        <div
+                          key={shift.id}
+                          data-index={vi.index}
+                          ref={shiftVirtualizer.measureElement}
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            transform: `translateY(${vi.start}px)`,
+                            paddingBottom: '0.75rem',
+                          }}
+                        >
+                          <div className="shift-item">
+                            <div className="shift-header">
+                              <div className="shift-title">{shift.title}</div>
+                              <div className="shift-date">{shift.date}</div>
+                            </div>
+                            <div className="shift-meta">
+                              <span className="flex items-center gap-1">
+                                <MapPin size={14} /> {shift.location}
+                              </span>
+                              <span className="badge badge-outline" style={{ fontSize: '0.7rem' }}>
+                                {shift.role}
+                              </span>
+                            </div>
+                            <div className="shift-progress">
+                              <div style={{ minWidth: '80px' }}>
+                                {shift.filled} / {shift.total} filled
+                              </div>
+                              <div className="progress-bar-sm">
+                                <div
+                                  className="progress-fill-sm"
+                                  style={{ width: `${(shift.filled / shift.total) * 100}%` }}
+                                ></div>
+                              </div>
+                              <button
+                                className="btn btn-secondary"
+                                style={{ padding: '0.125rem 0.5rem', fontSize: '0.7rem' }}
+                                onClick={() => handleSignup(shift.id)}
+                                disabled={shift.filled >= shift.total}
+                              >
+                                Join
+                              </button>
+                              <button
+                                className="btn btn-secondary"
+                                style={{ padding: '0.125rem 0.5rem', fontSize: '0.7rem' }}
+                                onClick={() => handleManageShift(shift.title)}
+                              >
+                                Manage
+                              </button>
+                            </div>
+                            <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                              Signups logged: {shiftSignupCounts.get(shift.id) || 0}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-                {!shiftsLoading && shifts.length === 0 && (
-                  <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>
-                    No shifts found.
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -270,7 +318,8 @@ const Volunteers: React.FC = () => {
               </div>
             </div>
             <button className="btn btn-secondary" style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)', width: 'max-content' }}
-              onClick={() => toast('Corporate Portal settings panel coming soon!', { icon: '⚙️' })}>
+              disabled
+              title="Not available yet">
               Corporate Portal Settings
             </button>
           </div>
@@ -280,26 +329,68 @@ const Volunteers: React.FC = () => {
               <h3 className="card-title">Volunteer Roster ({volunteers.length})</h3>
             </div>
             <div className="card-body">
-              <div className="volunteer-roster">
-                {volunteers.map(vol => (
-                  <div key={vol.id} className="roster-item">
-                    <div className="flex items-center gap-3">
-                      <div className="avatar" style={{ width: 32, height: 32 }}>{vol.name.charAt(0)}</div>
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                          {vol.name}
-                          {vol.verified ? <CheckCircle2 size={12} color="var(--color-success)" /> : <ShieldAlert size={12} color="var(--color-warning)" />}
+              {volunteers.length === 0 ? (
+                <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>No volunteers on the roster yet.</div>
+              ) : (
+                <div
+                  ref={rosterRef}
+                  className="volunteer-roster"
+                  style={{ maxHeight: 'min(48vh, 400px)', overflow: 'auto' }}
+                >
+                  <div style={{ height: rosterVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                    {rosterVirtualizer.getVirtualItems().map(vi => {
+                      const vol = volunteers[vi.index];
+                      return (
+                        <div
+                          key={vol.id}
+                          data-index={vi.index}
+                          ref={rosterVirtualizer.measureElement}
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            transform: `translateY(${vi.start}px)`,
+                          }}
+                        >
+                          <div className="roster-item">
+                            <div className="flex items-center gap-3">
+                              <div className="avatar" style={{ width: 32, height: 32 }}>
+                                {vol.name.charAt(0)}
+                              </div>
+                              <div>
+                                <div
+                                  style={{
+                                    fontWeight: 500,
+                                    fontSize: '0.875rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                  }}
+                                >
+                                  {vol.name}
+                                  {vol.verified ? (
+                                    <CheckCircle2 size={12} color="var(--color-success)" />
+                                  ) : (
+                                    <ShieldAlert size={12} color="var(--color-warning)" />
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                                  {vol.skills.join(', ')}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{vol.hours}h</div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>YTD</div>
+                            </div>
+                          </div>
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{vol.skills.join(', ')}</div>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{vol.hours}h</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>YTD</div>
-                    </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -348,7 +439,7 @@ const Volunteers: React.FC = () => {
               ✅ Will send to <strong>{selectedShift?.filled || 0} confirmed volunteers</strong> for "{selectedShift?.title || '—'}" at {selectedShift?.location || '—'}
             </div>
             <div className="flex gap-3">
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => toast('Reminder draft saved!', { icon: '💾' })}>Save Draft</button>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowReminderModal(false)}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSendReminder}><Bell size={15} /> Schedule Reminder</button>
             </div>
           </div>

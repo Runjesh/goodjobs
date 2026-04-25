@@ -177,14 +177,16 @@ const Login: React.FC = () => {
 
             <form onSubmit={handleLogin} className="auth-form">
               <div className="input-group" style={{ marginBottom: '1rem' }}>
-                <label className="input-label">Work Email</label>
-                <input type="email" className="input-field" placeholder="you@yourngo.org"
+                <label className="input-label" htmlFor="login-email">Work Email</label>
+                <input id="login-email" type="email" className="input-field" placeholder="you@yourngo.org"
+                  autoComplete="username"
                   value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
               </div>
               <div className="input-group" style={{ marginBottom: '1.5rem' }}>
-                <label className="input-label">Password</label>
+                <label className="input-label" htmlFor="login-password">Password</label>
                 <div style={{ position: 'relative' }}>
-                  <input type={showPassword ? 'text' : 'password'} className="input-field"
+                  <input id="login-password" type={showPassword ? 'text' : 'password'} className="input-field"
+                    autoComplete="current-password"
                     placeholder="••••••••" value={form.password}
                     onChange={e => setForm({ ...form, password: e.target.value })}
                     style={{ paddingRight: '3rem' }} />

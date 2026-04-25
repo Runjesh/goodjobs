@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..400&family=Noto+Sans:ital,wght@0,400..700;1,400..700&display=swap');
 
 /* ═══════════════════════════════════════════════════════
    SEVASUITE DESIGN SYSTEM — v4 Mobile-First
@@ -35,12 +35,12 @@
   --color-border:         #e2e8f0;
   --color-border-light:   #f1f5f9;
 
-  /* Shadows */
-  --shadow-xs:  0 1px 2px 0 rgba(0,0,0,.04);
-  --shadow-sm:  0 1px 3px 0 rgba(0,0,0,.08), 0 1px 2px -1px rgba(0,0,0,.06);
-  --shadow-md:  0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.06);
-  --shadow-lg:  0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.05);
-  --shadow-xl:  0 20px 25px -5px rgba(0,0,0,.1), 0 8px 10px -6px rgba(0,0,0,.04);
+  /* Shadows (elevation) */
+  --shadow-xs:  0 1px 2px rgba(0,0,0,0.05);
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.08);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.10);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,0.12);
+  --shadow-xl:  0 16px 48px rgba(0,0,0,0.16);
   --shadow-glass: 0 4px 30px rgba(0,0,0,.08);
   --shadow-card:  0 2px 8px rgba(79,70,229,.08);
 
@@ -65,7 +65,7 @@
   --space-12: 3rem;
 
   /* Layout */
-  --sidebar-width:      260px;
+  --sidebar-width:      240px;
   --sidebar-collapsed:   64px;
   --header-height:       64px;
   --bottom-nav-height:   72px;
@@ -78,19 +78,62 @@
   --safe-left:   env(safe-area-inset-left, 0px);
   --safe-right:  env(safe-area-inset-right, 0px);
 
-  /* Transitions */
-  --ease-out:   cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --transition-fast:   150ms var(--ease-out);
-  --transition-normal: 280ms var(--ease-out);
-  --transition-slow:   400ms var(--ease-out);
-  --transition-spring: 350ms var(--ease-spring);
+  /* Motion — easing (prefer these over ad-hoc curves) */
+  --ease-standard:   cubic-bezier(0.4, 0.0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0.0, 0.0, 0.2, 1);
+  --ease-accelerate: cubic-bezier(0.4, 0.0, 1.0, 1);
+  --ease-spring:     cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-snappy:     cubic-bezier(0.2, 0, 0, 1);
+  --ease-out:        var(--ease-standard);
 
-  /* Breaks */
+  --duration-instant:  80ms;
+  --duration-fast:     150ms;
+  --duration-normal:   250ms;
+  --duration-slow:     400ms;
+  --duration-story:    600ms;
+
+  --transition-fast:   var(--duration-fast) var(--ease-standard);
+  --transition-normal: var(--duration-normal) var(--ease-standard);
+  --transition-slow:   var(--duration-slow) var(--ease-standard);
+  --transition-spring: var(--duration-normal) var(--ease-spring);
+
+  /* Typography scale */
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-regional: 'Noto Sans', system-ui, sans-serif;
+  --text-xs-size: 0.6875rem;
+  --text-xs-leading: 1.4;
+  --text-sm-size: 0.8125rem;
+  --text-sm-leading: 1.5;
+  --text-base-size: 0.9375rem;
+  --text-base-leading: 1.6;
+  --text-lg-size: 1.0625rem;
+  --text-lg-leading: 1.5;
+  --text-xl-size: 1.25rem;
+  --text-xl-leading: 1.4;
+  --text-2xl-size: 1.75rem;
+  --text-2xl-leading: 1.2;
+  --text-3xl-size: 2.375rem;
+  --text-3xl-leading: 1.1;
+
+  /* Breakpoints (for JS; CSS uses same values in @media) */
+  --bp-mobile: 0px;
+  --bp-tablet: 768px;
+  --bp-desktop: 1200px;
+
+  /* 8px grid — canonical px aliases */
+  --gj-space-1: 4px;
+  --gj-space-2: 8px;
+  --gj-space-3: 12px;
+  --gj-space-4: 16px;
+  --gj-space-5: 24px;
+  --gj-space-6: 32px;
+  --gj-space-7: 48px;
+  --gj-space-8: 64px;
+
   /* Breakpoints (reference — use media queries in CSS) */
   /* mobile:  < 768px  */
-  /* tablet:  768–1024px */
-  /* desktop: > 1024px */
+  /* tablet:  768–1199px */
+  /* desktop: 1200px+ */
 }
 
 /* ── Dark Mode ───────────────────────────────────────── */
@@ -116,9 +159,11 @@ html.dark {
   --color-primary-light:  #3730a3;
 
   /* Shadows */
-  --shadow-xs:  0 1px 2px 0 rgba(0,0,0,.3);
-  --shadow-sm:  0 1px 3px 0 rgba(0,0,0,.4), 0 1px 2px -1px rgba(0,0,0,.2);
-  --shadow-md:  0 4px 6px -1px rgba(0,0,0,.5), 0 2px 4px -2px rgba(0,0,0,.3);
+  --shadow-xs:  0 1px 2px rgba(0,0,0,0.25);
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.35);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.4);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,0.45);
+  --shadow-xl:  0 16px 48px rgba(0,0,0,0.5);
   --shadow-card: 0 2px 8px rgba(0,0,0,.5);
 }
 
@@ -136,15 +181,14 @@ html {
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+  font-family: var(--font-ui), -apple-system, BlinkMacSystemFont, 'Segoe UI',
                Helvetica, Arial, sans-serif;
   background-color: var(--color-bg-main);
   color: var(--color-text-primary);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Prevent tap highlight on mobile */
-  -webkit-tap-highlight-color: transparent;
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
   touch-action: manipulation;
   min-height: 100vh;
   min-height: -webkit-fill-available;
@@ -593,14 +637,32 @@ select.input-field {
   to   { transform: translateX(0); }
 }
 
-.animate-fade-in  { animation: fadeIn  var(--transition-normal) var(--ease-out) both; }
-.animate-slide-up { animation: slideUp var(--transition-normal) var(--ease-out) both; }
+.animate-fade-in  { animation: fadeIn  var(--transition-normal) var(--ease-standard) both; }
+.animate-slide-up { animation: slideUp var(--transition-normal) var(--ease-standard) both; }
+
+/* Agent activity — subtle pulse ring (opt-in class on avatars) */
+@keyframes agent-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary) 40%, transparent); }
+  70%  { box-shadow: 0 0 0 8px color-mix(in srgb, var(--color-primary) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.agent-avatar--running {
+  animation: agent-pulse-ring 2s var(--ease-standard) infinite;
+}
+
+.font-regional {
+  font-family: var(--font-regional);
+}
 
 /* ── Mobile Overrides ─────────────────────────────────── */
 @media (max-width: 767px) {
   :root {
     --page-padding: var(--page-padding-mobile);
     --header-height: 56px;
+  }
+
+  .btn {
+    min-height: 44px;
   }
 
   .page-header {
@@ -630,6 +692,24 @@ select.input-field {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-text-tertiary); }
 
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .skeleton {
+    animation: none;
+    background: var(--color-border-light);
+  }
+  .agent-avatar--running {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 35%, transparent);
+  }
+  .animate-fade-in,
+  .animate-slide-up {
+    animation: none;
+  }
+}
+
 /* ── Modal Overlay ────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
@@ -654,7 +734,7 @@ select.input-field {
   max-height: calc(100dvh - 3rem);
   overflow-y: auto;
   padding: 1.75rem;
-  animation: slideUp 200ms var(--ease-out) both;
+  animation: slideUp var(--duration-fast) var(--ease-spring) both;
 }
 
 @media (max-width: 767px) {

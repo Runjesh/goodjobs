@@ -69,7 +69,17 @@ const TheoryOfChangeBuilder: React.FC = () => {
           <h2 style={{ fontSize: '1.125rem', fontWeight: 600 }}>Theory of Change (ToC) Canvas</h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>Map your program logic. Linked MIS metrics update automatically.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => toast.success('Theory of Change saved successfully!')}>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            try {
+              localStorage.setItem('goodjobs.toc.v1', JSON.stringify(nodes));
+              toast.success('Saved locally.');
+            } catch {
+              toast.error('Failed to save.');
+            }
+          }}
+        >
           <Save size={16} /> Save Canvas
         </button>
       </div>

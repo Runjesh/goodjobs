@@ -131,10 +131,11 @@ const IntentBar: React.FC = () => {
                 category={resultCard.intent_type}
                 summary={`Risk Level: ${resultCard.risk_level}. Ready to execute based on extracted context: ${JSON.stringify(resultCard.action_data)}`}
                 onApprove={() => {
-                  toast.success("Approved. (Execution wiring next)");
+                  toast('Queued. Review and execute in Agent HQ.', { duration: 2500 });
+                  window.location.hash = '/agent-hq';
                   handleClear();
                 }}
-                onEdit={() => toast("Opening structured editor...")}
+                onEdit={() => toast('Editing not available yet.', { duration: 1500 })}
                 onReject={() => handleClear()}
               />
             </div>

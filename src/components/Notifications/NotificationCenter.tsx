@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bell, Check, Trash2, X, Settings, Zap, ShieldAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './NotificationCenter.css';
+import { apiFetch } from '../../api/client';
+import { notificationTasksHref } from '../../utils/inboxLinks';
 
 interface Notification {
   id: string;
+  tasks_path?: string | null;
   type: 'urgent' | 'info' | 'agent';
   title: string;
   message: string;
@@ -12,32 +16,61 @@ interface Notification {
   read: boolean;
 }
 
-const mockNotifications: Notification[] = [
-  { id: '1', type: 'urgent', title: 'FCRA Alert', message: 'Admin overhead reached 18%. Approaching 20% limit.', time: '10m ago', read: false },
-  { id: '2', type: 'agent', title: 'CSR Pipeline Agent', message: 'Automated 3 follow-ups to Tata Trusts.', time: '2h ago', read: false },
-  { id: '3', type: 'info', title: 'Daily Digest Available', message: '12 new donations logged. 3 pending approvals.', time: '5h ago', read: true },
-  { id: '4', type: 'info', title: 'Board Briefing Sent', message: 'Morning brief delivered to 5 trustees.', time: '1d ago', read: true },
-];
-
 interface Props {
   isOpen: boolean;
   onClose: () => void;
 }
 
 const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const navigate = useNavigate();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const run = async () => {
+      try {
+        const res = await apiFetch('/notifications');
+        if (!res.ok) throw new Error('load');
+        const data = await res.json();
+        setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+      } catch {
+        setNotifications([]);
+      }
+    };
+    run();
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const markAllRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })));
-    toast.success('All notifications marked as read.');
+  const markAllRead = async () => {
+    try {
+      const res = await apiFetch('/notifications/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'mark_all_read' }),
+      });
+      if (!res.ok) throw new Error('mark');
+      setNotifications(notifications.map(n => ({ ...n, read: true })));
+      toast.success('All notifications marked as read.');
+    } catch {
+      toast.error('Failed to mark notifications read.');
+    }
   };
 
-  const clearAll = () => {
-    setNotifications([]);
+  const clearAll = async () => {
+    try {
+      const res = await apiFetch('/notifications/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear_all' }),
+      });
+      if (!res.ok) throw new Error('clear');
+      setNotifications([]);
+    } catch {
+      toast.error('Failed to clear notifications.');
+    }
   };
 
   const getIcon = (type: string) => {
@@ -61,7 +94,13 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
           </div>
           <div className="flex gap-2">
             <button className="action-btn-small" onClick={markAllRead} title="Mark all read"><Check size={14} /></button>
-            <button className="action-btn-small" onClick={() => toast('Notification preferences opened.')} title="Settings"><Settings size={14} /></button>
+            <button
+              className="action-btn-small"
+              onClick={() => { window.location.hash = '/settings'; onClose(); }}
+              title="Settings"
+            >
+              <Settings size={14} />
+            </button>
             <button className="action-btn-small" onClick={onClose}><X size={14} /></button>
           </div>
         </div>
@@ -71,7 +110,24 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
             <div className="notif-empty">You're all caught up!</div>
           ) : (
             notifications.map(n => (
-              <div key={n.id} className={`notif-item ${n.read ? 'read' : 'unread'}`}>
+              <div
+                key={n.id}
+                role="button"
+                tabIndex={0}
+                className={`notif-item ${n.read ? 'read' : 'unread'}`}
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  navigate(notificationTasksHref(n));
+                  onClose();
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigate(notificationTasksHref(n));
+                    onClose();
+                  }
+                }}
+              >
                 <div className={`notif-icon-wrap ${n.type}`}>{getIcon(n.type)}</div>
                 <div className="notif-content">
                   <div className="notif-item-header">

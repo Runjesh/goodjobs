@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Plus, Link as LinkIcon, Share2, Download, QrCode, X, Heart, BarChart2, TrendingUp, Users, IndianRupee, RefreshCw, Loader2, Bot } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
@@ -6,7 +7,44 @@ import { apiFetch } from '../../api/client';
 import './Fundraising.css';
 
 const Fundraising: React.FC = () => {
-  const { campaigns, transactions, addCampaign, addTransaction, donors } = useStore();
+  const { campaigns, transactions, addTransaction, donors } = useStore();
+  const campBreakdownScrollRef = useRef<HTMLDivElement>(null);
+  const campBreakdownVirtualizer = useVirtualizer({
+    count: campaigns.length,
+    getScrollElement: () => campBreakdownScrollRef.current,
+    estimateSize: () => 54,
+    overscan: 10,
+  });
+  const txScrollRef = useRef<HTMLDivElement>(null);
+  const txVirtualizer = useVirtualizer({
+    count: transactions.length,
+    getScrollElement: () => txScrollRef.current,
+    estimateSize: () => 48,
+    overscan: 14,
+  });
+
+  const [campaignCols, setCampaignCols] = useState(3);
+  useEffect(() => {
+    const update = () => {
+      const w = window.innerWidth;
+      if (w >= 1025) setCampaignCols(3);
+      else if (w >= 769) setCampaignCols(2);
+      else setCampaignCols(1);
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  const campaignGridRef = useRef<HTMLDivElement>(null);
+  const campaignRowCount = campaigns.length === 0 ? 0 : Math.ceil(campaigns.length / campaignCols);
+  const campaignRowVirtualizer = useVirtualizer({
+    count: campaignRowCount,
+    getScrollElement: () => campaignGridRef.current,
+    estimateSize: () => 440,
+    overscan: 1,
+  });
+
   const [showModal, setShowModal] = useState(false);
   const [showDonateModal, setShowDonateModal] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
@@ -18,8 +56,6 @@ const Fundraising: React.FC = () => {
 
   const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Optimistic local add
-    addCampaign({ title: newCampaign.title, goal: newCampaign.goal, status: 'active', image: 'linear-gradient(135deg, #10b981, #047857)' });
     try {
       const res = await apiFetch('/fundraising/campaigns', {
         method: 'POST',
@@ -32,18 +68,20 @@ const Fundraising: React.FC = () => {
           cause: newCampaign.cause,
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.campaign?.id) {
-          useStore.getState().addCampaignWithId(data.campaign);
-        }
+      if (!res.ok) throw new Error('create');
+      // refresh canonical campaigns list
+      const r = await apiFetch('/fundraising/campaigns');
+      if (r.ok) {
+        const data = await r.json();
+        if (Array.isArray(data.campaigns)) useStore.getState().setCampaigns(data.campaigns);
       }
+      toast.success(`Campaign "${newCampaign.title}" launched!`);
+      setShowModal(false);
+      setNewCampaign({ title: '', goal: 100000, cause: 'Education' });
+      return;
     } catch {
-      // ignore, still usable locally
+      toast.error('Failed to create campaign (backend not reachable).');
     }
-    toast.success(`Campaign "${newCampaign.title}" launched!`);
-    setShowModal(false);
-    setNewCampaign({ title: '', goal: 100000, cause: 'Education' });
   };
 
   const handleSuggestGoal = async () => {
@@ -66,12 +104,29 @@ const Fundraising: React.FC = () => {
 
   const handleCopyLink = (title: string) => {
     const slug = title.toLowerCase().replace(/\s+/g, '-');
-    navigator.clipboard?.writeText(`https://sevasuite.in/give/${slug}`).catch(() => {});
+    const link = `${window.location.origin}/give/${slug}`;
+    navigator.clipboard?.writeText(link).catch(() => {});
     toast.success('Donation link copied to clipboard!', { icon: '🔗' });
   };
 
-  const handleQR = (title: string) => toast.success(`QR Code generated for "${title}"!`, { icon: '📱' });
-  const handleShare = (title: string) => toast(`Share link for "${title}" ready!`, { icon: '📤' });
+  const handleOpenDonationPage = (title: string) => {
+    const slug = title.toLowerCase().replace(/\s+/g, '-');
+    window.open(`/give/${slug}`, '_blank', 'noopener,noreferrer');
+  };
+  const handleShare = async (title: string) => {
+    const slug = title.toLowerCase().replace(/\s+/g, '-');
+    const url = `${window.location.origin}/give/${slug}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `Donate to ${title}`, url });
+      } else {
+        await navigator.clipboard?.writeText(url);
+        toast.success('Link copied (share not supported).', { icon: '📤' });
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const handleExportCSV = () => {
     const csv = ['ID,Donor,Amount,Method,Campaign,Date',
@@ -124,17 +179,6 @@ const Fundraising: React.FC = () => {
     const campaign = campaigns.find(c => c.id === donationData.campaignId);
     if (!donor || !campaign) return;
 
-    // 1. Update Global State (Zustand) optimistically
-    addTransaction({
-      donorId: donor.id,
-      donorName: donor.name,
-      amount: Number(donationData.amount),
-      method: 'UPI AutoPay',
-      campaignId: campaign.id,
-      campaignTitle: campaign.title,
-      date: 'Just now'
-    });
-
     // 1b. Persist transaction (DB or memory backend)
     try {
       const txRes = await apiFetch('/finance/transactions', {
@@ -149,14 +193,21 @@ const Fundraising: React.FC = () => {
           campaignTitle: campaign.title,
         }),
       });
-      if (txRes.ok) {
-        const data = await txRes.json();
-        if (data?.transaction?.id) {
-          useStore.getState().addTransactionWithId(data.transaction);
-        }
+      if (!txRes.ok) throw new Error('tx');
+      const data = await txRes.json();
+      if (data?.transaction?.id) {
+        useStore.getState().addTransactionWithId(data.transaction);
       }
+      // refresh campaigns so aggregates (raised/donorsCount) stay consistent
+      const r = await apiFetch('/fundraising/campaigns');
+      if (r.ok) {
+        const cData = await r.json();
+        if (Array.isArray(cData.campaigns)) useStore.getState().setCampaigns(cData.campaigns);
+      }
+      toast.success('Donation recorded.');
     } catch {
-      // ignore; demo still works locally
+      toast.error('Failed to record donation (backend not reachable).');
+      return;
     }
 
     // 2. Trigger the Python FastAPI Agent backend (Donor Nurture)
@@ -235,40 +286,91 @@ const Fundraising: React.FC = () => {
         ))}
       </div>
 
-      {activeTab === 'campaigns' && (
-        <div className="campaign-grid">
-          {campaigns.map(camp => (
-            <div key={camp.id} className="card campaign-card">
-              <div className="campaign-image" style={{ background: camp.image }}>
-                <span className={`campaign-status ${camp.status === 'active' ? 'status-active' : 'status-draft'}`}>
-                  {camp.status.toUpperCase()}
-                </span>
-              </div>
-              <div className="campaign-content">
-                <h3 className="campaign-title">{camp.title}</h3>
-                <div className="progress-container">
-                  <div className="progress-stats">
-                    <span className="raised-amount">₹{(camp.raised).toLocaleString()}</span>
-                    <span className="goal-amount">of ₹{(camp.goal).toLocaleString()}</span>
+      {activeTab === 'campaigns' &&
+        (campaigns.length === 0 ? (
+          <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+            No campaigns yet. Create one to see it here.
+          </div>
+        ) : (
+          <div
+            ref={campaignGridRef}
+            style={{ maxHeight: 'min(78vh, 920px)', overflow: 'auto', marginBottom: '2rem' }}
+          >
+            <div style={{ height: campaignRowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+              {campaignRowVirtualizer.getVirtualItems().map(vr => {
+                const rowCampaigns = campaigns.slice(
+                  vr.index * campaignCols,
+                  vr.index * campaignCols + campaignCols
+                );
+                return (
+                  <div
+                    key={vr.index}
+                    data-index={vr.index}
+                    ref={campaignRowVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${vr.start}px)`,
+                    }}
+                  >
+                    <div
+                      className="campaign-grid"
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns:
+                          campaignCols === 3 ? 'repeat(3, 1fr)' : campaignCols === 2 ? 'repeat(2, 1fr)' : '1fr',
+                        gap: '1.5rem',
+                        marginBottom: 0,
+                      }}
+                    >
+                      {rowCampaigns.map(camp => (
+                        <div key={camp.id} className="card campaign-card">
+                          <div className="campaign-image" style={{ background: camp.image }}>
+                            <span className={`campaign-status ${camp.status === 'active' ? 'status-active' : 'status-draft'}`}>
+                              {camp.status.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="campaign-content">
+                            <h3 className="campaign-title">{camp.title}</h3>
+                            <div className="progress-container">
+                              <div className="progress-stats">
+                                <span className="raised-amount">₹{camp.raised.toLocaleString()}</span>
+                                <span className="goal-amount">of ₹{camp.goal.toLocaleString()}</span>
+                              </div>
+                              <div className="progress-bar">
+                                <div
+                                  className="progress-fill"
+                                  style={{ width: `${Math.min((camp.raised / camp.goal) * 100, 100)}%` }}
+                                ></div>
+                              </div>
+                              <div className="progress-stats" style={{ marginTop: '0.25rem', color: 'var(--color-text-tertiary)' }}>
+                                <span>{camp.donorsCount} Donors</span>
+                                <span>{Math.round((camp.raised / camp.goal) * 100)}% Funded</span>
+                              </div>
+                            </div>
+                            <div className="campaign-actions">
+                              <button className="btn btn-secondary flex-1" onClick={() => handleCopyLink(camp.title)}>
+                                <LinkIcon size={16} /> Link
+                              </button>
+                              <button className="btn btn-secondary flex-1" onClick={() => handleOpenDonationPage(camp.title)}>
+                                <QrCode size={16} /> Open
+                              </button>
+                              <button className="btn btn-secondary flex-1" onClick={() => handleShare(camp.title)}>
+                                <Share2 size={16} /> Share
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${Math.min((camp.raised / camp.goal) * 100, 100)}%` }}></div>
-                  </div>
-                  <div className="progress-stats" style={{ marginTop: '0.25rem', color: 'var(--color-text-tertiary)' }}>
-                    <span>{camp.donorsCount} Donors</span>
-                    <span>{Math.round((camp.raised / camp.goal) * 100)}% Funded</span>
-                  </div>
-                </div>
-                <div className="campaign-actions">
-                  <button className="btn btn-secondary flex-1" onClick={() => handleCopyLink(camp.title)}><LinkIcon size={16} /> Link</button>
-                  <button className="btn btn-secondary flex-1" onClick={() => handleQR(camp.title)}><QrCode size={16} /> QR</button>
-                  <button className="btn btn-secondary flex-1" onClick={() => handleShare(camp.title)}><Share2 size={16} /> Share</button>
-                </div>
-              </div>
+                );
+              })}
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
 
       {activeTab === 'analytics' && (
         <div>
@@ -293,34 +395,109 @@ const Fundraising: React.FC = () => {
           {/* Per-campaign breakdown */}
           <div className="card">
             <div className="card-header"><h3 className="card-title">Campaign Performance Breakdown</h3></div>
-            <div className="table-scroll-wrap">
-              <div className="table-scroll">
-                <table className="data-table">
-                <thead><tr><th>Campaign</th><th>Raised</th><th>Goal</th><th>Donors</th><th>Completion</th><th>Status</th></tr></thead>
-                <tbody>
-                  {campaigns.map(c => {
+            <div
+              ref={campBreakdownScrollRef}
+              className="table-scroll-wrap"
+              style={{
+                maxHeight: 'min(45vh, 400px)',
+                overflow: 'auto',
+                border: '1px solid var(--color-border-light)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(100px,1.2fr) minmax(72px,0.85fr) minmax(72px,0.85fr) 64px minmax(120px,1fr) 72px',
+                  gap: '0.5rem',
+                  padding: '0.6rem 0.75rem',
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.03em',
+                  color: 'var(--color-text-tertiary)',
+                  borderBottom: '1px solid var(--color-border-light)',
+                  position: 'sticky',
+                  top: 0,
+                  background: 'var(--color-bg-card)',
+                  zIndex: 1,
+                }}
+              >
+                <span>Campaign</span>
+                <span>Raised</span>
+                <span>Goal</span>
+                <span>Donors</span>
+                <span>Done</span>
+                <span>Status</span>
+              </div>
+              {campaigns.length === 0 ? (
+                <div style={{ padding: '1.25rem', color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>No campaigns yet.</div>
+              ) : (
+                <div style={{ height: campBreakdownVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                  {campBreakdownVirtualizer.getVirtualItems().map(vr => {
+                    const c = campaigns[vr.index];
                     const pct = Math.round((c.raised / c.goal) * 100);
                     return (
-                      <tr key={c.id}>
-                        <td style={{ fontWeight: 500 }}>{c.title}</td>
-                        <td style={{ fontWeight: 600 }}>₹{c.raised.toLocaleString()}</td>
-                        <td style={{ color: 'var(--color-text-secondary)' }}>₹{c.goal.toLocaleString()}</td>
-                        <td>{c.donorsCount}</td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <div style={{ flex: 1, height: 6, background: 'var(--color-bg-main)', borderRadius: 999, overflow: 'hidden', minWidth: 80 }}>
-                              <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: pct > 80 ? 'var(--color-success)' : 'var(--color-primary)', borderRadius: 999 }}></div>
+                      <div
+                        key={c.id}
+                        data-index={vr.index}
+                        ref={campBreakdownVirtualizer.measureElement}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          transform: `translateY(${vr.start}px)`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'minmax(100px,1.2fr) minmax(72px,0.85fr) minmax(72px,0.85fr) 64px minmax(120px,1fr) 72px',
+                            gap: '0.5rem',
+                            padding: '0.5rem 0.75rem',
+                            alignItems: 'center',
+                            fontSize: '0.82rem',
+                            borderBottom: '1px solid var(--color-border-light)',
+                          }}
+                        >
+                          <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
+                          <span style={{ fontWeight: 600 }}>₹{c.raised.toLocaleString()}</span>
+                          <span style={{ color: 'var(--color-text-secondary)' }}>₹{c.goal.toLocaleString()}</span>
+                          <span>{c.donorsCount}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                            <div
+                              style={{
+                                flex: 1,
+                                height: 6,
+                                background: 'var(--color-bg-main)',
+                                borderRadius: 999,
+                                overflow: 'hidden',
+                                minWidth: 48,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${Math.min(pct, 100)}%`,
+                                  height: '100%',
+                                  background: pct > 80 ? 'var(--color-success)' : 'var(--color-primary)',
+                                  borderRadius: 999,
+                                }}
+                              ></div>
                             </div>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600, minWidth: 32 }}>{pct}%</span>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 600, minWidth: 28 }}>{pct}%</span>
                           </div>
-                        </td>
-                        <td><span className={`badge ${c.status === 'active' ? 'badge-success' : 'badge-outline'}`}>{c.status}</span></td>
-                      </tr>
+                          <span>
+                            <span className={`badge ${c.status === 'active' ? 'badge-success' : 'badge-outline'}`} style={{ fontSize: '0.65rem' }}>
+                              {c.status}
+                            </span>
+                          </span>
+                        </div>
+                      </div>
                     );
                   })}
-                </tbody>
-                </table>
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -333,40 +510,95 @@ const Fundraising: React.FC = () => {
             <Download size={14} /> Export CSV
           </button>
         </div>
-        <div className="table-scroll-wrap">
-          <div className="table-scroll">
-            <table className="data-table">
-            <thead>
-              <tr>
-                <th>Transaction ID</th>
-                <th>Donor</th>
-                <th>Amount</th>
-                <th>Method</th>
-                <th>Campaign</th>
-                <th>Time</th>
-                <th>80G Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map(tx => (
-                <tr key={tx.id}>
-                  <td style={{ fontFamily: 'monospace', color: 'var(--color-text-tertiary)' }}>{tx.id}</td>
-                  <td style={{ fontWeight: 500 }}>{tx.donorName}</td>
-                  <td style={{ fontWeight: 600 }}>₹{tx.amount.toLocaleString()}</td>
-                  <td><span className="badge badge-outline">{tx.method}</span></td>
-                  <td>{tx.campaignTitle}</td>
-                  <td style={{ color: 'var(--color-text-tertiary)', fontSize: '0.75rem' }}>{tx.date}</td>
-                  <td><span className="badge badge-success">Sent via WhatsApp</span></td>
-                </tr>
-              ))}
-              {transactions.length === 0 && (
-                <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '2rem' }}>No transactions found.</td>
-                </tr>
-              )}
-            </tbody>
-            </table>
+        <div
+          ref={txScrollRef}
+          className="table-scroll-wrap"
+          style={{
+            maxHeight: 'min(55vh, 520px)',
+            overflow: 'auto',
+            border: '1px solid var(--color-border-light)',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(72px,0.95fr) minmax(88px,1fr) minmax(72px,0.85fr) minmax(64px,0.75fr) minmax(88px,1fr) minmax(72px,0.85fr) minmax(88px,1fr)',
+              gap: '0.45rem',
+              padding: '0.6rem 0.75rem',
+              fontSize: '0.65rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+              color: 'var(--color-text-tertiary)',
+              borderBottom: '1px solid var(--color-border-light)',
+              position: 'sticky',
+              top: 0,
+              background: 'var(--color-bg-card)',
+              zIndex: 1,
+            }}
+          >
+            <span>ID</span>
+            <span>Donor</span>
+            <span>Amt</span>
+            <span>Meth</span>
+            <span>Campaign</span>
+            <span>Time</span>
+            <span>80G</span>
           </div>
+          {transactions.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-tertiary)' }}>No transactions found.</div>
+          ) : (
+            <div style={{ height: txVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+              {txVirtualizer.getVirtualItems().map(vr => {
+                const tx = transactions[vr.index];
+                return (
+                  <div
+                    key={tx.id}
+                    data-index={vr.index}
+                    ref={txVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${vr.start}px)`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(72px,0.95fr) minmax(88px,1fr) minmax(72px,0.85fr) minmax(64px,0.75fr) minmax(88px,1fr) minmax(72px,0.85fr) minmax(88px,1fr)',
+                        gap: '0.45rem',
+                        padding: '0.45rem 0.75rem',
+                        alignItems: 'center',
+                        fontSize: '0.8rem',
+                        borderBottom: '1px solid var(--color-border-light)',
+                      }}
+                    >
+                      <span style={{ fontFamily: 'monospace', color: 'var(--color-text-tertiary)', fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {tx.id}
+                      </span>
+                      <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.donorName}</span>
+                      <span style={{ fontWeight: 600 }}>₹{tx.amount.toLocaleString()}</span>
+                      <span>
+                        <span className="badge badge-outline" style={{ fontSize: '0.65rem' }}>
+                          {tx.method}
+                        </span>
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.campaignTitle}</span>
+                      <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{tx.date}</span>
+                      <span>
+                        <span className="badge badge-success" style={{ fontSize: '0.62rem' }}>
+                          WhatsApp
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 

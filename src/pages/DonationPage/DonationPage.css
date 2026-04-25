@@ -1,12 +1,12 @@
 .donation-page {
   min-height: 100vh;
-  background: #f8fafc;
+  background: var(--color-bg-main);
   display: flex;
   flex-direction: column;
 }
 
 .donation-header {
-  background: white;
+  background: var(--color-bg-card);
   border-bottom: 1px solid var(--color-border-light);
   padding: 1rem 2rem;
   display: flex;

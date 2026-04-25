@@ -1,21 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { IndianRupee, Users, TrendingUp, AlertCircle, ArrowUpRight, ArrowDownRight, Bot, ShieldCheck, MessageCircle, X, Bell, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useNavigate } from 'react-router-dom';
+import { motion, useReducedMotion } from 'framer-motion';
+import { IndianRupee, Users, TrendingUp, AlertCircle, ArrowUpRight, ArrowDownRight, Bot, ShieldCheck, MessageCircle, X, Bell, Loader2, Download } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
+import { tasksInboxHref, notificationTasksHref } from '../../utils/inboxLinks';
+import { listItemEnterDelay } from '../../motion/variants';
 import './Dashboard.css';
 
-const monthLabels = ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May (Est)', 'Jun (Est)', 'Jul (Est)'];
-const monthlyData   = [320000, 480000, 410000, 620000, 530000, 750000, 0, 0, 0];
-const predictiveData = [0, 0, 0, 0, 0, 0, 850000, 920000, 1150000]; // ML Forecast
-const maxMonthly    = Math.max(...monthlyData, ...predictiveData);
-
-const agentActivity = [
-  { id: 1, icon: '💰', text: 'Donor Nurture Agent sent 80G receipt to Anjali Desai', time: '2m ago', color: 'var(--color-success)' },
-  { id: 2, icon: '🤖', text: 'CSR Agent drafted outreach to Tata Trusts — awaiting approval', time: '18m ago', color: '#8b5cf6' },
-  { id: 3, icon: '⚠️', text: 'FCRA Admin overhead at 87% — Finance Agent flagged for CFO', time: '1h ago', color: 'var(--color-warning)' },
-  { id: 4, icon: '📋', text: 'Board Briefing Agent delivered morning brief to 4 trustees', time: '6h ago', color: 'var(--color-primary)' },
-];
+const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
 
 const quickActions = [
   { label: 'Log Donation', icon: '💸', path: '/fundraising' },
@@ -25,6 +21,9 @@ const quickActions = [
 ];
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const reducedMotion = useReducedMotion();
+  const { user } = useAuth();
   const { donors, transactions, campaigns, complianceDocs } = useStore();
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -32,24 +31,61 @@ const Dashboard: React.FC = () => {
   const [anomaly, setAnomaly] = useState<{has_anomaly: boolean, message: string} | null>(null);
   const [reportDrafting, setReportDrafting] = useState(false);
   const [morningBrief, setMorningBrief] = useState<any[]>([]);
+  const [briefHandled, setBriefHandled] = useState<any[]>([]);
   const [isBriefLoading, setIsBriefLoading] = useState(true);
   const [inboxItems, setInboxItems] = useState<any[]>([]);
   const [inboxLoading, setInboxLoading] = useState(true);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
 
+  const activityLogScrollRef = useRef<HTMLDivElement>(null);
+  const activityLogVirtualizer = useVirtualizer({
+    count: activityLogs.length,
+    getScrollElement: () => activityLogScrollRef.current,
+    estimateSize: () => 76,
+    overscan: 12,
+  });
+
+  const activityFeed: { id: string; icon: string; text: string; time: string; color: string; tasksPath: string }[] =
+    (notifications || []).slice(0, 6).map((n: any, idx: number) => ({
+      id: String(n?.id ?? idx),
+      icon: n?.type === 'urgent' ? '⚠️' : n?.type === 'agent' ? '🤖' : '📌',
+      text: String(n?.message || n?.title || 'Update'),
+      time: String(n?.time || ''),
+      color: n?.type === 'urgent' ? 'var(--color-warning)' : n?.type === 'agent' ? 'var(--color-secondary)' : 'var(--color-text-tertiary)',
+      tasksPath: notificationTasksHref(n),
+    }));
   useEffect(() => {
     const fetchAnalytics = async () => {
+      const uid = user?.id || '';
+      const role = user?.role || '';
       try {
+        try {
+          const raw = localStorage.getItem(BRIEF_CACHE_KEY);
+          if (raw) {
+            const c = JSON.parse(raw);
+            if (c.uid === uid && c.role === role && Date.now() - (c.at || 0) < 30 * 60 * 1000) {
+              setMorningBrief(Array.isArray(c.priorities) ? c.priorities : []);
+              setBriefHandled(Array.isArray(c.handled) ? c.handled : []);
+              setIsBriefLoading(false);
+            }
+          }
+        } catch {
+          /* ignore cache */
+        }
+
         const [forecastRes, anomalyRes, briefRes] = await Promise.all([
           apiFetch('/analytics/revenue-forecast'),
           apiFetch('/analytics/anomalies'),
-          apiFetch('/morning-brief')
+          apiFetch('/morning-brief'),
         ]);
 
         if (forecastRes.ok) {
           const data = await forecastRes.json();
           const combined = [
             ...data.actuals.map((d: any) => ({ ...d, is_estimate: false })),
-            ...data.forecast.map((d: any) => ({ ...d, is_estimate: true }))
+            ...data.forecast.map((d: any) => ({ ...d, is_estimate: true })),
           ].slice(-9);
           setForecastData(combined);
         }
@@ -57,19 +93,31 @@ const Dashboard: React.FC = () => {
         if (anomalyRes.ok) {
           const data = await anomalyRes.json();
           if (data.has_anomaly) {
-            setAnomaly({ 
-              has_anomaly: true, 
-              message: "Anomaly Detected: Donor Acquisition Velocity Dropped by 30%. Recommend triggering re-engagement agent."
+            setAnomaly({
+              has_anomaly: true,
+              message:
+                'Anomaly Detected: Donor Acquisition Velocity Dropped by 30%. Recommend triggering re-engagement agent.',
             });
           }
         }
 
         if (briefRes.ok) {
           const data = await briefRes.json();
-          setMorningBrief(data);
+          const priorities = Array.isArray(data) ? data : data.priorities || [];
+          const handled = Array.isArray(data?.handled_by_agents) ? data.handled_by_agents : [];
+          setMorningBrief(priorities);
+          setBriefHandled(handled);
+          try {
+            localStorage.setItem(
+              BRIEF_CACHE_KEY,
+              JSON.stringify({ uid, role, at: Date.now(), priorities, handled })
+            );
+          } catch {
+            /* ignore */
+          }
         }
       } catch (err) {
-        console.error("Failed to fetch analytics:", err);
+        console.error('Failed to fetch analytics:', err);
       } finally {
         setLoading(false);
         setIsBriefLoading(false);
@@ -77,7 +125,7 @@ const Dashboard: React.FC = () => {
     };
 
     fetchAnalytics();
-  }, []);
+  }, [user?.id, user?.role]);
 
   useEffect(() => {
     const fetchInbox = async () => {
@@ -95,6 +143,20 @@ const Dashboard: React.FC = () => {
       }
     };
     fetchInbox();
+  }, []);
+
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const res = await apiFetch('/notifications');
+        if (!res.ok) return;
+        const data = await res.json();
+        setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+      } catch {
+        // ignore
+      }
+    };
+    run();
   }, []);
 
   const refreshInbox = async () => {
@@ -117,15 +179,20 @@ const Dashboard: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ngo_name: "India NGO Trust",
-          impact_data: { "education": "1200 girls trained", "health": "45 camps conducted", "revenue": "₹4.2Cr raised" }
+          ngo_name: "GoodJobs NGO",
+          impact_data: {
+            donors: donors.length,
+            transactions: transactions.length,
+            revenue_inr: transactions.reduce((s, t) => s + (Number(t.amount) || 0), 0),
+            campaigns: campaigns.length,
+          }
         })
       });
       if (res.ok) {
         const data = await res.json();
         toast.success("AI Annual Report Draft Generated!", { duration: 5000 });
+        // For now, surface in console; UI modal can be added later.
         console.log("Draft:", data.draft);
-        // In a real app, open a modal with the draft
       } else {
         toast.error("Failed to generate draft.");
       }
@@ -136,12 +203,42 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const totalRaised = transactions.reduce((s, t) => s + t.amount, 0) + 4200000;
-  const expiringSoon = complianceDocs.filter(d => d.status === 'Expiring Soon').length;
+  const totalRaised = transactions.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const expiringSoon = inboxItems.filter(i => i.kind === 'compliance_doc').length || complianceDocs.filter(d => d.status === 'Expiring Soon').length;
   const recentTx = transactions.slice(0, 5);
 
-  const handleReport = () => {
-    toast.success('Generating Executive Board Report PDF...', { icon: '📊' });
+  const handleReport = async () => {
+    try {
+      const res = await apiFetch('/compliance/health-report.pdf');
+      if (!res.ok) throw new Error('report');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'board_report.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to generate report.');
+    }
+  };
+
+  const chartSeries = forecastData.length ? forecastData : [];
+  const maxMonthly = Math.max(1, ...chartSeries.map(d => Number(d.amount) || 0));
+
+  const openActivityLog = async () => {
+    setShowWhatsApp(true);
+    setActivityLoading(true);
+    try {
+      const res = await apiFetch('/volunteers/activity');
+      if (!res.ok) throw new Error('activity');
+      const data = await res.json();
+      setActivityLogs(Array.isArray(data.events) ? data.events : []);
+    } catch {
+      setActivityLogs([]);
+    } finally {
+      setActivityLoading(false);
+    }
   };
 
   return (
@@ -153,7 +250,7 @@ const Dashboard: React.FC = () => {
             <span style={{ color: 'var(--color-success)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
               <span className="agent-pulse" /> Your agents are active
             </span> 
-            • Today is Thursday, April 23
+            • Today is {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
         </div>
         <div className="flex gap-4">
@@ -178,29 +275,141 @@ const Dashboard: React.FC = () => {
               <p className="text-tertiary">Synthesizing priorities...</p>
             </div>
           ) : (
-            morningBrief.map(item => (
-              <div key={item.id} className="card" style={{ 
-                padding: '1.25rem', 
-                marginBottom: '1rem', 
-                borderLeft: `4px solid ${item.priority === 'High' ? 'var(--color-danger)' : 'var(--color-warning)'}`,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                boxShadow: 'var(--shadow-sm)'
-              }}>
-                <div style={{ flex: 1 }}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className={`badge ${item.priority === 'High' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>{item.priority}</span>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-tertiary)' }}>{item.category.toUpperCase()}</span>
+            <>
+              {morningBrief.map((item: any, index: number) => (
+                <motion.div
+                  key={item.id}
+                  className="card"
+                  initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+                  animate={{
+                    opacity: 1,
+                    y: 0,
+                    transition: reducedMotion
+                      ? { duration: 0 }
+                      : { duration: 0.3, ease: [0, 0, 0.2, 1], delay: listItemEnterDelay(index) },
+                  }}
+                  style={{
+                    padding: '1.25rem',
+                    marginBottom: '1rem',
+                    borderLeft: `4px solid ${item.priority === 'High' ? 'var(--color-danger)' : 'var(--color-warning)'}`,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '1rem',
+                    flexWrap: 'wrap',
+                    boxShadow: 'var(--shadow-sm)',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className={`badge ${item.priority === 'High' ? 'badge-danger' : 'badge-warning'}`}
+                        style={{ fontSize: '0.65rem' }}
+                      >
+                        {item.priority}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-tertiary)' }}>
+                        {(item.category || '').toString().toUpperCase()}
+                      </span>
+                    </div>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.25rem' }}>{item.title}</h3>
+                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>{item.summary}</p>
                   </div>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.25rem' }}>{item.title}</h3>
-                  <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>{item.summary}</p>
+                  <div className="flex gap-2" style={{ flexShrink: 0, flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn-primary"
+                      style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          if (item.kind === 'csr_report_due') {
+                            const inl = item.inline || {};
+                            const meta = item.meta || {};
+                            const company = inl.company ?? meta.company;
+                            const project = inl.project ?? meta.project;
+                            if (company) {
+                              const q = new URLSearchParams();
+                              q.set('company', String(company));
+                              if (project) q.set('project', String(project));
+                              const res = await apiFetch(`/finance/uc.pdf?${q}`);
+                              if (res.ok) {
+                                const blob = await res.blob();
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = 'utilization_certificate_draft.pdf';
+                                a.click();
+                                URL.revokeObjectURL(url);
+                                toast.success('UC draft downloaded.');
+                              }
+                            }
+                          }
+                          if (item.kind === 'month_end_close') {
+                            navigate('/finance');
+                            return;
+                          }
+                          const route = item?.primary_action?.route;
+                          if (route) {
+                            const path = route.startsWith('/') ? route : `/${route}`;
+                            if (path === '/tasks') navigate(item.tasks_deep_link_path || tasksInboxHref(item.kind, item.ref?.id));
+                            else navigate(path);
+                          } else toast('No action linked for this item yet.');
+                        } catch {
+                          toast.error('Action failed.');
+                        }
+                      }}
+                    >
+                      {item?.primary_action?.label || 'Take action'} <ArrowUpRight size={14} />
+                    </button>
+                    {item?.secondary_action?.route && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}
+                        type="button"
+                        onClick={() => {
+                          const route = item.secondary_action.route;
+                          const path = route.startsWith('/') ? route : `/${route}`;
+                          if (path === '/tasks') navigate(item.tasks_deep_link_path || tasksInboxHref(item.kind, item.ref?.id));
+                          else navigate(path);
+                        }}
+                      >
+                        {item.secondary_action.label || 'Module'}
+                      </button>
+                    )}
+                    {item?.tertiary_action?.route && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}
+                        type="button"
+                        onClick={() => {
+                          const route = item.tertiary_action.route;
+                          const path = route.startsWith('/') ? route : `/${route}`;
+                          if (path === '/tasks') navigate(item.tasks_deep_link_path || tasksInboxHref(item.kind, item.ref?.id));
+                          else navigate(path);
+                        }}
+                      >
+                        {item.tertiary_action.label || 'Inbox'}
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+              {briefHandled.length > 0 && (
+                <div className="card" style={{ padding: '1rem', marginTop: '1rem', background: 'var(--color-bg-main)' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-tertiary)', marginBottom: '0.5rem' }}>
+                    Handled by agents (recent)
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                    {briefHandled.slice(0, 6).map((h: any, i: number) => (
+                      <li key={i} style={{ marginBottom: 4 }}>
+                        {(h.intent_type || 'intent').toString()}: {String(h.directive || '').slice(0, 80)}
+                        {h.executed_at ? ` — ${String(h.executed_at).slice(0, 16)}` : ''}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}>
-                  Take Action <ArrowUpRight size={14} />
-                </button>
-              </div>
-            ))
+              )}
+            </>
           )}
         </section>
 
@@ -217,13 +426,14 @@ const Dashboard: React.FC = () => {
                   <span style={{ fontSize: '0.85rem' }}>Loading…</span>
                 </div>
               ) : inboxItems.length === 0 ? (
-                <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>
-                  No pending items. You’re all caught up.
+                <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+                  <div style={{ fontSize: '1.5rem', marginBottom: 6 }}>🎉</div>
+                  <div style={{ fontWeight: 600, color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>All clear — agents are handling the rest</div>
                 </div>
               ) : (
                 <div className="flex flex-col gap-3">
                   {inboxItems.slice(0, 6).map((it: any, idx: number) => (
-                    <div key={idx} style={{ padding: '0.75rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'white' }}>
+                    <div key={`${it.kind}-${it.ref?.id ?? idx}`} style={{ padding: '0.75rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-card)' }}>
                       <div className="flex justify-between items-center" style={{ marginBottom: '0.25rem' }}>
                         <span className={`badge ${it.priority === 'High' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>{it.priority}</span>
                         <span style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>{(it.kind || '').toString().toUpperCase()}</span>
@@ -234,7 +444,11 @@ const Dashboard: React.FC = () => {
                           className="btn btn-secondary"
                           style={{ flex: 1, padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
                           onClick={() => {
-                            if (it.primary_action?.route) window.location.hash = it.primary_action.route;
+                            const r = it.primary_action?.route;
+                            if (!r) return;
+                            const p = r.startsWith('/') ? r : `/${r}`;
+                            if (p === '/tasks') navigate(tasksInboxHref(it.kind, it.ref?.id));
+                            else navigate(p);
                           }}
                         >
                           {it.primary_action?.label || 'Open'}
@@ -243,6 +457,9 @@ const Dashboard: React.FC = () => {
                           className="btn btn-secondary"
                           style={{ padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
                           onClick={async () => {
+                            const kind = it.kind;
+                            const id = it.ref?.id;
+                            setInboxItems(prev => prev.filter(x => !(x.kind === kind && x.ref?.id === id)));
                             try {
                               const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
                               const res = await apiFetch('/inbox/snooze', {
@@ -252,9 +469,9 @@ const Dashboard: React.FC = () => {
                               });
                               if (!res.ok) throw new Error('snooze');
                               toast.success('Snoozed for 24h.');
-                              refreshInbox();
                             } catch {
                               toast.error('Failed to snooze.');
+                              await refreshInbox();
                             }
                           }}
                         >
@@ -264,6 +481,9 @@ const Dashboard: React.FC = () => {
                           className="btn btn-secondary"
                           style={{ padding: '0.35rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-success)', borderColor: 'var(--color-success)' }}
                           onClick={async () => {
+                            const kind = it.kind;
+                            const id = it.ref?.id;
+                            setInboxItems(prev => prev.filter(x => !(x.kind === kind && x.ref?.id === id)));
                             try {
                               const res = await apiFetch('/inbox/resolve', {
                                 method: 'POST',
@@ -272,9 +492,9 @@ const Dashboard: React.FC = () => {
                               });
                               if (!res.ok) throw new Error('resolve');
                               toast.success('Done.');
-                              refreshInbox();
                             } catch {
                               toast.error('Failed to mark done.');
+                              await refreshInbox();
                             }
                           }}
                         >
@@ -296,8 +516,22 @@ const Dashboard: React.FC = () => {
               <h3 className="card-title">Agents in Background</h3>
             </div>
             <div className="card-body">
-              {agentActivity.map(item => (
-                <div key={item.id} style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+              {activityFeed.length === 0 ? (
+                <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>No recent agent updates.</div>
+              ) : activityFeed.map(item => (
+                <div
+                  key={item.id}
+                  role="button"
+                  tabIndex={0}
+                  style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', cursor: 'pointer' }}
+                  onClick={() => navigate(item.tasksPath)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      navigate(item.tasksPath);
+                    }
+                  }}
+                >
                   <div style={{ 
                     width: '32px', 
                     height: '32px', 
@@ -316,21 +550,48 @@ const Dashboard: React.FC = () => {
                   </div>
                 </div>
               ))}
-              <div style={{ marginTop: '1.5rem', padding: '0.75rem', background: 'var(--color-bg-main)', borderRadius: 'var(--radius-md)', fontSize: '0.75rem' }}>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="font-semibold">Nurture Agent</span>
-                  <span className="text-success">Active</span>
-                </div>
-                <div className="progress-inline" style={{ height: '4px' }}>
-                  <div className="progress-track" style={{ height: '4px' }}>
-                    <div className="progress-val" style={{ width: '85%', height: '4px' }}></div>
-                  </div>
-                </div>
-                <div style={{ marginTop: '0.5rem', color: 'var(--color-text-tertiary)' }}>85% task completion for today</div>
-              </div>
             </div>
           </div>
         </aside>
+      </div>
+
+      {/* Smart Notifications (real feed) */}
+      <div className="card" style={{ marginBottom: '2rem' }}>
+        <div className="card-header flex justify-between items-center">
+          <h3 className="card-title flex items-center gap-2"><Bell size={18} /> Smart Notifications</h3>
+          <button className="btn btn-secondary" onClick={handleReport} style={{ fontSize: '0.85rem' }}>
+            Generate Board Report <Download size={14} />
+          </button>
+        </div>
+        <div className="card-body">
+          {notifications.length === 0 ? (
+            <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>No notifications right now.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {notifications.slice(0, 6).map((n: any) => (
+                <div
+                  key={n.id}
+                  role="button"
+                  tabIndex={0}
+                  style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 1rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-card)', cursor: 'pointer' }}
+                  onClick={() => navigate(notificationTasksHref(n))}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      navigate(notificationTasksHref(n));
+                    }
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.15rem' }}>{n.title}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.message}</div>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', flexShrink: 0 }}>{n.time}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Metrics & Anomaly section below */}
@@ -391,8 +652,8 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
         <button className="btn btn-secondary" style={{ background: 'white', color: '#166534', border: 'none', fontWeight: 600 }}
-          onClick={() => setShowWhatsApp(true)}>
-          View WhatsApp Logs
+          onClick={openActivityLog}>
+          View Activity Log
         </button>
       </div>
 
@@ -493,12 +754,14 @@ const Dashboard: React.FC = () => {
           <div className="card-header flex justify-between items-center">
             <h3 className="card-title flex items-center gap-2"><Bot size={18} color="#8b5cf6" /> Agent Activity Feed</h3>
             <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-              onClick={() => toast('Full agent log available in GoodJobs Copilot.')}>
+              onClick={() => { window.location.hash = '/agent-hq'; }}>
               View All
             </button>
           </div>
           <div className="card-body flex flex-col gap-4">
-            {agentActivity.map(act => (
+            {activityFeed.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '1.5rem 0' }}>No recent activity.</div>
+            ) : activityFeed.map(act => (
               <div key={act.id} className="flex items-start gap-3" style={{ paddingBottom: '0.75rem', borderBottom: '1px solid var(--color-border-light)' }}>
                 <div style={{ fontSize: '1.25rem', minWidth: 28, marginTop: '0.1rem' }}>{act.icon}</div>
                 <div style={{ flex: 1 }}>
@@ -515,47 +778,88 @@ const Dashboard: React.FC = () => {
           <div className="card-header flex justify-between items-center">
             <h3 className="card-title flex items-center gap-2"><ShieldCheck size={18} color="var(--color-primary)" /> Compliance Status</h3>
             <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-              onClick={() => toast('Navigate to Compliance HQ for full details.')}>
+              onClick={() => { window.location.hash = '/compliance'; }}>
               View HQ
             </button>
           </div>
           <div className="card-body flex flex-col gap-4">
-            {complianceDocs.slice(0, 4).map(doc => (
-              <div key={doc.id} className="flex justify-between items-center" style={{ paddingBottom: '0.75rem', borderBottom: '1px solid var(--color-border-light)' }}>
-                <div>
-                  <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>{doc.name}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>Expires: {doc.expiry}</div>
+            {(inboxItems.filter(i => i.kind === 'compliance_doc').slice(0, 4)).map((doc: any) => (
+              <div key={(doc.ref?.id || doc.title)} className="flex justify-between items-center" style={{ paddingBottom: '0.75rem', borderBottom: '1px solid var(--color-border-light)' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{doc.meta?.doc_type ? `Type: ${doc.meta.doc_type}` : ''}</div>
                 </div>
-                <span className={`badge ${doc.status === 'Valid' ? 'badge-success' : ''}`}
-                  style={doc.status === 'Expiring Soon' ? { background: '#fef3c7', color: '#92400e' } : {}}>
-                  {doc.status}
-                </span>
+                <span className="badge badge-warning" style={{ fontSize: '0.65rem' }}>{doc.priority}</span>
               </div>
             ))}
+            {inboxItems.filter(i => i.kind === 'compliance_doc').length === 0 && (
+              <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '1.5rem 0' }}>No expiring documents.</div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* WhatsApp Logs Modal */}
+      {/* Activity Log Modal */}
       {showWhatsApp && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
           <div className="card" style={{ width: '500px', maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div className="card-header flex justify-between items-center">
-              <h3 className="card-title flex items-center gap-2"><MessageCircle size={18} color="#16a34a" /> WhatsApp Bot Logs</h3>
+              <h3 className="card-title flex items-center gap-2"><MessageCircle size={18} color="#16a34a" /> Activity Log</h3>
               <button className="action-btn" onClick={() => setShowWhatsApp(false)}><X size={20} /></button>
             </div>
-            <div style={{ overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {[
-                { from: 'Priya M. (Field Staff)', msg: 'Received ₹5000 from Ravi for Health Camp Nashik', time: '10:14 AM', parsed: '✅ Logged as TRX-1098 under Healthcare Camp Fund' },
-                { from: 'Ramesh K. (Field Staff)', msg: 'Enrolled Sunita Devi in Nashik Livelihood program family 3', time: '9:52 AM', parsed: '✅ Added BEN-1049 to Women Livelihood Center' },
-                { from: 'Dr. Sharma (Field Staff)', msg: 'Health camp done. 45 patients checked. Pune Main Hall.', time: '9:10 AM', parsed: '✅ Field visit logged for Healthcare Camp, Pune' },
-              ].map((log, i) => (
-                <div key={i} style={{ background: 'var(--color-bg-main)', borderRadius: 'var(--radius-md)', padding: '1rem', border: '1px solid var(--color-border-light)' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '0.25rem' }}>{log.from} • {log.time}</div>
-                  <div style={{ background: '#dcfce7', padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-sm)', fontStyle: 'italic', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#166534' }}>"{log.msg}"</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: 500 }}>{log.parsed}</div>
+            <div ref={activityLogScrollRef} style={{ overflowY: 'auto', padding: '1rem 1.5rem 1.5rem', flex: 1, minHeight: 0 }}>
+              {activityLoading ? (
+                <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
+                  <Loader2 className="animate-spin mx-auto mb-2" />
+                  Loading…
                 </div>
-              ))}
+              ) : activityLogs.length === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)' }}>No activity yet.</div>
+              ) : (
+                <div style={{ height: activityLogVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                  {activityLogVirtualizer.getVirtualItems().map(vr => {
+                    const ev = activityLogs[vr.index];
+                    return (
+                      <div
+                        key={String(ev.id ?? vr.index)}
+                        data-index={vr.index}
+                        ref={activityLogVirtualizer.measureElement}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          transform: `translateY(${vr.start}px)`,
+                          paddingBottom: '0.75rem',
+                        }}
+                      >
+                        <div
+                          style={{
+                            background: 'var(--color-bg-main)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '1rem',
+                            border: '1px solid var(--color-border-light)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              color: 'var(--color-text-secondary)',
+                              marginBottom: '0.25rem',
+                            }}
+                          >
+                            {(ev.type || 'event').toString()} • {(ev.created_at || '').toString().slice(0, 16).replace('T', ' ')}
+                          </div>
+                          <div style={{ fontSize: '0.875rem' }}>
+                            {ev.shift_title || ev.message || ev.audience || '—'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>

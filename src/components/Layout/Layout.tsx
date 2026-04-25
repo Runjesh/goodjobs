@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   LayoutDashboard, HeartHandshake, Users, Wallet, ClipboardList,
   Building2, CalendarCheck, ShieldCheck, Search, Bell, Settings,
@@ -16,6 +17,7 @@ import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 import { useStore } from '../../store/useStore';
+import { getPageVariants } from '../../motion/variants';
 import './Layout.css';
 
 // ── Navigation Config ────────────────────────────────────────────────────────
@@ -45,6 +47,8 @@ const Layout: React.FC = () => {
   const { setVolunteers, setBeneficiaries } = useStore();
   const navigate       = useNavigate();
   const location       = useLocation();
+  const reducedMotion  = useReducedMotion();
+  const pageVariants   = useMemo(() => getPageVariants(!!reducedMotion), [reducedMotion]);
   const meta           = user ? ROLE_META[user.role] : null;
 
   // Close sidebar & more on route change
@@ -83,12 +87,24 @@ const Layout: React.FC = () => {
         if (Array.isArray(dData.donors)) setDonors(dData.donors);
         if (Array.isArray(tData.transactions)) setTransactions(tData.transactions);
       } catch {
-        // keep local demo data
+        // keep whatever is currently in store (may be empty)
       }
     };
     run();
     return () => { cancelled = true; };
   }, [setDonors, setTransactions]);
+
+  // Warm cache for inbox + morning brief (first screen many users open)
+  useEffect(() => {
+    if (!user) return;
+    void (async () => {
+      try {
+        await Promise.all([apiFetch('/inbox'), apiFetch('/morning-brief')]);
+      } catch {
+        /* non-fatal */
+      }
+    })();
+  }, [user?.token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +116,7 @@ const Layout: React.FC = () => {
         if (cancelled) return;
         if (Array.isArray(data.campaigns)) setCampaigns(data.campaigns);
       } catch {
-        // keep local demo data
+        // keep whatever is currently in store (may be empty)
       }
     };
     run();
@@ -117,7 +133,7 @@ const Layout: React.FC = () => {
         if (cancelled) return;
         if (Array.isArray(data.cards)) setCsrCards(data.cards as any);
       } catch {
-        // keep local demo data
+        // keep whatever is currently in store (may be empty)
       }
     };
     run();
@@ -139,7 +155,7 @@ const Layout: React.FC = () => {
         if (Array.isArray(vData.volunteers)) setVolunteers(vData.volunteers);
         if (Array.isArray(bData.beneficiaries)) setBeneficiaries(bData.beneficiaries);
       } catch {
-        // keep local demo data
+        // keep whatever is currently in store (may be empty)
       }
     };
     run();
@@ -320,7 +336,19 @@ const Layout: React.FC = () => {
 
         {/* Page Content */}
         <div className="page-content">
-          <Outlet />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              className="page-transition-root"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              style={{ minHeight: '100%' }}
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
         </div>
       </main>
 
