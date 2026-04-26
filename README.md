@@ -31,13 +31,25 @@ python3 backend/scripts/seed_prospect_db.py
 
 ## Railway / production frontend + API
 
-1. **Backend service** — set `FRONTEND_ORIGINS` to your **browser-facing** site URL(s), comma-separated, e.g.  
+Use **two Railway services** unless you intentionally run FastAPI and static files behind one reverse proxy:
+
+| Service | Role | Typical public URL |
+|--------|------|---------------------|
+| **Backend** | `uvicorn api.main:app` (FastAPI) | `https://goodjobs-api-xxxx.up.railway.app` |
+| **Frontend** | Static `dist/` (Nginx or `vite preview`) | `https://goodjobs-production-xxxx.up.railway.app` |
+
+If the frontend URL only serves HTML/JS, **`POST …/auth/login` on that host will return 405** — the browser must call the **backend** URL. Set `VITE_API_BASE_URL` on the frontend build to the backend’s public origin.
+
+1. **Backend service** — set `FRONTEND_ORIGINS` to every **browser** origin that loads the SPA, comma-separated, e.g.  
    `https://goodjobs.co.in,https://goodjobs-production-xxxx.up.railway.app,http://localhost:5173`  
-   so the browser is allowed to call the API (CORS). If unset, the API defaults to allowing `localhost:5173` and `https://goodjobs.co.in`.
+   so CORS allows `fetch` from the UI. If unset, the API defaults to `localhost:5173` and `https://goodjobs.co.in`.
 
-2. **Frontend build** — Vite bakes the API URL at build time:
-   - If the API is on **another** Railway URL, set **`VITE_API_BASE_URL`** on the **frontend** build to that public API origin (no trailing slash), e.g. `https://your-api-service.up.railway.app`.
-   - If the API is served from the **same** public origin as the static app, you can omit `VITE_API_BASE_URL`; the client will use `window.location.origin`.
+2. **Frontend build** (variables in Railway **before** `npm run build` / Docker build):
+   - **Required for split deploy:** `VITE_API_BASE_URL=https://<your-fastapi-service>.up.railway.app` (no trailing slash).
+   - **Monolith only:** if FastAPI truly serves the SPA from the **same** host, set `VITE_USE_SAME_ORIGIN_API=true` and omit `VITE_API_BASE_URL`.
+   - **Hotfix without rebuild:** in the browser console,  
+     `localStorage.setItem('goodjobs_api_base','https://<your-fastapi-service>.up.railway.app'); location.reload()`  
+     (then fix the build env and redeploy).
 
-3. After deploying a new service worker, do a hard refresh or unregister the old SW once so `sw.js` updates.
+3. After deploying a new service worker, hard-refresh or unregister the old SW once so `sw.js` updates.
 
