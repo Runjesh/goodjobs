@@ -29,9 +29,26 @@ export SEVASUITE_NGO_ID="ngo_001"
 python3 backend/scripts/seed_prospect_db.py
 ```
 
-## Railway / production frontend + API
+## Railway — **one service** (simplest)
 
-Use **two Railway services** unless you intentionally run FastAPI and static files behind one reverse proxy:
+Use the repo **`Dockerfile`**: one container runs **FastAPI** and serves the built **`dist/`** from the same URL, so you do **not** need `VITE_API_BASE_URL` or a second service.
+
+1. In Railway: **New project** → **Deploy from GitHub** → select this repo.
+2. Railway should detect **`Dockerfile`**. If not: service **Settings** → set **Dockerfile path** to `Dockerfile`.
+3. **Variables** on that service, at minimum:
+   - `FRONTEND_ORIGINS` — your public site URL(s), e.g. `https://goodjobs-production-xxxx.up.railway.app,https://goodjobs.co.in`
+   - `JWT_SECRET` — random string  
+   - `DATABASE_URL` — if you use Postgres (optional for demo mode)
+
+The image sets **`VITE_USE_SAME_ORIGIN_API=true`** during `npm run build`, so the browser calls the **same** host for API + pages.
+
+4. **Networking** → generate a public domain → open it: `/docs` should show Swagger, `/login` should load the app.
+
+---
+
+## Railway / production frontend + API (two services)
+
+Use **two Railway services** if you prefer separate static hosting and API:
 
 | Service | Role | Typical public URL |
 |--------|------|---------------------|

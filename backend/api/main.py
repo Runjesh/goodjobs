@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import hmac, hashlib, json, os
@@ -23,7 +26,7 @@ from core.analytics import predict_revenue, detect_anomalies, calculate_propensi
 from agents.orchestrator import process_orchestration
 from core.gen_ai import summarize_conversations, analyze_sentiment, draft_annual_report
 from core.intent_router import route_intent, generate_morning_brief
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from core.db import db_conn
@@ -5103,3 +5106,48 @@ def delete_board_member(member_id: str, current_user: TokenUser = Depends(requir
         raise HTTPException(status_code=404, detail="Board member not found.")
     BOARD_MEMBERS_BY_NGO[current_user.ngo_id] = next_members
     return {"status": "deleted", "id": member_id, "source": "memory"}
+
+
+# ── Single Railway service: serve Vite `dist/` from the same uvicorn process ──
+# - `/assets/*` is mounted for hashed bundles (register last among mounts; API routes stay first).
+# - SPA paths (`/tasks`, `/login`, …) are not files; Starlette StaticFiles(html=True) no longer
+#   serves index.html for missing paths, so we use an explicit GET catch-all after all API routes.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DIST_DIR = _REPO_ROOT / "dist"
+_SPA_INDEX = _DIST_DIR / "index.html"
+
+
+def _mount_frontend_dist() -> None:
+    if not _SPA_INDEX.is_file():
+        return
+    assets_dir = _DIST_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="vite-assets")
+
+
+_mount_frontend_dist()
+
+
+@app.get("/", include_in_schema=False)
+async def spa_index_root():
+    if not _SPA_INDEX.is_file():
+        raise HTTPException(status_code=503, detail="Frontend dist/ not built (missing index.html).")
+    return FileResponse(_SPA_INDEX)
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str):
+    """
+    Serve files from dist/ when present; otherwise index.html for client-side routes.
+    Registered after all API routes so GET /inbox, /openapi.json, etc. keep matching the app.
+    """
+    if not _SPA_INDEX.is_file():
+        raise HTTPException(status_code=503, detail="Frontend dist/ not built (missing index.html).")
+    safe = (_DIST_DIR / full_path).resolve()
+    try:
+        safe.relative_to(_DIST_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if safe.is_file():
+        return FileResponse(safe)
+    return FileResponse(_SPA_INDEX)
