@@ -24,6 +24,7 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const reducedMotion = useReducedMotion();
   const { user } = useAuth();
+  const canRunAnnualDraft = user?.role === 'ed';
   const { donors, transactions, campaigns, complianceDocs } = useStore();
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -254,10 +255,12 @@ const Dashboard: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-4">
+          {canRunAnnualDraft && (
           <button className="btn btn-secondary" onClick={handleDraftReport} disabled={reportDrafting}>
             {reportDrafting ? <Loader2 size={16} className="animate-spin" /> : <Bot size={16} />}
             {reportDrafting ? "Drafting..." : "Draft Annual Report"}
           </button>
+          )}
         </div>
       </div>
 

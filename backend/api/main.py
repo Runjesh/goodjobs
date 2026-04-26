@@ -661,7 +661,7 @@ class BeneficiaryCreate(BaseModel):
 
 
 @app.get("/programs/beneficiaries", tags=["Programs"])
-def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "programs"))):
+def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "programs", "board"))):
     with db_conn() as conn:
         if conn is None:
             _seed_memory_beneficiaries(current_user.ngo_id)
@@ -1068,7 +1068,7 @@ def _ts_iso(val: Any) -> Optional[str]:
 
 
 @app.get("/csr/cards", tags=["CSR"])
-def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "programs", "board"))):
     with db_conn() as conn:
         if conn is None:
             _seed_memory_csr(current_user.ngo_id)
@@ -3247,7 +3247,7 @@ def post_process_intent(directive: str, current_user: TokenUser = Depends(requir
 def get_intent_queue(
     status: Optional[str] = None,
     limit: int = 50,
-    current_user: TokenUser = Depends(require_role("ed", "admin", "fundraising")),
+    current_user: TokenUser = Depends(require_role("ed", "admin", "fundraising", "board")),
 ):
     with db_conn() as conn:
         if conn is None:
@@ -5026,7 +5026,7 @@ BOARD_MEMBERS_BY_NGO: Dict[str, List[Dict[str, Any]]] = {
 }
 
 @app.get("/governance/board-members", tags=["Governance"])
-def list_board_members(current_user: TokenUser = Depends(require_role("ed", "admin"))):
+def list_board_members(current_user: TokenUser = Depends(require_role("ed", "admin", "board"))):
     with db_conn() as conn:
         if conn is not None:
             cur = conn.cursor()

@@ -41,7 +41,7 @@ const Layout: React.FC = () => {
   const [isSidebarOpen,  setIsSidebarOpen]  = useState(false);
   const [isNotifOpen,    setIsNotifOpen]    = useState(false);
   const [isDarkMode,     setIsDarkMode]     = useState(false);
-  const { user, can }  = useAuth();
+  const { user, can } = useAuth();
   const { t, lang, setLanguage } = useTranslation();
   const { setDonors, setTransactions, setCampaigns, setCsrCards } = useStore();
   const { setVolunteers, setBeneficiaries } = useStore();
@@ -71,28 +71,42 @@ const Layout: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Hydrate CRM + transactions from backend (DB or memory mode)
+  // Hydrate CRM + transactions only when the role may access those modules (avoids 403 noise).
   useEffect(() => {
+    if (!can('crm', 'canView')) return;
     let cancelled = false;
     const run = async () => {
       try {
-        const [dRes, tRes] = await Promise.all([
-          apiFetch('/crm/donors'),
-          apiFetch('/finance/transactions'),
-        ]);
-        if (!dRes.ok || !tRes.ok) return;
+        const dRes = await apiFetch('/crm/donors');
+        if (!dRes.ok) return;
         const dData = await dRes.json();
-        const tData = await tRes.json();
         if (cancelled) return;
         if (Array.isArray(dData.donors)) setDonors(dData.donors);
-        if (Array.isArray(tData.transactions)) setTransactions(tData.transactions);
       } catch {
-        // keep whatever is currently in store (may be empty)
+        /* keep store */
       }
     };
     run();
     return () => { cancelled = true; };
-  }, [setDonors, setTransactions]);
+  }, [can, setDonors]);
+
+  useEffect(() => {
+    if (!can('finance', 'canView')) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const tRes = await apiFetch('/finance/transactions');
+        if (!tRes.ok) return;
+        const tData = await tRes.json();
+        if (cancelled) return;
+        if (Array.isArray(tData.transactions)) setTransactions(tData.transactions);
+      } catch {
+        /* keep store */
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [can, setTransactions]);
 
   // Warm cache for inbox + morning brief (first screen many users open)
   useEffect(() => {
@@ -107,6 +121,7 @@ const Layout: React.FC = () => {
   }, [user?.token]);
 
   useEffect(() => {
+    if (!can('fundraising', 'canView')) return;
     let cancelled = false;
     const run = async () => {
       try {
@@ -116,14 +131,15 @@ const Layout: React.FC = () => {
         if (cancelled) return;
         if (Array.isArray(data.campaigns)) setCampaigns(data.campaigns);
       } catch {
-        // keep whatever is currently in store (may be empty)
+        /* keep store */
       }
     };
     run();
     return () => { cancelled = true; };
-  }, [setCampaigns]);
+  }, [can, setCampaigns]);
 
   useEffect(() => {
+    if (!can('csr', 'canView')) return;
     let cancelled = false;
     const run = async () => {
       try {
@@ -133,34 +149,48 @@ const Layout: React.FC = () => {
         if (cancelled) return;
         if (Array.isArray(data.cards)) setCsrCards(data.cards as any);
       } catch {
-        // keep whatever is currently in store (may be empty)
+        /* keep store */
       }
     };
     run();
     return () => { cancelled = true; };
-  }, [setCsrCards]);
+  }, [can, setCsrCards]);
 
   useEffect(() => {
+    if (!can('volunteers', 'canView')) return;
     let cancelled = false;
     const run = async () => {
       try {
-        const [vRes, bRes] = await Promise.all([
-          apiFetch('/volunteers/roster'),
-          apiFetch('/programs/beneficiaries'),
-        ]);
-        if (!vRes.ok || !bRes.ok) return;
+        const vRes = await apiFetch('/volunteers/roster');
+        if (!vRes.ok) return;
         const vData = await vRes.json();
-        const bData = await bRes.json();
         if (cancelled) return;
         if (Array.isArray(vData.volunteers)) setVolunteers(vData.volunteers);
-        if (Array.isArray(bData.beneficiaries)) setBeneficiaries(bData.beneficiaries);
       } catch {
-        // keep whatever is currently in store (may be empty)
+        /* keep store */
       }
     };
     run();
     return () => { cancelled = true; };
-  }, [setVolunteers, setBeneficiaries]);
+  }, [can, setVolunteers]);
+
+  useEffect(() => {
+    if (!can('programs', 'canView')) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const bRes = await apiFetch('/programs/beneficiaries');
+        if (!bRes.ok) return;
+        const bData = await bRes.json();
+        if (cancelled) return;
+        if (Array.isArray(bData.beneficiaries)) setBeneficiaries(bData.beneficiaries);
+      } catch {
+        /* keep store */
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [can, setBeneficiaries]);
 
   // Dark mode init
   useEffect(() => {

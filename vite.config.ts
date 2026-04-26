@@ -2,6 +2,21 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+/** SPA document navigations — must match React Router paths or offline navigations fall back incorrectly. */
+const NAV_FALLBACK_ALLOWLIST = [
+  /^\/$/,
+  /^\/(login|tasks|fundraising|crm|finance|programs|csr|volunteers|compliance|agent-hq|settings)(\/.*)?$/,
+  /^\/give\/[^/]+$/,
+];
+
+function apiPathMatcher(segment: string) {
+  const base = segment.startsWith('/') ? segment : `/${segment}`;
+  return ({ url }: { url: URL }) => {
+    const p = url.pathname;
+    return p === base || p.startsWith(`${base}/`);
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -37,22 +52,25 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        navigateFallback: '/index.html',
+        navigateFallbackAllowlist: [...NAV_FALLBACK_ALLOWLIST],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.includes('/morning-brief'),
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'brief-cache',
-              expiration: { maxEntries: 16, maxAgeSeconds: 1800 },
-            },
-          },
-          {
-            urlPattern: ({ url }) => url.pathname.includes('/inbox'),
+            // Use path-prefix match only — `.includes('/inbox')` also matched `/src/utils/inboxLinks.ts`.
+            urlPattern: apiPathMatcher('inbox'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'inbox-cache',
               networkTimeoutSeconds: 3,
               expiration: { maxEntries: 24, maxAgeSeconds: 3600 },
+            },
+          },
+          {
+            urlPattern: apiPathMatcher('morning-brief'),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'brief-cache',
+              expiration: { maxEntries: 16, maxAgeSeconds: 1800 },
             },
           },
           {
@@ -75,6 +93,8 @@ export default defineConfig({
       },
       devOptions: {
         enabled: true,
+        navigateFallback: '/index.html',
+        navigateFallbackAllowlist: [...NAV_FALLBACK_ALLOWLIST],
       },
     }),
   ],
