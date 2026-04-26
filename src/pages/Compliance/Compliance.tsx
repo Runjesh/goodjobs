@@ -764,7 +764,6 @@ const Compliance: React.FC = () => {
         </ModalOverlay>
       )}
       </>
-      )}
     </div>
   );
 };
