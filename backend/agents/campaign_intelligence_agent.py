@@ -3,7 +3,7 @@ Campaign Intelligence Agent — LangGraph State Machine
 Triggers: campaign.performance.update (daily), campaign.underperforming.detected
 Actions: detect underperformance → A/B copy variant → alert Fundraising team → HITL for send
 """
-from typing import TypedDict, List, Literal, Optional
+from typing import TypedDict, Literal
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage

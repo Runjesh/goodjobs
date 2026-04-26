@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Dict, Any
 
 def predict_revenue(transactions: List[Dict[str, Any]], days_ahead: int = 90) -> List[Dict[str, Any]]:

@@ -1,9 +1,7 @@
-import operator
-from typing import TypedDict, Annotated, Literal
-from langchain_core.messages import SystemMessage, HumanMessage
+from typing import TypedDict, Literal
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
-import json
 
 # Define the Agent State
 class DonorAgentState(TypedDict):
@@ -63,7 +61,7 @@ def draft_personalized_message(state: DonorAgentState) -> DonorAgentState:
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
         draft = response.content
-    except Exception as e:
+    except Exception:
         # Fallback if API keys aren't set
         draft = f"Thank you {state['donor_name']} for your generous contribution of ₹{state['donation_amount']}. Your support means everything to our mission."
         if state['is_major_donor']:

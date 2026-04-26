@@ -3,9 +3,8 @@ Donor Lapse Detection Cron Job
 Runs: Daily at 7:00 AM IST
 Action: Scans donors table → finds anyone silent >90 days → emits donor.lapse.detected event → triggers Donor Nurture Agent
 """
-from datetime import date, timedelta
+from datetime import date
 from typing import List, Dict
-import json
 
 # Simulate DB donor records (in production: SELECT FROM donors WHERE last_gift < NOW() - INTERVAL '90 days')
 MOCK_DONORS = [
@@ -37,15 +36,7 @@ def detect_lapsed_donors(donors: List[Dict]) -> List[Dict]:
 def emit_lapse_events(lapsed_donors: List[Dict]) -> None:
     """Emit events to Redis Streams for Donor Nurture Agent to process."""
     for donor in lapsed_donors:
-        event = {
-            "event_type": "donor.lapse.detected",
-            "donor_id": donor["id"],
-            "donor_name": donor["name"],
-            "days_lapsed": donor["days_since_last_gift"],
-            "severity": donor["lapse_severity"],
-            "last_amount": donor["total_given"],
-        }
-        # In production: redis_client.xadd("donor_events", event)
+        # In production: redis_client.xadd("donor_events", {...})
         print(f"  📢 Emitting event: donor.lapse.detected for {donor['name']} ({donor['days_since_last_gift']} days)")
 
 def run_lapse_detection():
@@ -67,8 +58,8 @@ def run_lapse_detection():
     print(f"\nEmitting {len(lapsed)} donor.lapse.detected events to Redis Streams...")
     emit_lapse_events(lapsed)
     
-    print(f"\n✅ Lapse detection complete. Donor Nurture Agent will process these events and draft re-engagement messages.")
-    print(f"   High-value donors (>₹1L) will be queued in Agent HQ HITL queue before outreach is sent.")
+    print("\n✅ Lapse detection complete. Donor Nurture Agent will process these events and draft re-engagement messages.")
+    print("   High-value donors (>₹1L) will be queued in Agent HQ HITL queue before outreach is sent.")
 
 if __name__ == "__main__":
     run_lapse_detection()

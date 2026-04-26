@@ -3,9 +3,7 @@ Failed Payment Recovery Job
 Runs: Every 1 hour
 Action: Scans failed transactions → emits payment.failed.recovery event → triggers Recovery Agent
 """
-from datetime import datetime, timedelta
-from typing import List, Dict
-import json
+from datetime import datetime
 
 MOCK_FAILED_TRANSACTIONS = [
     {"id": "TRX-FAILED-001", "donor_id": "D-002", "donor_name": "Rohan Gupta", "amount": 2500, "reason": "Insufficient Funds", "timestamp": "2026-04-23T10:00:00"},

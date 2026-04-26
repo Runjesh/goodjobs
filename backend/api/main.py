@@ -5,7 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-import hmac, hashlib, json, os
+import hashlib
+import json
+import os
 
 from agents.donor_nurture_agent import donor_nurture_app
 from agents.finance_compliance_agent import finance_agent
@@ -25,11 +27,17 @@ from jobs.lapse_detector import run_lapse_detection
 from core.analytics import predict_revenue, detect_anomalies, calculate_propensity_score, suggest_campaign_goal, classify_fcra_transaction
 from agents.orchestrator import process_orchestration
 from core.gen_ai import summarize_conversations, analyze_sentiment, draft_annual_report
-from core.intent_router import route_intent, generate_morning_brief
+from core.intent_router import route_intent
 from fastapi.responses import Response, FileResponse
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from core.db import db_conn
+from core.s3_storage import (
+    generate_presigned_upload_url,
+    generate_presigned_download_url,
+    list_ngo_files,
+    delete_file,
+)
 
 # Public endpoints should not require auth; use get_current_user_optional.
 
@@ -2813,7 +2821,7 @@ async def export_tally_xml(request: TallyExportRequest):
     return Response(
         content=xml_content,
         media_type="application/xml",
-        headers={"Content-Disposition": f"attachment; filename=sevasuite_tally.xml"}
+        headers={"Content-Disposition": "attachment; filename=sevasuite_tally.xml"}
     )
 
 
@@ -2900,9 +2908,12 @@ def get_donor_propensity(donor_id: str, current_user: TokenUser = Depends(requir
     
     score = calculate_propensity_score(history)
     recommendation = "Nurture with impact updates."
-    if score > 80: recommendation = "High probability! Trigger personal outreach for Major Gift."
-    elif score > 50: recommendation = "Healthy segment. Send regular WhatsApp updates."
-    elif score < 30: recommendation = "High churn risk. Recommend re-engagement sequence."
+    if score > 80:
+        recommendation = "High probability! Trigger personal outreach for Major Gift."
+    elif score > 50:
+        recommendation = "Healthy segment. Send regular WhatsApp updates."
+    elif score < 30:
+        recommendation = "High churn risk. Recommend re-engagement sequence."
 
     return {
         "donor_id": donor_id,
@@ -3095,7 +3106,6 @@ def list_notifications(current_user: TokenUser = Depends(get_current_user)):
     Derived from inbox + recent volunteer events; persisted read/cleared state is stored in inbox_item_states.
     """
     items: List[Dict[str, Any]] = []
-    now = datetime.now(timezone.utc)
     with db_conn() as conn:
         if conn is None:
             # memory: derive from inbox (already filters snooze/done for some kinds)
@@ -3508,13 +3518,6 @@ def get_morning_brief(
 
 # ── AWS S3 Storage (Compliance Vault) ──────────────────────────────────────────
 
-from core.s3_storage import (
-    generate_presigned_upload_url,
-    generate_presigned_download_url,
-    list_ngo_files,
-    delete_file
-)
-
 class S3UploadRequest(BaseModel):
     folder: str
     filename: str
@@ -3909,7 +3912,7 @@ def get_inbox(current_user: TokenUser = Depends(get_current_user)):
     with db_conn() as conn:
         if conn is None:
             now = datetime.now(timezone.utc)
-            state = _get_mem_inbox_state(current_user.ngo_id)
+            _get_mem_inbox_state(current_user.ngo_id)
             # queued intents
             for it in INTENT_QUEUE_MEM_BY_NGO.get(current_user.ngo_id, []):
                 if it.get("status") != "queued":
@@ -4596,7 +4599,7 @@ def _simple_pdf_bytes(title: str, lines: List[str]) -> bytes:
     Minimal PDF generator (no external deps).
     ASCII only; suitable for a quick downloadable report.
     """
-    safe_lines = [l.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for l in lines]
+    safe_lines = [line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for line in lines]
     y = 760
     content_lines = [f"BT /F1 18 Tf 50 {y} Td ({title}) Tj ET"]
     y -= 30
@@ -4782,7 +4785,7 @@ def get_dpdp_notice_pdf(version: Optional[int] = None, current_user: TokenUser =
         ver = 1
 
     title = f"DPDP Notice (v{ver}) — {current_user.ngo_name}"
-    lines = [l.strip() for l in notice_md.splitlines() if l.strip()][:40]
+    lines = [line.strip() for line in notice_md.splitlines() if line.strip()][:40]
     pdf = _simple_pdf_bytes(title, lines)
     return Response(content=pdf, media_type="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="dpdp_notice_v{ver}.pdf"'

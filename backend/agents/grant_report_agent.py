@@ -3,10 +3,9 @@ Grant Report Agent — LangGraph State Machine with RAG
 Triggers: grant.report.due | grant.milestone.reached
 Actions: RAG retrieval → pull MIS data → LLM draft → HITL review gate → send for PM approval
 """
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
-import psycopg2, os, json
 
 class GrantReportState(TypedDict):
     grant_id: str

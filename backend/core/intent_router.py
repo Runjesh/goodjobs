@@ -2,6 +2,7 @@
 Intent Router for SevaSuite
 Translates natural language directives into structured Action Cards.
 """
+import os
 from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -15,8 +16,6 @@ class ActionCard(BaseModel):
     risk_level: str = Field(description="Low/Medium/High risk assessment")
     action_data: Dict[str, Any] = Field(description="The specific data needed to execute the action")
     suggested_ui: str = Field(description="The type of UI component to render (whatsapp_preview, report_review, finance_approve, donor_preview)")
-
-import os
 
 api_key = os.getenv("OPENAI_API_KEY", "sk-mock-key-for-local-dev-only")
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)

@@ -114,7 +114,7 @@ def aggregate_to_dashboard(state: FieldMISState) -> FieldMISState:
 
 def flag_for_review(state: FieldMISState) -> FieldMISState:
     """Flag duplicate or invalid entry for supervisor review."""
-    print(f"--- FIELD MIS AGENT: Flagged for supervisor review —")
+    print("--- FIELD MIS AGENT: Flagged for supervisor review —")
     print(f"  Errors: {state['validation_errors']}")
     return {**state, "alert_required": True, "status": "flagged"}
 

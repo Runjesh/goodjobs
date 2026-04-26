@@ -5,7 +5,7 @@ Provides token verification, current user extraction, and RBAC enforcement.
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError

@@ -1,6 +1,6 @@
 """
 API-level RBAC and auth smoke tests (pytest + TestClient).
-Run from repo: cd backend && PYTHONPATH=. pytest tests -q
+Run from repo: cd backend && pytest -q
 """
 
 from fastapi.testclient import TestClient

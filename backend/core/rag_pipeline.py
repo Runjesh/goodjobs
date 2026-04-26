@@ -162,11 +162,11 @@ def ingest_document(
     print(f"   ✂️  Split into {len(chunks)} chunks")
     
     if use_mock:
-        embeddings = embed_chunks_mock(chunks)
-        print(f"   🧮 Mock embeddings generated (no API key needed for testing)")
+        embed_chunks_mock(chunks)
+        print("   🧮 Mock embeddings generated (no API key needed for testing)")
     else:
-        embeddings = embed_chunks(chunks)
-        print(f"   🧮 Embedded using text-embedding-3-small")
+        embed_chunks(chunks)
+        print("   🧮 Embedded using text-embedding-3-small")
     
     # In real mode, upsert to database
     # count = upsert_to_pgvector(chunks, embeddings, document_title, document_type, ngo_id)
