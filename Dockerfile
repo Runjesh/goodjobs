@@ -5,7 +5,7 @@
 FROM node:20-alpine AS frontend
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 COPY . .
 # Same browser origin as the API — no second public URL for fetch()
 ENV VITE_USE_SAME_ORIGIN_API=true
