@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2 } from 'lucide-react';
+import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import './CSR.css';
@@ -31,7 +31,7 @@ function idleDaysFromIso(iso?: string): number {
 }
 
 const CSR: React.FC = () => {
-  const { csrCards, moveCSRCard, addCSRCard } = useStore();
+  const { csrCards, moveCSRCard, addCSRCard, updateCSRCard, deleteCSRCard } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [dragId, setDragId] = useState<number | string | null>(null);
   const [form, setForm] = useState({ company: '', amount: 1000000, project: '', tags: '', col: 'prospecting' });
@@ -45,6 +45,11 @@ const CSR: React.FC = () => {
   const [dbQuery, setDbQuery] = useState('');
   const [dbLoading, setDbLoading] = useState(false);
   const [dbResults, setDbResults] = useState<any[]>([]);
+
+  const [showEditCard, setShowEditCard] = useState(false);
+  const [editCard, setEditCard] = useState<any>(null);
+  const [showDeleteCardConfirm, setShowDeleteCardConfirm] = useState(false);
+  const [cardToDelete, setCardToDelete] = useState<any>(null);
 
   const handleDragStart = (id: number | string) => setDragId(id);
 
@@ -106,6 +111,53 @@ const CSR: React.FC = () => {
       return;
     }
     toast.error('Failed to add proposal.');
+  };
+
+  const handleEditCard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editCard.company.trim()) return;
+    const tags = typeof editCard.tags === 'string' ? editCard.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : editCard.tags;
+    try {
+      const res = await apiFetch(`/csr/cards/${editCard.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company: editCard.company,
+          amount: editCard.amount,
+          project: editCard.project,
+          tags,
+          agent: editCard.agent || 'AD',
+          col: editCard.col,
+          date: editCard.date || 'Just added',
+        }),
+      });
+      if (res.ok) {
+        updateCSRCard(editCard.id, { ...editCard, tags });
+        toast.success(`Proposal updated!`);
+        setShowEditCard(false);
+      } else {
+        toast.error('Failed to update proposal.');
+      }
+    } catch {
+      toast.error('Network error updating proposal.');
+    }
+  };
+
+  const handleDeleteCard = async () => {
+    if (!cardToDelete) return;
+    try {
+      const res = await apiFetch(`/csr/cards/${cardToDelete.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        deleteCSRCard(cardToDelete.id);
+        toast.success(`Proposal deleted!`);
+        setShowDeleteCardConfirm(false);
+        setCardToDelete(null);
+      } else {
+        toast.error('Failed to delete proposal.');
+      }
+    } catch {
+      toast.error('Network error deleting proposal.');
+    }
   };
 
   const runProspectAgent = async () => {
@@ -278,8 +330,8 @@ const CSR: React.FC = () => {
     }
   };
 
-  const totalPipeline = csrCards.reduce((s, c) => s + c.amount, 0);
-  const signed = csrCards.filter(c => c.col === 'mou' || c.col === 'live').reduce((s, c) => s + c.amount, 0);
+  const totalPipeline = csrCards.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const signed = csrCards.filter(c => c.col === 'mou' || c.col === 'live').reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const reportsDueCount = csrCards.filter(
     c => c.col === 'live' && idleDaysFromIso(c.last_activity_at || c.updated_at) >= 21
   ).length;
@@ -311,7 +363,7 @@ const CSR: React.FC = () => {
       {/* Prospect DB Modal */}
       {showProspectDb && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '720px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '720px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
             <div className="card-header flex justify-between items-center" style={{ padding: '1.25rem 1.5rem' }}>
               <h3 className="card-title flex items-center gap-2"><Search size={18} /> Prospect DB</h3>
               <button className="action-btn" onClick={() => setShowProspectDb(false)}><X size={20} /></button>
@@ -447,8 +499,18 @@ const CSR: React.FC = () => {
                     onDragStart={() => handleDragStart(card.id)}
                     style={{ opacity: dragId !== null && String(dragId) === String(card.id) ? 0.5 : 1 }}>
                     <div className="csr-card-header">
-                      <div className="csr-company">{card.company}</div>
-                      <div className="csr-amount">₹{(card.amount / 100000).toFixed(1)}L</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="csr-company">{card.company}</div>
+                        <div className="csr-amount">₹{(card.amount / 100000).toFixed(1)}L</div>
+                      </div>
+                      <div className="flex gap-1" style={{ marginLeft: '0.5rem', alignItems: 'flex-start' }}>
+                        <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }} onClick={(e) => { e.stopPropagation(); setEditCard({ ...card, tags: card.tags.join(', ') }); setShowEditCard(true); }}>
+                          <Edit size={13} color="var(--color-text-secondary)" />
+                        </button>
+                        <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }} onClick={(e) => { e.stopPropagation(); setCardToDelete(card); setShowDeleteCardConfirm(true); }}>
+                          <Trash2 size={13} color="var(--color-danger)" />
+                        </button>
+                      </div>
                     </div>
                     <div className="csr-project">{card.project}</div>
                     <div className="csr-tags">
@@ -499,7 +561,7 @@ const CSR: React.FC = () => {
       {/* New Proposal Modal */}
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '460px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>New CSR Proposal</h2>
             <form onSubmit={handleAddProposal} className="flex-col gap-4 flex">
@@ -534,7 +596,7 @@ const CSR: React.FC = () => {
       {/* Document Room Modal */}
       {docRoom && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '560px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '560px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
             <div className="card-header flex justify-between items-center" style={{ padding: '1.25rem 1.5rem' }}>
               <h3 className="card-title flex items-center gap-2">
                 <Folder size={20} color="#f59e0b" /> {docRoom.company} — Document Room
@@ -586,6 +648,62 @@ const CSR: React.FC = () => {
         accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
         onChange={onPickDocFile}
       />
+
+      {/* ── Edit Proposal Modal ───────────────────────────────────── */}
+      {showEditCard && editCard && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
+            <button onClick={() => setShowEditCard(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
+            <h2 style={{ marginBottom: '1.5rem' }}>Edit CSR Proposal</h2>
+            <form onSubmit={handleEditCard} className="flex-col gap-4 flex">
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Corporate Name</label>
+                <input required type="text" className="input-field" value={editCard.company} onChange={e => setEditCard({ ...editCard, company: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Project / Focus Area</label>
+                <input required type="text" className="input-field" value={editCard.project} onChange={e => setEditCard({ ...editCard, project: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Proposed Grant Amount (₹)</label>
+                <input required type="number" className="input-field" value={editCard.amount} min="100000" onChange={e => setEditCard({ ...editCard, amount: Number(e.target.value) })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Tags (comma separated)</label>
+                <input type="text" className="input-field" value={editCard.tags} onChange={e => setEditCard({ ...editCard, tags: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Pipeline Stage</label>
+                <select className="input-field" value={editCard.col} onChange={e => setEditCard({ ...editCard, col: e.target.value })}>
+                  {columns.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                </select>
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Proposal</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Modal ───────────────────────────────────── */}
+      {showDeleteCardConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative', textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+              <div style={{ background: 'var(--color-danger)', color: 'white', padding: '1rem', borderRadius: '50%' }}>
+                <Trash2 size={32} />
+              </div>
+            </div>
+            <h2 style={{ marginBottom: '0.5rem' }}>Delete Proposal?</h2>
+            <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
+              Are you sure you want to delete the proposal for <strong>{cardToDelete?.company}</strong>? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button className="btn btn-secondary" onClick={() => setShowDeleteCardConfirm(false)} style={{ flex: 1 }}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleDeleteCard} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

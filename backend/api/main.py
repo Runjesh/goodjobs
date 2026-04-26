@@ -753,6 +753,58 @@ def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUs
         return {"imported": n, "source": "db"}
 
 
+@app.put("/programs/beneficiaries/{ben_id}", tags=["Programs"])
+def update_beneficiary(ben_id: str, body: BeneficiaryCreate, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_beneficiaries(current_user.ngo_id)
+            lst = BENEFICIARIES_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for i, b in enumerate(lst):
+                if str(b.get("id")) == ben_id:
+                    lst[i].update({
+                        "name": body.name,
+                        "program": body.program,
+                        "location": body.location,
+                        "aadhaar": bool(body.aadhaar),
+                        "familySize": int(body.familySize),
+                    })
+                    return {"status": "updated", "beneficiary": lst[i], "source": "memory"}
+            raise HTTPException(status_code=404, detail="Beneficiary not found")
+        
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE program_beneficiaries
+            SET name = %s, program = %s, location = %s, aadhaar = %s, family_size = %s
+            WHERE id = %s AND ngo_id = %s
+            RETURNING id
+            """,
+            (body.name, body.program, body.location, bool(body.aadhaar), int(body.familySize), ben_id, current_user.ngo_id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Beneficiary not found")
+        return {"status": "updated", "id": ben_id, "source": "db"}
+
+
+@app.delete("/programs/beneficiaries/{ben_id}", tags=["Programs"])
+def delete_beneficiary(ben_id: str, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_beneficiaries(current_user.ngo_id)
+            lst = BENEFICIARIES_MEM_BY_NGO.get(current_user.ngo_id, [])
+            before_len = len(lst)
+            BENEFICIARIES_MEM_BY_NGO[current_user.ngo_id] = [b for b in lst if str(b.get("id")) != ben_id]
+            if len(BENEFICIARIES_MEM_BY_NGO[current_user.ngo_id]) == before_len:
+                raise HTTPException(status_code=404, detail="Beneficiary not found")
+            return {"status": "deleted", "id": ben_id, "source": "memory"}
+        
+        cur = conn.cursor()
+        cur.execute("DELETE FROM program_beneficiaries WHERE id = %s AND ngo_id = %s RETURNING id", (ben_id, current_user.ngo_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Beneficiary not found")
+        return {"status": "deleted", "id": ben_id, "source": "db"}
+
+
 class VolunteerCreate(BaseModel):
     name: str
     skills: List[str] = []
@@ -807,6 +859,54 @@ def create_volunteer_roster(body: VolunteerCreate, current_user: TokenUser = Dep
         )
         v = {"id": new_id, "name": body.name, "skills": body.skills or [], "hours": 0, "verified": bool(body.verified)}
         return {"status": "created", "volunteer": v, "source": "db"}
+
+
+@app.put("/volunteers/roster/{v_id}", tags=["Volunteers"])
+def update_volunteer(v_id: str, body: VolunteerCreate, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_volunteer_roster(current_user.ngo_id)
+            lst = VOLUNTEERS_ROSTER_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for i, v in enumerate(lst):
+                if str(v.get("id")) == v_id:
+                    lst[i].update({
+                        "name": body.name,
+                        "skills": body.skills or [],
+                        "verified": bool(body.verified)
+                    })
+                    return {"status": "updated", "volunteer": lst[i], "source": "memory"}
+            raise HTTPException(status_code=404, detail="Volunteer not found")
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE volunteer_roster
+            SET name = %s, skills = %s, verified = %s
+            WHERE id = %s AND ngo_id = %s
+            RETURNING id
+            """,
+            (body.name, body.skills or [], bool(body.verified), v_id, current_user.ngo_id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Volunteer not found")
+        return {"status": "updated", "id": v_id, "source": "db"}
+
+
+@app.delete("/volunteers/roster/{v_id}", tags=["Volunteers"])
+def delete_volunteer(v_id: str, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_volunteer_roster(current_user.ngo_id)
+            lst = VOLUNTEERS_ROSTER_MEM_BY_NGO.get(current_user.ngo_id, [])
+            before_len = len(lst)
+            VOLUNTEERS_ROSTER_MEM_BY_NGO[current_user.ngo_id] = [v for v in lst if str(v.get("id")) != v_id]
+            if len(VOLUNTEERS_ROSTER_MEM_BY_NGO[current_user.ngo_id]) == before_len:
+                raise HTTPException(status_code=404, detail="Volunteer not found")
+            return {"status": "deleted", "id": v_id, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute("DELETE FROM volunteer_roster WHERE id = %s AND ngo_id = %s RETURNING id", (v_id, current_user.ngo_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Volunteer not found")
+        return {"status": "deleted", "id": v_id, "source": "db"}
 
 
 class VolunteerSignupRequest(BaseModel):
@@ -1060,6 +1160,60 @@ def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(requi
         return {"status": "created", "card": card, "source": "db"}
 
 
+@app.put("/csr/cards/{card_id}", tags=["CSR"])
+def update_csr_card(card_id: str, body: CsrCardCreate, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_csr(current_user.ngo_id)
+            lst = CSR_CARDS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for i, card in enumerate(lst):
+                if str(card.get("id")) == card_id:
+                    card.update({
+                        "company": body.company,
+                        "amount": float(body.amount),
+                        "project": body.project,
+                        "tags": body.tags or [],
+                        "agent": body.agent,
+                        "col": body.col,
+                        "date": body.date,
+                        "last_activity_at": datetime.now(timezone.utc).isoformat()
+                    })
+                    return {"status": "updated", "card": card, "source": "memory"}
+            raise HTTPException(status_code=404, detail="Card not found")
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE csr_pipeline_cards
+            SET company = %s, amount = %s, project = %s, tags = %s, agent = %s, col = %s, date_label = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s AND ngo_id = %s
+            RETURNING id, updated_at
+            """,
+            (body.company, float(body.amount), body.project, body.tags or [], body.agent, body.col, body.date, card_id, current_user.ngo_id)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return {"status": "updated", "id": card_id, "updated_at": _ts_iso(row[1]), "source": "db"}
+
+
+@app.delete("/csr/cards/{card_id}", tags=["CSR"])
+def delete_csr_card(card_id: str, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_csr(current_user.ngo_id)
+            lst = CSR_CARDS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            before_len = len(lst)
+            CSR_CARDS_MEM_BY_NGO[current_user.ngo_id] = [c for c in lst if str(c.get("id")) != card_id]
+            if len(CSR_CARDS_MEM_BY_NGO[current_user.ngo_id]) == before_len:
+                raise HTTPException(status_code=404, detail="Card not found")
+            return {"status": "deleted", "id": card_id, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute("DELETE FROM csr_pipeline_cards WHERE id = %s AND ngo_id = %s RETURNING id", (card_id, current_user.ngo_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Card not found")
+        return {"status": "deleted", "id": card_id, "source": "db"}
+
+
 @app.patch("/csr/cards/{card_id}/move", tags=["CSR"])
 def move_csr_card(card_id: str, body: CsrCardMove, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
     with db_conn() as conn:
@@ -1285,6 +1439,55 @@ def create_campaign(body: CampaignCreate, current_user: TokenUser = Depends(requ
         return {"status": "created", "campaign": camp, "source": "db"}
 
 
+@app.put("/fundraising/campaigns/{c_id}", tags=["Fundraising"])
+def update_campaign(c_id: str, body: CampaignCreate, current_user: TokenUser = Depends(require_role("ed", "fundraising"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_campaigns(current_user.ngo_id)
+            lst = CAMPAIGNS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for i, c in enumerate(lst):
+                if str(c.get("id")) == c_id:
+                    c.update({
+                        "title": body.title,
+                        "goal": float(body.goal or 0),
+                        "status": body.status,
+                        "cause": body.cause or ""
+                    })
+                    return {"status": "updated", "campaign": c, "source": "memory"}
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE campaigns
+            SET title = %s, goal = %s, status = %s, cause = %s
+            WHERE id = %s AND ngo_id = %s
+            RETURNING id
+            """,
+            (body.title, float(body.goal or 0), body.status, body.cause or "", c_id, current_user.ngo_id)
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        return {"status": "updated", "id": c_id, "source": "db"}
+
+
+@app.delete("/fundraising/campaigns/{c_id}", tags=["Fundraising"])
+def delete_campaign(c_id: str, current_user: TokenUser = Depends(require_role("ed", "fundraising"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_campaigns(current_user.ngo_id)
+            lst = CAMPAIGNS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            before_len = len(lst)
+            CAMPAIGNS_MEM_BY_NGO[current_user.ngo_id] = [c for c in lst if str(c.get("id")) != c_id]
+            if len(CAMPAIGNS_MEM_BY_NGO[current_user.ngo_id]) == before_len:
+                raise HTTPException(status_code=404, detail="Campaign not found")
+            return {"status": "deleted", "id": c_id, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute("DELETE FROM campaigns WHERE id = %s AND ngo_id = %s RETURNING id", (c_id, current_user.ngo_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        return {"status": "deleted", "id": c_id, "source": "db"}
+
+
 # ── CRM Persistence (Donors + Transactions) ───────────────────────────────────
 
 class DonorCreate(BaseModel):
@@ -1333,6 +1536,89 @@ def list_donors(current_user: TokenUser = Depends(require_role("ed", "crm", "fun
                 }
             )
         return {"donors": out, "source": "db"}
+
+
+@app.get("/crm/donors/{donor_id}/80g/{tx_id}.pdf", tags=["CRM"])
+def get_donor_80g_pdf(
+    donor_id: str,
+    tx_id: str,
+    current_user: TokenUser = Depends(require_role("ed", "crm", "finance", "programs")),
+):
+    """
+    Generates an 80G donation certificate for a specific transaction.
+    (Sprint 3: Actionable NGO OS feature)
+    """
+    ngo_id = current_user.ngo_id
+    donor = None
+    tx = None
+    ngo_data = {"name": current_user.ngo_name, "pan": "AABCI1234C", "reg_no": "MH/2015/0012345"}
+
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(ngo_id)
+            donor = next((d for d in DONORS_MEM_BY_NGO.get(ngo_id, []) if str(d.get("id")) == donor_id), None)
+            tx = next((t for t in TX_MEM_BY_NGO.get(ngo_id, []) if str(t.get("id")) == tx_id), None)
+        else:
+            cur = conn.cursor()
+            # Fetch NGO details
+            cur.execute("SELECT name, pan, reg_no FROM ngos WHERE id = %s::uuid", (ngo_id,))
+            ngo_row = cur.fetchone()
+            if ngo_row:
+                ngo_data = {"name": ngo_row[0], "pan": ngo_row[1] or "AABCI1234C", "reg_no": ngo_row[2] or "MH/2015/0012345"}
+
+            # Fetch Donor details
+            cur.execute("SELECT full_name, pan_masked FROM donors WHERE id = %s::uuid AND ngo_id = %s::uuid", (donor_id, ngo_id))
+            donor_row = cur.fetchone()
+            if donor_row:
+                donor = {"name": donor_row[0], "pan": donor_row[1]}
+            
+            # Fetch Transaction details
+            cur.execute("SELECT amount, transaction_date, payment_method, campaign_title FROM transactions WHERE id = %s::uuid AND ngo_id = %s::uuid", (tx_id, ngo_id))
+            tx_row = cur.fetchone()
+            if tx_row:
+                tx = {
+                    "amount": float(tx_row[0]), 
+                    "date": tx_row[1].strftime('%Y-%m-%d') if hasattr(tx_row[1], 'strftime') else str(tx_row[1]), 
+                    "method": tx_row[2], 
+                    "campaign": tx_row[3]
+                }
+
+    if not donor or not tx:
+        raise HTTPException(status_code=404, detail="Donor or Transaction not found")
+
+    title = f"80G Donation Receipt — {ngo_data['name']}"
+    lines = [
+        f"Receipt No: 80G-{tx_id[:8].upper()}",
+        f"Date of Receipt: {tx.get('date')}",
+        "",
+        f"Organisation: {ngo_data['name']}",
+        f"PAN: {ngo_data['pan']}",
+        f"Reg No: {ngo_data['reg_no']}",
+        "",
+        "DONOR INFORMATION:",
+        f"Name: {donor.get('name')}",
+        f"PAN: {donor.get('pan') or 'N/A'}",
+        "",
+        "DONATION SUMMARY:",
+        f"Amount: Rs. {tx.get('amount'):,.2f}",
+        f"Payment Method: {tx.get('method')}",
+        f"Purpose: {tx.get('campaign') or 'General Fund'}",
+        "",
+        "CERTIFICATION:",
+        "This is to certify that we have received the above donation.",
+        "This receipt is issued under Section 80G of the Income Tax Act, 1961.",
+        "The donor is eligible for 50% deduction from their taxable income.",
+        "",
+        f"Generated on: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        "Infrastructure for Social Good | Powered by GoodJobs"
+    ]
+    
+    pdf = _simple_pdf_bytes(title, lines)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="80G_Receipt_{tx_id[:8]}.pdf"'}
+    )
 
 
 @app.post("/crm/donors", tags=["CRM"])
@@ -1441,6 +1727,59 @@ def bulk_import_donors(body: DonorBulkImport, current_user: TokenUser = Depends(
             )
             n += 1
         return {"imported": n, "source": "db"}
+
+
+@app.put("/crm/donors/{donor_id}", tags=["CRM"])
+def update_donor(donor_id: str, body: DonorCreate, current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            lst = DONORS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            for i, d in enumerate(lst):
+                if str(d.get("id")) == donor_id:
+                    lst[i].update({
+                        "name": body.name,
+                        "type": body.type,
+                        "initial": (body.name or "U")[:1].upper(),
+                        "pan": _mask_pan(body.pan) if body.pan else lst[i].get("pan"),
+                        "location": body.location,
+                        "tags": body.tags if body.tags else lst[i].get("tags"),
+                    })
+                    return {"status": "updated", "donor": lst[i], "source": "memory"}
+            raise HTTPException(status_code=404, detail="Donor not found")
+            
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE donors
+            SET full_name = %s, donor_type = %s, pan_masked = %s, location_text = %s, tags = %s
+            WHERE id = %s::uuid AND ngo_id = %s::uuid
+            RETURNING id::text
+            """,
+            (body.name, body.type, _mask_pan(body.pan), body.location, body.tags or [], donor_id, current_user.ngo_id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Donor not found")
+        return {"status": "updated", "id": donor_id, "source": "db"}
+
+
+@app.delete("/crm/donors/{donor_id}", tags=["CRM"])
+def delete_donor(donor_id: str, current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising"))):
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            lst = DONORS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            before_len = len(lst)
+            DONORS_MEM_BY_NGO[current_user.ngo_id] = [d for d in lst if str(d.get("id")) != donor_id]
+            if len(DONORS_MEM_BY_NGO[current_user.ngo_id]) == before_len:
+                raise HTTPException(status_code=404, detail="Donor not found")
+            return {"status": "deleted", "id": donor_id, "source": "memory"}
+            
+        cur = conn.cursor()
+        cur.execute("DELETE FROM donors WHERE id = %s::uuid AND ngo_id = %s::uuid RETURNING id::text", (donor_id, current_user.ngo_id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Donor not found")
+        return {"status": "deleted", "id": donor_id, "source": "db"}
 
 
 class TransactionCreate(BaseModel):
@@ -2420,10 +2759,15 @@ def _run_csr_agent(payload: dict):
         print(f"CSR Agent Error: {e}")
 
 @app.post("/trigger/csr-prospect")
-async def trigger_csr_prospect(event: CSRProspectTrigger, background_tasks: BackgroundTasks):
+async def trigger_csr_prospect(event: CSRProspectTrigger):
     """Estimate CSR obligation, score company alignment, draft outreach."""
-    background_tasks.add_task(_run_csr_agent, event.model_dump())
-    return {"status": "accepted", "company": event.company_name}
+    try:
+        result = csr_agent.invoke(event.model_dump())
+        return result
+    except Exception as e:
+        print(f"CSR Agent Error: {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="CSR Agent failed")
 
 
 # ── Field MIS Agent ─────────────────────────────────────────────────────────────

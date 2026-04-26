@@ -241,7 +241,7 @@ const Login: React.FC = () => {
 
         {showRegister && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, backdropFilter: 'blur(4px)' }}>
-            <div className="card" style={{ width: 520, padding: '1.5rem', position: 'relative' }}>
+            <div className="card" style={{ width: '100%', maxWidth: '520px', padding: '1.5rem', position: 'relative' }}>
               <button className="action-btn" style={{ position: 'absolute', right: '1rem', top: '1rem' }} onClick={() => setShowRegister(false)}>
                 <EyeOff size={18} />
               </button>

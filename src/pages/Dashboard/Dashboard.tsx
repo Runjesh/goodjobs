@@ -802,7 +802,7 @@ const Dashboard: React.FC = () => {
       {/* Activity Log Modal */}
       {showWhatsApp && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '500px', maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '500px', maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div className="card-header flex justify-between items-center">
               <h3 className="card-title flex items-center gap-2"><MessageCircle size={18} color="#16a34a" /> Activity Log</h3>
               <button className="action-btn" onClick={() => setShowWhatsApp(false)}><X size={20} /></button>

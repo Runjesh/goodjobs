@@ -804,7 +804,7 @@ const Finance: React.FC = () => {
 
       {showEntryModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '440px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowEntryModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>New Journal Entry</h2>
             <form onSubmit={handleJournalEntry} className="flex-col gap-4 flex">
@@ -874,7 +874,7 @@ const Finance: React.FC = () => {
 
       {showGrantModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '440px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowGrantModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.25rem' }}>{editingGrantId ? 'Edit Grant' : 'Add Grant'}</h2>
             <form onSubmit={saveGrant} className="flex-col gap-4 flex">

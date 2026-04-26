@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Clock, Users, MapPin, UserPlus, Send, CheckCircle2, ShieldAlert, X, Bell, Calendar } from 'lucide-react';
+import { Clock, Users, MapPin, UserPlus, Send, CheckCircle2, ShieldAlert, X, Bell, Calendar, Edit, Trash2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import './Volunteers.css';
@@ -10,7 +10,7 @@ type Shift = { id: number; title: string; date: string; location: string; filled
 type Signup = { id: string; shiftId: number; volunteerName: string; createdAt?: string };
 
 const Volunteers: React.FC = () => {
-  const { volunteers, addVolunteer } = useStore();
+  const { volunteers, addVolunteer, updateVolunteer, deleteVolunteer } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -22,6 +22,11 @@ const Volunteers: React.FC = () => {
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [signupShift, setSignupShift] = useState<Shift | null>(null);
   const [signupName, setSignupName] = useState('');
+
+  const [showEditVol, setShowEditVol] = useState(false);
+  const [editVol, setEditVol] = useState<any>(null);
+  const [showDeleteVolConfirm, setShowDeleteVolConfirm] = useState(false);
+  const [volToDelete, setVolToDelete] = useState<any>(null);
 
   const shiftListRef = useRef<HTMLDivElement>(null);
   const shiftVirtualizer = useVirtualizer({
@@ -89,6 +94,45 @@ const Volunteers: React.FC = () => {
       setShowModal(false);
     } catch {
       toast.error('Failed to add volunteer (backend not reachable).');
+    }
+  };
+
+  const handleEditVolunteer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editVol.name.trim()) return;
+    const skills = typeof editVol.skills === 'string' ? editVol.skills.split(',').map((s: string) => s.trim()).filter(Boolean) : editVol.skills;
+    try {
+      const res = await apiFetch(`/volunteers/roster/${editVol.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editVol.name, skills, verified: editVol.verified }),
+      });
+      if (res.ok) {
+        updateVolunteer(editVol.id, { ...editVol, skills });
+        toast.success(`Volunteer updated!`);
+        setShowEditVol(false);
+      } else {
+        toast.error('Failed to update volunteer.');
+      }
+    } catch {
+      toast.error('Network error updating volunteer.');
+    }
+  };
+
+  const handleDeleteVolunteer = async () => {
+    if (!volToDelete) return;
+    try {
+      const res = await apiFetch(`/volunteers/roster/${volToDelete.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        deleteVolunteer(volToDelete.id);
+        toast.success(`Volunteer deleted!`);
+        setShowDeleteVolConfirm(false);
+        setVolToDelete(null);
+      } else {
+        toast.error('Failed to delete volunteer.');
+      }
+    } catch {
+      toast.error('Network error deleting volunteer.');
     }
   };
 
@@ -380,9 +424,19 @@ const Volunteers: React.FC = () => {
                                 </div>
                               </div>
                             </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <div style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{vol.hours}h</div>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>YTD</div>
+                            <div className="flex items-center gap-4">
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{vol.hours}h</div>
+                                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>YTD</div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setEditVol({ ...vol, skills: vol.skills.join(', ') }); setShowEditVol(true); }}>
+                                  <Edit size={14} color="var(--color-text-secondary)" />
+                                </button>
+                                <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setVolToDelete(vol); setShowDeleteVolConfirm(true); }}>
+                                  <Trash2 size={14} color="var(--color-danger)" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -398,7 +452,7 @@ const Volunteers: React.FC = () => {
 
       {showReminderModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '480px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '480px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowReminderModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Bell size={20} color="#f59e0b" /> Schedule Volunteer Reminder</h2>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>Send an automated WhatsApp/SMS reminder to volunteers before their shift.</p>
@@ -448,7 +502,7 @@ const Volunteers: React.FC = () => {
 
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '420px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>Add New Volunteer</h2>
             <form onSubmit={handleAddVolunteer} className="flex-col gap-4 flex">
@@ -472,7 +526,7 @@ const Volunteers: React.FC = () => {
 
       {showSignupModal && signupShift && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '440px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowSignupModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '0.5rem' }}>Join shift</h2>
             <p style={{ marginBottom: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
@@ -503,6 +557,52 @@ const Volunteers: React.FC = () => {
               <button className="btn btn-primary" style={{ flex: 2 }} onClick={submitSignup} disabled={!signupName}>
                 Confirm signup
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Volunteer Modal ───────────────────────────────────── */}
+      {showEditVol && editVol && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem', position: 'relative' }}>
+            <button onClick={() => setShowEditVol(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
+            <h2 style={{ marginBottom: '1.5rem' }}>Edit Volunteer</h2>
+            <form onSubmit={handleEditVolunteer} className="flex-col gap-4 flex">
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Full Name</label>
+                <input required type="text" className="input-field" value={editVol.name} onChange={e => setEditVol({ ...editVol, name: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Skills (comma separated)</label>
+                <input type="text" className="input-field" value={editVol.skills} onChange={e => setEditVol({ ...editVol, skills: e.target.value })} />
+              </div>
+              <div className="flex items-center gap-2" style={{ marginTop: '0.25rem' }}>
+                <input type="checkbox" id="edit-verified" checked={editVol.verified} onChange={e => setEditVol({ ...editVol, verified: e.target.checked })} />
+                <label htmlFor="edit-verified" style={{ fontSize: '0.875rem' }}>Background Verified</label>
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Volunteer</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Modal ───────────────────────────────────── */}
+      {showDeleteVolConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative', textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+              <div style={{ background: 'var(--color-danger)', color: 'white', padding: '1rem', borderRadius: '50%' }}>
+                <Trash2 size={32} />
+              </div>
+            </div>
+            <h2 style={{ marginBottom: '0.5rem' }}>Delete Volunteer?</h2>
+            <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
+              Are you sure you want to delete <strong>{volToDelete?.name}</strong>? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button className="btn btn-secondary" onClick={() => setShowDeleteVolConfirm(false)} style={{ flex: 1 }}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleDeleteVolunteer} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
             </div>
           </div>
         </div>

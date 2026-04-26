@@ -198,3 +198,7 @@
   .programs-grid { grid-template-columns: 1fr; }
   .programs-stats-row { grid-template-columns: repeat(2, 1fr); }
 }
+
+@media (max-width: 640px) {
+  .programs-stats-row { grid-template-columns: 1fr; }
+}

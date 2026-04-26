@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Search, Filter, MessageCircle, Mail, Phone, MapPin,
-  IndianRupee, Clock, CheckCircle, X, UserPlus,
+  IndianRupee, Clock, CheckCircle, X, UserPlus, Edit, Trash2,
   Download, Upload, Users, Send, ChevronDown, ChevronUp, Zap, Loader2, Mic, Bot
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
@@ -21,8 +21,8 @@ const WA_TEMPLATES = [
 const CSV_TEMPLATE = 'name,type,pan,location\nAnita Sharma,Recurring,ABCDE1234F,"Mumbai, Maharashtra"\nRaj Kumar,Major Donor,XYZAB5678G,"Delhi, NCR"';
 
 const CRM: React.FC = () => {
-  const { donors, transactions, addDonor } = useStore();
-  const [activeDonorId, setActiveDonorId] = useState(donors[0]?.id || '');
+  const { donors, transactions, addDonor, updateDonor, deleteDonor } = useStore();
+  const [activeDonorId, setActiveDonorId] = useState<string>(String(donors[0]?.id || ''));
   const [viewMode, setViewMode] = useState<'list' | 'heatmap'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
@@ -42,6 +42,10 @@ const CRM: React.FC = () => {
   const [sentiment, setSentiment] = useState<{sentiment: string, score: number} | null>(null);
   const [propensityLoading, setPropensityLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+
+  const [showEditContact, setShowEditContact] = useState(false);
+  const [editContact, setEditContact] = useState<any>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (!activeDonorId || viewMode === 'heatmap') return;
@@ -133,7 +137,7 @@ const CRM: React.FC = () => {
     }
   };
 
-  const activeDonor = useMemo(() => donors.find(d => d.id === activeDonorId) || donors[0], [donors, activeDonorId]);
+  const activeDonor = useMemo(() => donors.find(d => String(d.id) === String(activeDonorId)) || donors[0], [donors, activeDonorId]);
   const donorTransactions = useMemo(() => transactions.filter(t => t.donorId === activeDonor?.id), [transactions, activeDonor]);
 
   const filteredDonors = useMemo(() => {
@@ -212,6 +216,49 @@ const CRM: React.FC = () => {
     setNewContact({ name: '', type: 'Recurring', pan: '', location: '' });
   };
 
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await apiFetch(`/crm/donors/${editContact.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editContact.name,
+          type: editContact.type,
+          pan: editContact.pan,
+          location: editContact.location,
+          tags: editContact.tags || [],
+        }),
+      });
+      if (res.ok) {
+        updateDonor(editContact.id, editContact);
+        toast.success(`Profile updated!`);
+        setShowEditContact(false);
+      } else {
+        toast.error('Failed to update donor.');
+      }
+    } catch {
+      toast.error('Network error updating donor.');
+    }
+  };
+
+  const handleDeleteDonor = async () => {
+    if (!activeDonorId) return;
+    try {
+      const res = await apiFetch(`/crm/donors/${activeDonorId}`, { method: 'DELETE' });
+      if (res.ok) {
+        deleteDonor(activeDonorId);
+        toast.success(`Donor deleted!`);
+        setActiveDonorId('');
+        setShowDeleteConfirm(false);
+      } else {
+        toast.error('Failed to delete donor.');
+      }
+    } catch {
+      toast.error('Network error deleting donor.');
+    }
+  };
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -276,6 +323,23 @@ const CRM: React.FC = () => {
     const a = document.createElement('a');
     a.href = url; a.download = 'donors_export.csv'; a.click();
     toast.success(`Exported ${toExport.length} donor records!`);
+  };
+
+  const handleDownload80G = async (donorId: string, txId: string) => {
+    try {
+      const res = await apiFetch(`/crm/donors/${donorId}/80g/${txId}.pdf`);
+      if (!res.ok) throw new Error('80g');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `80G_Receipt_${txId.slice(0, 8)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('80G Certificate downloaded!');
+    } catch {
+      toast.error('Failed to download 80G certificate.');
+    }
   };
 
   const handleCSVFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -452,14 +516,14 @@ const CRM: React.FC = () => {
                       }}
                     >
                       <div
-                        className={`donor-item ${activeDonorId === donor.id ? 'active' : ''} ${selectedIds.has(donor.id) ? 'selected' : ''}`}
-                        onClick={() => setActiveDonorId(donor.id)}
+                        className={`donor-item ${String(activeDonorId) === String(donor.id) ? 'active' : ''} ${selectedIds.has(String(donor.id)) ? 'selected' : ''}`}
+                        onClick={() => setActiveDonorId(String(donor.id))}
                       >
                         <input
                           type="checkbox"
-                          checked={selectedIds.has(donor.id)}
+                          checked={selectedIds.has(String(donor.id))}
                           onClick={e => e.stopPropagation()}
-                          onChange={() => toggleSelect(donor.id)}
+                          onChange={() => toggleSelect(String(donor.id))}
                           style={{ flexShrink: 0 }}
                         />
                         <div className="donor-avatar">{donor.initial}</div>
@@ -571,6 +635,24 @@ const CRM: React.FC = () => {
                 >
                   <Phone size={16} />
                 </button>
+                <button
+                  className="btn btn-secondary"
+                  title="Edit Profile"
+                  onClick={() => {
+                    setEditContact(activeDonor);
+                    setShowEditContact(true);
+                  }}
+                >
+                  <Edit size={16} />
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  title="Delete Donor"
+                  style={{ color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
             </div>
 
@@ -612,6 +694,13 @@ const CRM: React.FC = () => {
                                 <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
                                   Campaign: {tx.campaignTitle}
                                 </p>
+                                <button
+                                  className="btn btn-secondary"
+                                  style={{ marginTop: '0.5rem', fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                                  onClick={() => handleDownload80G(activeDonor.id, tx.id)}
+                                >
+                                  <Download size={12} /> Download 80G
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -719,7 +808,7 @@ const CRM: React.FC = () => {
       {/* ── Message Composer Modal ───────────────────────────────── */}
       {showComposer && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '560px', maxHeight: '90vh', overflow: 'auto', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '560px', maxHeight: '90vh', overflow: 'auto', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowComposer(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               {composerChannel === 'whatsapp' ? <MessageCircle size={22} color="#16a34a" /> : <Mail size={22} color="var(--color-primary)" />}
@@ -793,7 +882,7 @@ const CRM: React.FC = () => {
       {/* ── CSV Import Modal ─────────────────────────────────────── */}
       {showCSVImport && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '560px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '560px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => { setShowCSVImport(false); setCsvPreview([]); }} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '0.5rem' }}>Import Donors from CSV</h2>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
@@ -857,7 +946,7 @@ const CRM: React.FC = () => {
       {/* ── Add Contact Modal ───────────────────────────────────── */}
       {showAddContact && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '400px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowAddContact(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>Add New Contact</h2>
             <form onSubmit={handleAddContact} className="flex-col gap-4 flex">
@@ -881,6 +970,57 @@ const CRM: React.FC = () => {
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Save Contact</button>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ── Edit Contact Modal ───────────────────────────────────── */}
+      {showEditContact && editContact && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative' }}>
+            <button onClick={() => setShowEditContact(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
+            <h2 style={{ marginBottom: '1.5rem' }}>Edit Contact</h2>
+            <form onSubmit={handleEditSubmit} className="flex-col gap-4 flex">
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Full Name</label>
+                <input required type="text" className="input-field" value={editContact.name} onChange={e => setEditContact({ ...editContact, name: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Donor Type</label>
+                <select className="input-field" value={editContact.type} onChange={e => setEditContact({ ...editContact, type: e.target.value })}>
+                  {['Major Donor', 'Recurring', 'Event Attendee', 'CSR Partner', 'Lapsing'].map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">PAN Number</label>
+                <input type="text" className="input-field" value={editContact.pan || ''} onChange={e => setEditContact({ ...editContact, pan: e.target.value.toUpperCase() })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Location</label>
+                <input required type="text" className="input-field" value={editContact.location || ''} onChange={e => setEditContact({ ...editContact, location: e.target.value })} placeholder="e.g. Mumbai, Maharashtra" />
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Contact</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Modal ───────────────────────────────────── */}
+      {showDeleteConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative', textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+              <div style={{ background: 'var(--color-danger)', color: 'white', padding: '1rem', borderRadius: '50%' }}>
+                <Trash2 size={32} />
+              </div>
+            </div>
+            <h2 style={{ marginBottom: '0.5rem' }}>Delete Donor?</h2>
+            <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
+              Are you sure you want to delete <strong>{activeDonor?.name}</strong>? This action cannot be undone and will remove them from all campaigns.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button className="btn btn-secondary" onClick={() => setShowDeleteConfirm(false)} style={{ flex: 1 }}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleDeleteDonor} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
+            </div>
           </div>
         </div>
       )}

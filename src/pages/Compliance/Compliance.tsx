@@ -595,7 +595,7 @@ const Compliance: React.FC = () => {
       {/* Add Board Member Modal */}
       {showBoardModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '460px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowBoardModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>Add Board Member</h2>
             <form onSubmit={handleAddBoardMember} className="flex-col gap-4 flex">
@@ -625,7 +625,7 @@ const Compliance: React.FC = () => {
 
       {showDocModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '460px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowDocModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>Upload Compliance Document</h2>
             <form onSubmit={handleAddDoc} className="flex-col gap-4 flex">

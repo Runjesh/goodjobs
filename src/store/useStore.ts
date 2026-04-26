@@ -100,15 +100,25 @@ interface AppState {
 
   addCampaign: (campaign: Omit<Campaign, 'id' | 'raised' | 'donorsCount'>) => void;
   addCampaignWithId: (campaign: Campaign) => void;
+  updateCampaign: (id: string, data: Partial<Campaign>) => void;
+  deleteCampaign: (id: string) => void;
   addDonor: (donor: Omit<Donor, 'id' | 'totalGiven' | 'lastGift' | 'initial'>) => void;
   addDonorWithId: (donor: Donor) => void;
+  updateDonor: (id: string, data: Partial<Donor>) => void;
+  deleteDonor: (id: string) => void;
   addTransaction: (transaction: Omit<Transaction, 'id' | 'timestamp'>) => void;
   addTransactionWithId: (transaction: Transaction) => void;
   moveCSRCard: (cardId: number | string, newCol: string) => void;
   addCSRCard: (card: Omit<CSRCard, 'id'>) => void;
   addCSRCardWithId: (card: CSRCard) => void;
+  updateCSRCard: (id: number | string, data: Partial<CSRCard>) => void;
+  deleteCSRCard: (id: number | string) => void;
   addBeneficiary: (b: Omit<Beneficiary, 'id'>) => void;
+  updateBeneficiary: (id: string, data: Partial<Beneficiary>) => void;
+  deleteBeneficiary: (id: string) => void;
   addVolunteer: (v: Omit<Volunteer, 'id' | 'hours'>) => void;
+  updateVolunteer: (id: string, data: Partial<Volunteer>) => void;
+  deleteVolunteer: (id: string) => void;
   addComplianceDoc: (doc: Omit<ComplianceDocument, 'id' | 'uploadedAt'>) => void;
 }
 
@@ -188,12 +198,28 @@ export const useStore = create<AppState>((set) => ({
     campaigns: [campaign, ...state.campaigns.filter(c => c.id !== campaign.id)]
   })),
 
+  updateCampaign: (id, data) => set((state) => ({
+    campaigns: state.campaigns.map(c => c.id === id ? { ...c, ...data } : c)
+  })),
+
+  deleteCampaign: (id) => set((state) => ({
+    campaigns: state.campaigns.filter(c => c.id !== id)
+  })),
+
   addDonor: (donor) => set((state) => ({
     donors: [...state.donors, { ...donor, id: `${Date.now()}`, totalGiven: 0, lastGift: 'N/A', initial: donor.name.charAt(0).toUpperCase() }]
   })),
 
   addDonorWithId: (donor) => set((state) => ({
     donors: [donor, ...state.donors.filter(d => d.id !== donor.id)]
+  })),
+
+  updateDonor: (id, data) => set((state) => ({
+    donors: state.donors.map(d => d.id === id ? { ...d, ...data } : d)
+  })),
+
+  deleteDonor: (id) => set((state) => ({
+    donors: state.donors.filter(d => d.id !== id)
   })),
 
   addTransaction: (transaction) => set((state) => {
@@ -241,12 +267,36 @@ export const useStore = create<AppState>((set) => ({
     csrCards: [card, ...state.csrCards.filter(c => String(c.id) !== String(card.id))]
   })),
 
+  updateCSRCard: (id, data) => set((state) => ({
+    csrCards: state.csrCards.map(c => String(c.id) === String(id) ? { ...c, ...data } : c)
+  })),
+
+  deleteCSRCard: (id) => set((state) => ({
+    csrCards: state.csrCards.filter(c => String(c.id) !== String(id))
+  })),
+
   addBeneficiary: (b) => set((state) => ({
     beneficiaries: [{ ...b, id: `BEN-${1000 + state.beneficiaries.length + 49}` }, ...state.beneficiaries]
   })),
 
+  updateBeneficiary: (id, data) => set((state) => ({
+    beneficiaries: state.beneficiaries.map(b => b.id === id ? { ...b, ...data } : b)
+  })),
+
+  deleteBeneficiary: (id) => set((state) => ({
+    beneficiaries: state.beneficiaries.filter(b => b.id !== id)
+  })),
+
   addVolunteer: (v) => set((state) => ({
     volunteers: [{ ...v, id: `V-${100 + state.volunteers.length + 5}`, hours: 0 }, ...state.volunteers]
+  })),
+
+  updateVolunteer: (id, data) => set((state) => ({
+    volunteers: state.volunteers.map(v => v.id === id ? { ...v, ...data } : v)
+  })),
+
+  deleteVolunteer: (id) => set((state) => ({
+    volunteers: state.volunteers.filter(v => v.id !== id)
   })),
 
   addComplianceDoc: (doc) => set((state) => ({

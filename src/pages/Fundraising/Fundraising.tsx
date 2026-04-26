@@ -1,13 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Plus, Link as LinkIcon, Share2, Download, QrCode, X, Heart, BarChart2, TrendingUp, Users, IndianRupee, RefreshCw, Loader2, Bot } from 'lucide-react';
+import { Plus, Link as LinkIcon, Share2, Download, QrCode, X, Heart, BarChart2, TrendingUp, Users, IndianRupee, RefreshCw, Loader2, Bot, Edit, Trash2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 import './Fundraising.css';
 
 const Fundraising: React.FC = () => {
-  const { campaigns, transactions, addTransaction, donors } = useStore();
+  const { campaigns, transactions, addTransaction, donors, updateCampaign, deleteCampaign } = useStore();
   const campBreakdownScrollRef = useRef<HTMLDivElement>(null);
   const campBreakdownVirtualizer = useVirtualizer({
     count: campaigns.length,
@@ -54,6 +54,11 @@ const Fundraising: React.FC = () => {
   const [donationData, setDonationData] = useState({ amount: 1000, donorId: donors[0]?.id || '', campaignId: campaigns[0]?.id || '' });
   const [mandate, setMandate] = useState({ donorId: donors[0]?.id || '', amount: 500, frequency: 'monthly', upiId: '', campaign: campaigns[0]?.id || '' });
 
+  const [showEditCamp, setShowEditCamp] = useState(false);
+  const [editCamp, setEditCamp] = useState<any>(null);
+  const [showDeleteCampConfirm, setShowDeleteCampConfirm] = useState(false);
+  const [campToDelete, setCampToDelete] = useState<any>(null);
+
   const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -81,6 +86,49 @@ const Fundraising: React.FC = () => {
       return;
     } catch {
       toast.error('Failed to create campaign (backend not reachable).');
+    }
+  };
+
+  const handleEditCampaign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editCamp.title.trim()) return;
+    try {
+      const res = await apiFetch(`/fundraising/campaigns/${editCamp.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editCamp.title,
+          goal: editCamp.goal,
+          status: editCamp.status,
+          cause: editCamp.cause || 'Education',
+        }),
+      });
+      if (res.ok) {
+        updateCampaign(editCamp.id, { title: editCamp.title, goal: editCamp.goal, status: editCamp.status });
+        toast.success(`Campaign updated!`);
+        setShowEditCamp(false);
+      } else {
+        toast.error('Failed to update campaign.');
+      }
+    } catch {
+      toast.error('Network error updating campaign.');
+    }
+  };
+
+  const handleDeleteCampaign = async () => {
+    if (!campToDelete) return;
+    try {
+      const res = await apiFetch(`/fundraising/campaigns/${campToDelete.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        deleteCampaign(campToDelete.id);
+        toast.success(`Campaign deleted!`);
+        setShowDeleteCampConfirm(false);
+        setCampToDelete(null);
+      } else {
+        toast.error('Failed to delete campaign.');
+      }
+    } catch {
+      toast.error('Network error deleting campaign.');
     }
   };
 
@@ -333,7 +381,17 @@ const Fundraising: React.FC = () => {
                             </span>
                           </div>
                           <div className="campaign-content">
-                            <h3 className="campaign-title">{camp.title}</h3>
+                            <div className="flex justify-between items-start">
+                              <h3 className="campaign-title" style={{ flex: 1, paddingRight: '1rem' }}>{camp.title}</h3>
+                              <div className="flex gap-2">
+                                <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setEditCamp({ ...camp, cause: 'Education' }); setShowEditCamp(true); }}>
+                                  <Edit size={14} color="var(--color-text-secondary)" />
+                                </button>
+                                <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setCampToDelete(camp); setShowDeleteCampConfirm(true); }}>
+                                  <Trash2 size={14} color="var(--color-danger)" />
+                                </button>
+                              </div>
+                            </div>
                             <div className="progress-container">
                               <div className="progress-stats">
                                 <span className="raised-amount">₹{camp.raised.toLocaleString()}</span>
@@ -605,7 +663,7 @@ const Fundraising: React.FC = () => {
       {/* Campaign Modal */}
       {showModal && (
         <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '400px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>Create Campaign</h2>
             <form onSubmit={handleCreateCampaign} className="flex-col gap-4 flex">
@@ -639,7 +697,7 @@ const Fundraising: React.FC = () => {
       {/* Donation Modal */}
       {showDonateModal && (
         <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '400px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowDonateModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>Add Manual Donation</h2>
             <form onSubmit={handleCreateDonation} className="flex-col gap-4 flex">
@@ -668,7 +726,7 @@ const Fundraising: React.FC = () => {
       {/* Recurring Giving Modal */}
       {showRecurringModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '480px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '480px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowRecurringModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
               <RefreshCw size={22} color="var(--color-primary)" />
@@ -717,6 +775,55 @@ const Fundraising: React.FC = () => {
                 <RefreshCw size={16} /> Create AutoPay Mandate
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Campaign Modal ───────────────────────────────────── */}
+      {showEditCamp && editCamp && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative' }}>
+            <button onClick={() => setShowEditCamp(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
+            <h2 style={{ marginBottom: '1.5rem' }}>Edit Campaign</h2>
+            <form onSubmit={handleEditCampaign} className="flex-col gap-4 flex">
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Campaign Title</label>
+                <input required type="text" className="input-field" value={editCamp.title} onChange={e => setEditCamp({ ...editCamp, title: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Status</label>
+                <select className="input-field" value={editCamp.status} onChange={e => setEditCamp({ ...editCamp, status: e.target.value })}>
+                  <option value="active">Active</option>
+                  <option value="draft">Draft / Closed</option>
+                </select>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Funding Goal (₹)</label>
+                <input required type="number" className="input-field" value={editCamp.goal} onChange={e => setEditCamp({ ...editCamp, goal: Number(e.target.value) })} min="1000" />
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }}>Update Campaign</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Modal ───────────────────────────────────── */}
+      {showDeleteCampConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative', textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+              <div style={{ background: 'var(--color-danger)', color: 'white', padding: '1rem', borderRadius: '50%' }}>
+                <Trash2 size={32} />
+              </div>
+            </div>
+            <h2 style={{ marginBottom: '0.5rem' }}>Delete Campaign?</h2>
+            <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
+              Are you sure you want to delete <strong>{campToDelete?.title}</strong>? All associated donation records will be unlinked.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button className="btn btn-secondary" onClick={() => setShowDeleteCampConfirm(false)} style={{ flex: 1 }}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleDeleteCampaign} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
+            </div>
           </div>
         </div>
       )}

@@ -280,7 +280,7 @@ const Layout: React.FC = () => {
           </button>
 
           {/* Intent Bar (Zero-Manual-Work Directive Layer) */}
-          <div style={{ flex: 1, margin: '0 2rem' }}>
+          <div className="header-intent-wrap">
             <IntentBar />
           </div>
 

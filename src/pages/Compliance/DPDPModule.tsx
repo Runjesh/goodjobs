@@ -658,7 +658,7 @@ const DPDPModule: React.FC = () => {
       {/* ── Erasure Modal ─────────────────────────────────────────────────── */}
       {showErasureModal && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, backdropFilter:'blur(4px)' }}>
-          <div className="card" style={{ width:440, padding:'1.5rem', position:'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '440px', padding:'1.5rem', position:'relative' }}>
             <button onClick={()=>setShowErasureModal(false)} style={{ position:'absolute', right:'1rem', top:'1rem' }} className="action-btn"><X size={18}/></button>
             <h3 style={{ marginBottom:'1.25rem' }}>Log Erasure Request (DPDP §12)</h3>
             <form onSubmit={handleAddErasure} className="flex-col gap-4 flex">
@@ -677,7 +677,7 @@ const DPDPModule: React.FC = () => {
       {/* ── Breach Modal ──────────────────────────────────────────────────── */}
       {showBreachModal && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, backdropFilter:'blur(4px)' }}>
-          <div className="card" style={{ width:480, padding:'1.5rem', position:'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '480px', padding:'1.5rem', position:'relative' }}>
             <button onClick={()=>setShowBreachModal(false)} style={{ position:'absolute', right:'1rem', top:'1rem' }} className="action-btn"><X size={18}/></button>
             <h3 style={{ marginBottom:'1.25rem' }}>Log Security Breach (DPDP §8)</h3>
             <div style={{ padding:'0.75rem', background:'#fff7ed', borderRadius:'var(--radius-sm)', border:'1px solid #fed7aa', marginBottom:'1rem', fontSize:'0.8rem', color:'#92400e' }}>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2 } from 'lucide-react';
+import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import FormBuilder from '../../components/FormBuilder/FormBuilder';
@@ -18,11 +18,15 @@ function parseBoolCell(v: string): boolean {
 }
 
 const Programs: React.FC = () => {
-  const { beneficiaries, addBeneficiary } = useStore();
+  const { beneficiaries, addBeneficiary, updateBeneficiary, deleteBeneficiary } = useStore();
   const programs = Array.from(new Set(beneficiaries.map(b => b.program).filter(Boolean)));
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'mis' | 'forms' | 'toc'>('mis');
   const [form, setForm] = useState({ name: '', program: '', location: '', aadhaar: false, familySize: 1 });
+  const [showEditBen, setShowEditBen] = useState(false);
+  const [editBen, setEditBen] = useState<any>(null);
+  const [showDeleteBenConfirm, setShowDeleteBenConfirm] = useState(false);
+  const [benToDelete, setBenToDelete] = useState<any>(null);
   const [showConversationalModal, setShowConversationalModal] = useState(false);
   const [conversationalInput, setConversationalInput] = useState('');
   const [isParsing, setIsParsing] = useState(false);
@@ -75,6 +79,49 @@ const Programs: React.FC = () => {
       setShowModal(false);
     } catch {
       toast.error('Failed to enroll (backend not reachable).');
+    }
+  };
+
+  const handleEditBenSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await apiFetch(`/programs/beneficiaries/${editBen.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editBen.name,
+          program: editBen.program,
+          location: editBen.location,
+          aadhaar: editBen.aadhaar,
+          familySize: Number(editBen.familySize),
+        }),
+      });
+      if (res.ok) {
+        updateBeneficiary(editBen.id, editBen);
+        toast.success(`Beneficiary updated!`);
+        setShowEditBen(false);
+      } else {
+        toast.error('Failed to update beneficiary.');
+      }
+    } catch {
+      toast.error('Network error updating beneficiary.');
+    }
+  };
+
+  const handleDeleteBen = async () => {
+    if (!benToDelete) return;
+    try {
+      const res = await apiFetch(`/programs/beneficiaries/${benToDelete.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        deleteBeneficiary(benToDelete.id);
+        toast.success(`Beneficiary deleted!`);
+        setShowDeleteBenConfirm(false);
+        setBenToDelete(null);
+      } else {
+        toast.error('Failed to delete beneficiary.');
+      }
+    } catch {
+      toast.error('Network error deleting beneficiary.');
     }
   };
 
@@ -265,10 +312,16 @@ const Programs: React.FC = () => {
                                 {ben.program} • {ben.location} • Family of {ben.familySize}
                               </div>
                             </div>
-                            <div>
+                            <div className="flex gap-2 items-center">
                               <span className="badge badge-outline" style={{ fontSize: '0.7rem' }}>
                                 {ben.id}
                               </span>
+                              <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setEditBen(ben); setShowEditBen(true); }}>
+                                <Edit size={14} color="var(--color-text-secondary)" />
+                              </button>
+                              <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setBenToDelete(ben); setShowDeleteBenConfirm(true); }}>
+                                <Trash2 size={14} color="var(--color-danger)" />
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -317,7 +370,7 @@ const Programs: React.FC = () => {
 
       {activeTab === 'mis' && showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '460px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '1.5rem' }}>Enroll Beneficiary</h2>
             <form onSubmit={handleEnroll} className="flex-col gap-4 flex">
@@ -351,7 +404,7 @@ const Programs: React.FC = () => {
 
       {activeTab === 'mis' && showBenImport && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '520px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '520px', padding: '1.5rem', position: 'relative' }}>
             <button type="button" onClick={() => { setShowBenImport(false); setBenCsvRows([]); }} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <h2 style={{ marginBottom: '0.5rem' }}>Import beneficiaries (CSV)</h2>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
@@ -417,7 +470,7 @@ const Programs: React.FC = () => {
       {/* Conversational MIS Modal */}
       {showConversationalModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '500px', padding: '1.5rem', position: 'relative' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '500px', padding: '1.5rem', position: 'relative' }}>
             <button onClick={() => setShowConversationalModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
             <div className="flex items-center gap-2 mb-4">
               <MessageCircle size={22} color="#16a34a" />
@@ -474,6 +527,60 @@ const Programs: React.FC = () => {
               {isParsing ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
               {isParsing ? 'Agent Parsing...' : 'Submit to MIS Agent'}
             </button>
+          </div>
+        </div>
+      )}
+      
+      {/* ── Edit Beneficiary Modal ───────────────────────────────────── */}
+      {showEditBen && editBen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
+            <button onClick={() => setShowEditBen(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
+            <h2 style={{ marginBottom: '1.5rem' }}>Edit Beneficiary</h2>
+            <form onSubmit={handleEditBenSubmit} className="flex-col gap-4 flex">
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Full Name</label>
+                <input required type="text" className="input-field" value={editBen.name} onChange={e => setEditBen({ ...editBen, name: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Program</label>
+                <input required type="text" className="input-field" value={editBen.program} onChange={e => setEditBen({ ...editBen, program: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Location (District, State)</label>
+                <input required type="text" className="input-field" value={editBen.location} onChange={e => setEditBen({ ...editBen, location: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Family Size</label>
+                <input type="number" className="input-field" min="1" max="20" value={editBen.familySize} onChange={e => setEditBen({ ...editBen, familySize: Number(e.target.value) })} />
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="checkbox" id="edit-aadhaar" checked={editBen.aadhaar} onChange={e => setEditBen({ ...editBen, aadhaar: e.target.checked })} />
+                <label htmlFor="edit-aadhaar" style={{ fontSize: '0.875rem' }}>Aadhaar Verified</label>
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Beneficiary</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirm Modal ───────────────────────────────────── */}
+      {showDeleteBenConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative', textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+              <div style={{ background: 'var(--color-danger)', color: 'white', padding: '1rem', borderRadius: '50%' }}>
+                <Trash2 size={32} />
+              </div>
+            </div>
+            <h2 style={{ marginBottom: '0.5rem' }}>Delete Beneficiary?</h2>
+            <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
+              Are you sure you want to delete <strong>{benToDelete?.name}</strong>? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+              <button className="btn btn-secondary" onClick={() => setShowDeleteBenConfirm(false)} style={{ flex: 1 }}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleDeleteBen} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
+            </div>
           </div>
         </div>
       )}

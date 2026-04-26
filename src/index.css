@@ -178,6 +178,7 @@ html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
   height: -webkit-fill-available;
+  overflow-x: hidden;
 }
 
 body {
@@ -192,6 +193,7 @@ body {
   touch-action: manipulation;
   min-height: 100vh;
   min-height: -webkit-fill-available;
+  overflow-x: hidden;
 }
 
 /* ── Typography ──────────────────────────────────────── */
@@ -667,6 +669,16 @@ select.input-field {
 
   .page-header {
     margin-bottom: 1.25rem;
+  }
+  
+  .page-header .flex {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  
+  .page-header .flex .btn {
+    flex: 1 1 auto;
+    min-width: calc(50% - 0.5rem);
   }
 
   /* Hide text on small icon buttons */

@@ -406,7 +406,7 @@ const AgentHQ: React.FC = () => {
                 <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--color-text-tertiary)' }} />
                 <input type="text" className="input-field" placeholder="Search logs..." value={logSearch}
                   onChange={e => setLogSearch(e.target.value)}
-                  style={{ padding: '0.5rem 1rem 0.5rem 2rem', fontSize: '0.75rem', width: '200px' }} />
+                  style={{ padding: '0.5rem 1rem 0.5rem 2rem', fontSize: '0.75rem', width: '100%', maxWidth: '200px' }} />
               </div>
             </div>
             <div

@@ -30,6 +30,11 @@ const BottomNav: React.FC = () => {
               `bottom-nav-item ${isActive ? 'active' : ''} ${!hasAccess ? 'locked' : ''}`
             }
             aria-label={item.label}
+            onClick={(e) => {
+              if (!hasAccess) {
+                e.preventDefault();
+              }
+            }}
           >
             <Icon size={22} className="bottom-nav-icon" />
             <span className="bottom-nav-label">{item.label}</span>
