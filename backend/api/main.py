@@ -34,15 +34,19 @@ from core.db import db_conn
 init_sentry()
 
 app = FastAPI(
-    title="SevaSuite Agent API",
-    description="Agentic backend for the SevaSuite India-first Nonprofit OS",
+    title="GoodJobs API",
+    description="Agentic backend for GoodJobs — India-first nonprofit operating system (goodjobs.co.in)",
     version="2.0.0",
 )
 
-# CORS for local React frontend
+# CORS — comma-separated origins in FRONTEND_ORIGINS (e.g. Railway app URL + local dev)
+_default_origins = "http://localhost:5173,https://goodjobs.co.in"
+_cors_env = (os.getenv("FRONTEND_ORIGINS") or _default_origins).strip()
+FRONTEND_ORIGIN_LIST = [o.strip() for o in _cors_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://sevasuite.in"],
+    allow_origins=FRONTEND_ORIGIN_LIST,
     allow_methods=["*"],
     allow_headers=["*"],
 )

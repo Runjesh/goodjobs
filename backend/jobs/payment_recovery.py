@@ -21,7 +21,7 @@ def run_payment_recovery():
         print(f"  🚨 Detected failed payment: {tx['donor_name']} (₹{tx['amount']}) - Reason: {tx['reason']}")
         
         # Trigger Recovery Agent Logic
-        nudge_text = f"Namaste {tx['donor_name']}! 🙏 We noticed your donation of ₹{tx['amount']} didn't go through due to a technical error. Your support is vital for our Programs. You can try again here: sevasuite.in/retry/{tx['id']}"
+        nudge_text = f"Namaste {tx['donor_name']}! 🙏 We noticed your donation of ₹{tx['amount']} didn't go through due to a technical error. Your support is vital for our Programs. You can try again here: goodjobs.co.in/retry/{tx['id']}"
         
         print(f"  📲 [AUTO-RECOVERY] Sending WhatsApp nudge to {tx['donor_name']}")
         print(f"  💬 Message: {nudge_text}")

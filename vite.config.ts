@@ -9,13 +9,7 @@ const NAV_FALLBACK_ALLOWLIST = [
   /^\/give\/[^/]+$/,
 ];
 
-function apiPathMatcher(segment: string) {
-  const base = segment.startsWith('/') ? segment : `/${segment}`;
-  return ({ url }: { url: URL }) => {
-    const p = url.pathname;
-    return p === base || p.startsWith(`${base}/`);
-  };
-}
+// NOTE: urlPattern must not close over outer vars — Workbox inlines these into sw.js and breaks on minified names (`base is not defined`).
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -56,8 +50,11 @@ export default defineConfig({
         navigateFallbackAllowlist: [...NAV_FALLBACK_ALLOWLIST],
         runtimeCaching: [
           {
-            // Use path-prefix match only — `.includes('/inbox')` also matched `/src/utils/inboxLinks.ts`.
-            urlPattern: apiPathMatcher('inbox'),
+            // Path-prefix only — `.includes('/inbox')` also matched `/src/utils/inboxLinks.ts`.
+            urlPattern: ({ url }: { url: URL }) => {
+              const p = url.pathname;
+              return p === '/inbox' || p.startsWith('/inbox/');
+            },
             handler: 'NetworkFirst',
             options: {
               cacheName: 'inbox-cache',
@@ -66,7 +63,10 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: apiPathMatcher('morning-brief'),
+            urlPattern: ({ url }: { url: URL }) => {
+              const p = url.pathname;
+              return p === '/morning-brief' || p.startsWith('/morning-brief/');
+            },
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'brief-cache',
