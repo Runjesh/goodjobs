@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ShieldCheck, Heart, IndianRupee, QrCode, CreditCard, Smartphone, X } from 'lucide-react';
+import { ShieldCheck, Heart, IndianRupee, QrCode, CreditCard, Smartphone } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './DonationPage.css';
 import { apiFetch } from '../../api/client';
@@ -17,6 +17,14 @@ const DonationPage: React.FC = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [pan, setPan] = useState('');
+  const [phone, setPhone] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+  const [city, setCity] = useState('');
+  const [stateField, setStateField] = useState('');
+  const [pincode, setPincode] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [message, setMessage] = useState('');
+  const [consentImpact, setConsentImpact] = useState(true);
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [step, setStep] = useState<'form' | 'success'>('form');
   const [processing, setProcessing] = useState(false);
@@ -41,6 +49,14 @@ const DonationPage: React.FC = () => {
           pan: pan || null,
           amount: finalAmount,
           method: payMethod === 'upi' ? 'UPI' : payMethod === 'card' ? 'Card' : 'NetBanking',
+          phone: isAnonymous ? null : phone || null,
+          address_line1: isAnonymous ? null : addressLine1 || null,
+          city: isAnonymous ? null : city || null,
+          state: isAnonymous ? null : stateField || null,
+          pincode: isAnonymous ? null : pincode || null,
+          company_name: isAnonymous ? null : companyName || null,
+          message: message || null,
+          consent_impact_updates: consentImpact,
         }),
       });
       if (!res.ok) throw new Error('donate');
@@ -60,23 +76,29 @@ const DonationPage: React.FC = () => {
   };
 
   if (step === 'success') {
+    const thanksName = isAnonymous ? 'Friend' : name.trim() || 'there';
     return (
       <div className="donation-page">
         <div className="donation-success">
           <div className="success-icon">🎉</div>
-          <h1>Thank you, {name}!</h1>
+          <h1>Thank you, {thanksName}!</h1>
           <p>Your donation of <strong>₹{finalAmount.toLocaleString()}</strong> to {ngoName} has been recorded.</p>
           <div className="success-details">
             <div className="success-detail-row"><span>Transaction ID</span><span style={{ fontFamily: 'monospace' }}>{txId || '—'}</span></div>
             <div className="success-detail-row"><span>Campaign</span><span>{campaignSlug || 'General Fund'}</span></div>
             <div className="success-detail-row"><span>Fund</span><span>{cause}</span></div>
+            {!isAnonymous && companyName ? (
+              <div className="success-detail-row"><span>Donor on record</span><span>{companyName} · {name}</span></div>
+            ) : null}
             <div className="success-detail-row"><span>80G Deduction</span><span style={{ color: 'var(--color-success)', fontWeight: 600 }}>₹{Math.round(finalAmount * 0.5).toLocaleString()} eligible</span></div>
           </div>
           <button className="btn btn-primary" style={{ width: '100%', marginTop: '1.5rem' }} onClick={handleDownload80G}>
             <ShieldCheck size={16} /> Download 80G Certificate
           </button>
           <p style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
-            A receipt has been sent to {email}
+            {isAnonymous
+              ? 'Anonymous gifts are receipted per NGO policy — contact the organisation if you need documentation.'
+              : `Receipt and updates will use ${email}${phone ? ` and ${phone}` : ''}.`}
           </p>
         </div>
       </div>
@@ -176,9 +198,46 @@ const DonationPage: React.FC = () => {
                 <input required={!isAnonymous} type="email" className="input-field" placeholder="ravi@email.com" value={email} onChange={e => setEmail(e.target.value)} disabled={isAnonymous} />
               </div>
             </div>
+            <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+              <label className="input-label">Mobile (for payment / receipt SMS)</label>
+              <input type="tel" className="input-field" placeholder="+91 …" value={phone} onChange={e => setPhone(e.target.value)} disabled={isAnonymous} />
+            </div>
             <div className="input-group" style={{ marginBottom: '0.5rem' }}>
               <label className="input-label">PAN (for 80G certificate)</label>
-              <input type="text" className="input-field" placeholder="ABCDE1234F (optional)" value={pan} onChange={e => setPan(e.target.value.toUpperCase())} maxLength={10} />
+              <input type="text" className="input-field" placeholder="ABCDE1234F (optional)" value={pan} onChange={e => setPan(e.target.value.toUpperCase())} maxLength={10} disabled={isAnonymous} />
+            </div>
+            <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+              <label className="input-label">Donating as a company? (optional)</label>
+              <input type="text" className="input-field" placeholder="Legal name as on PAN / invoice" value={companyName} onChange={e => setCompanyName(e.target.value)} disabled={isAnonymous} />
+            </div>
+            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
+              Postal address (recommended for 80G receipt)
+            </div>
+            <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+              <label className="input-label">Address line</label>
+              <input type="text" className="input-field" placeholder="Flat / street" value={addressLine1} onChange={e => setAddressLine1(e.target.value)} disabled={isAnonymous} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">City</label>
+                <input type="text" className="input-field" value={city} onChange={e => setCity(e.target.value)} disabled={isAnonymous} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">State</label>
+                <input type="text" className="input-field" value={stateField} onChange={e => setStateField(e.target.value)} disabled={isAnonymous} />
+              </div>
+            </div>
+            <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+              <label className="input-label">PIN code</label>
+              <input type="text" className="input-field" placeholder="6 digits" value={pincode} onChange={e => setPincode(e.target.value.replace(/\D/g, '').slice(0, 6))} disabled={isAnonymous} />
+            </div>
+            <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+              <label className="input-label">Message to the NGO (optional)</label>
+              <textarea className="input-field" rows={2} placeholder="In memory of… / please use for…" value={message} onChange={e => setMessage(e.target.value)} />
+            </div>
+            <div className="flex items-center gap-2" style={{ marginBottom: '1rem' }}>
+              <input type="checkbox" id="impact" checked={consentImpact} onChange={e => setConsentImpact(e.target.checked)} disabled={isAnonymous} />
+              <label htmlFor="impact" style={{ fontSize: '0.875rem' }}>Send occasional impact updates (email)</label>
             </div>
             <div className="flex items-center gap-2" style={{ marginBottom: '1.5rem' }}>
               <input type="checkbox" id="anon" checked={isAnonymous} onChange={e => setIsAnonymous(e.target.checked)} />

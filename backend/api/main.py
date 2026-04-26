@@ -554,11 +554,11 @@ def _seed_memory_crm(ngo_id: str):
     if ngo_id in DONORS_MEM_BY_NGO:
         return
     donors = [
-        {"id": "1", "name": "Anjali Desai", "type": "Major Donor", "totalGiven": 450000, "lastGift": "2026-03-15", "initial": "A", "pan": "ABCP****4D", "location": "Mumbai, Maharashtra", "tags": ["Education Cause"]},
-        {"id": "2", "name": "Rohan Gupta", "type": "Recurring", "totalGiven": 24000, "lastGift": "2026-04-01", "initial": "R", "pan": "BVCX****9H", "location": "Delhi, NCR", "tags": ["Monthly Giver"]},
-        {"id": "3", "name": "Infosys Foundation", "type": "CSR Partner", "totalGiven": 5000000, "lastGift": "2025-11-20", "initial": "I", "pan": "INFS****1C", "location": "Bangalore, Karnataka", "tags": ["CSR"]},
-        {"id": "4", "name": "Priya Sharma", "type": "Lapsing", "totalGiven": 15000, "lastGift": "2025-08-10", "initial": "P", "pan": "PRYS****3J", "location": "Pune, Maharashtra", "tags": ["Health"]},
-        {"id": "5", "name": "Vikram Singh", "type": "Event Attendee", "totalGiven": 5000, "lastGift": "2026-02-28", "initial": "V", "pan": "VKRS****2K", "location": "Jaipur, Rajasthan", "tags": ["Events"]},
+        {"id": "1", "name": "Anjali Desai", "type": "Major Donor", "totalGiven": 450000, "lastGift": "2026-03-15", "initial": "A", "pan": "ABCP****4D", "location": "Mumbai, Maharashtra", "tags": ["Education Cause"], "email": "anjali@example.com", "phone": "+91-98***01", "meta": {"employer": "Self", "preferred_channel": "whatsapp", "notes": "Interested in site visits"}},
+        {"id": "2", "name": "Rohan Gupta", "type": "Recurring", "totalGiven": 24000, "lastGift": "2026-04-01", "initial": "R", "pan": "BVCX****9H", "location": "Delhi, NCR", "tags": ["Monthly Giver"], "email": "", "phone": "", "meta": {}},
+        {"id": "3", "name": "Infosys Foundation", "type": "CSR Partner", "totalGiven": 5000000, "lastGift": "2025-11-20", "initial": "I", "pan": "INFS****1C", "location": "Bangalore, Karnataka", "tags": ["CSR"], "email": "csr@example.org", "phone": "", "meta": {}},
+        {"id": "4", "name": "Priya Sharma", "type": "Lapsing", "totalGiven": 15000, "lastGift": "2025-08-10", "initial": "P", "pan": "PRYS****3J", "location": "Pune, Maharashtra", "tags": ["Health"], "email": "", "phone": "", "meta": {}},
+        {"id": "5", "name": "Vikram Singh", "type": "Event Attendee", "totalGiven": 5000, "lastGift": "2026-02-28", "initial": "V", "pan": "VKRS****2K", "location": "Jaipur, Rajasthan", "tags": ["Events"], "email": "", "phone": "", "meta": {}},
     ]
     DONORS_MEM_BY_NGO[ngo_id] = donors
     TX_MEM_BY_NGO[ngo_id] = [
@@ -582,6 +582,7 @@ def _seed_memory_campaigns(ngo_id: str):
             "status": "active",
             "image": "linear-gradient(135deg, #a855f7, #ec4899)",
             "cause": "Education",
+            "details": {"story": "Rural girls gain digital skills and safer internet habits.", "partner_org": "District Education Office", "public_url": ""},
         },
         {
             "id": "c2",
@@ -592,6 +593,7 @@ def _seed_memory_campaigns(ngo_id: str):
             "status": "active",
             "image": "linear-gradient(135deg, #3b82f6, #06b6d4)",
             "cause": "Health",
+            "details": {},
         },
         {
             "id": "c3",
@@ -602,6 +604,7 @@ def _seed_memory_campaigns(ngo_id: str):
             "status": "draft",
             "image": "linear-gradient(135deg, #10b981, #3b82f6)",
             "cause": "Events",
+            "details": {},
         },
     ]
 
@@ -639,10 +642,26 @@ def _seed_memory_beneficiaries(ngo_id: str):
     if ngo_id in BENEFICIARIES_MEM_BY_NGO:
         return
     BENEFICIARIES_MEM_BY_NGO[ngo_id] = [
-        {"id": "BEN-1045", "name": "Lakshmi Devi", "program": "Women Livelihood Center", "location": "Nashik, MH", "aadhaar": True, "familySize": 4},
-        {"id": "BEN-1046", "name": "Rahul Kumar", "program": "Digital Literacy 2026", "location": "Patna, BR", "aadhaar": True, "familySize": 1},
-        {"id": "BEN-1047", "name": "Sunita Bai", "program": "Healthcare Camp", "location": "Pune, MH", "aadhaar": False, "familySize": 3},
-        {"id": "BEN-1048", "name": "Anita Desai", "program": "Women Livelihood Center", "location": "Nashik, MH", "aadhaar": True, "familySize": 5},
+        {
+            "id": "BEN-1045",
+            "name": "Lakshmi Devi",
+            "program": "Women Livelihood Center",
+            "location": "Nashik, MH",
+            "aadhaar": True,
+            "familySize": 4,
+            "details": {"phone": "+91-98***12", "referral_source": "shg", "gender": "female", "vulnerability_flags": ["woman_headed"]},
+        },
+        {
+            "id": "BEN-1046",
+            "name": "Rahul Kumar",
+            "program": "Digital Literacy 2026",
+            "location": "Patna, BR",
+            "aadhaar": True,
+            "familySize": 1,
+            "details": {"referral_source": "camp", "gender": "male"},
+        },
+        {"id": "BEN-1047", "name": "Sunita Bai", "program": "Healthcare Camp", "location": "Pune, MH", "aadhaar": False, "familySize": 3, "details": {}},
+        {"id": "BEN-1048", "name": "Anita Desai", "program": "Women Livelihood Center", "location": "Nashik, MH", "aadhaar": True, "familySize": 5, "details": {}},
     ]
 
 
@@ -650,10 +669,10 @@ def _seed_memory_volunteer_roster(ngo_id: str):
     if ngo_id in VOLUNTEERS_ROSTER_MEM_BY_NGO:
         return
     VOLUNTEERS_ROSTER_MEM_BY_NGO[ngo_id] = [
-        {"id": "V-101", "name": "Rohan Sharma", "skills": ["Teaching", "English"], "hours": 45, "verified": True},
-        {"id": "V-102", "name": "Priya Patel", "skills": ["Medical Camp", "Admin"], "hours": 120, "verified": True},
-        {"id": "V-103", "name": "Karan Singh", "skills": ["Logistics"], "hours": 8, "verified": False},
-        {"id": "V-104", "name": "Neha Gupta", "skills": ["Social Media", "Photography"], "hours": 32, "verified": True},
+        {"id": "V-101", "name": "Rohan Sharma", "skills": ["Teaching", "English"], "hours": 45, "verified": True, "profile": {"city": "Pune", "phone": "+91-98***01", "email": "rohan.s@email.com"}},
+        {"id": "V-102", "name": "Priya Patel", "skills": ["Medical Camp", "Admin"], "hours": 120, "verified": True, "profile": {"city": "Mumbai"}},
+        {"id": "V-103", "name": "Karan Singh", "skills": ["Logistics"], "hours": 8, "verified": False, "profile": {}},
+        {"id": "V-104", "name": "Neha Gupta", "skills": ["Social Media", "Photography"], "hours": 32, "verified": True, "profile": {"availability": "Weekends"}},
     ]
 
 
@@ -673,6 +692,7 @@ class BeneficiaryCreate(BaseModel):
     location: str
     aadhaar: bool = False
     familySize: int = 1
+    details: Optional[Dict[str, Any]] = None
 
 
 @app.get("/programs/beneficiaries", tags=["Programs"])
@@ -684,7 +704,7 @@ def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "pro
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, name, program, location, aadhaar, family_size
+            SELECT id, name, program, location, aadhaar, family_size, COALESCE(details, '{}'::jsonb)
             FROM program_beneficiaries
             WHERE ngo_id = %s
             ORDER BY created_at DESC
@@ -695,7 +715,15 @@ def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "pro
         rows = cur.fetchall()
         return {
             "beneficiaries": [
-                {"id": r[0], "name": r[1], "program": r[2], "location": r[3], "aadhaar": bool(r[4]), "familySize": int(r[5])}
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "program": r[2],
+                    "location": r[3],
+                    "aadhaar": bool(r[4]),
+                    "familySize": int(r[5]),
+                    "details": _parse_jsonb(r[6]),
+                }
                 for r in rows
             ],
             "source": "db",
@@ -708,20 +736,45 @@ def create_beneficiary(body: BeneficiaryCreate, current_user: TokenUser = Depend
         if conn is None:
             _seed_memory_beneficiaries(current_user.ngo_id)
             new_id = f"BEN-{1000 + len(BENEFICIARIES_MEM_BY_NGO.get(current_user.ngo_id, [])) + 49}"
-            ben = {"id": new_id, "name": body.name, "program": body.program, "location": body.location, "aadhaar": bool(body.aadhaar), "familySize": int(body.familySize)}
+            ben = {
+                "id": new_id,
+                "name": body.name,
+                "program": body.program,
+                "location": body.location,
+                "aadhaar": bool(body.aadhaar),
+                "familySize": int(body.familySize),
+                "details": body.details or {},
+            }
             BENEFICIARIES_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, ben)
             return {"status": "created", "beneficiary": ben, "source": "memory"}
         cur = conn.cursor()
         new_id = f"BEN-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
         cur.execute(
             """
-            INSERT INTO program_beneficiaries (id, ngo_id, name, program, location, aadhaar, family_size)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO program_beneficiaries (id, ngo_id, name, program, location, aadhaar, family_size, details)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             RETURNING id
             """,
-            (new_id, current_user.ngo_id, body.name, body.program, body.location, bool(body.aadhaar), int(body.familySize)),
+            (
+                new_id,
+                current_user.ngo_id,
+                body.name,
+                body.program,
+                body.location,
+                bool(body.aadhaar),
+                int(body.familySize),
+                json.dumps(body.details or {}),
+            ),
         )
-        ben = {"id": new_id, "name": body.name, "program": body.program, "location": body.location, "aadhaar": bool(body.aadhaar), "familySize": int(body.familySize)}
+        ben = {
+            "id": new_id,
+            "name": body.name,
+            "program": body.program,
+            "location": body.location,
+            "aadhaar": bool(body.aadhaar),
+            "familySize": int(body.familySize),
+            "details": body.details or {},
+        }
         return {"status": "created", "beneficiary": ben, "source": "db"}
 
 
@@ -748,6 +801,7 @@ def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUs
                     "location": b.location,
                     "aadhaar": bool(b.aadhaar),
                     "familySize": int(b.familySize),
+                    "details": b.details or {},
                 }
                 lst.insert(0, ben)
                 n += 1
@@ -759,10 +813,19 @@ def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUs
             new_id = f"BEN-{int(datetime.now(timezone.utc).timestamp() * 1000)}_{n}"
             cur.execute(
                 """
-                INSERT INTO program_beneficiaries (id, ngo_id, name, program, location, aadhaar, family_size)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO program_beneficiaries (id, ngo_id, name, program, location, aadhaar, family_size, details)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 """,
-                (new_id, current_user.ngo_id, b.name, b.program, b.location, bool(b.aadhaar), int(b.familySize)),
+                (
+                    new_id,
+                    current_user.ngo_id,
+                    b.name,
+                    b.program,
+                    b.location,
+                    bool(b.aadhaar),
+                    int(b.familySize),
+                    json.dumps(b.details or {}),
+                ),
             )
             n += 1
         return {"imported": n, "source": "db"}
@@ -782,6 +845,7 @@ def update_beneficiary(ben_id: str, body: BeneficiaryCreate, current_user: Token
                         "location": body.location,
                         "aadhaar": bool(body.aadhaar),
                         "familySize": int(body.familySize),
+                        "details": body.details or lst[i].get("details") or {},
                     })
                     return {"status": "updated", "beneficiary": lst[i], "source": "memory"}
             raise HTTPException(status_code=404, detail="Beneficiary not found")
@@ -790,11 +854,20 @@ def update_beneficiary(ben_id: str, body: BeneficiaryCreate, current_user: Token
         cur.execute(
             """
             UPDATE program_beneficiaries
-            SET name = %s, program = %s, location = %s, aadhaar = %s, family_size = %s
+            SET name = %s, program = %s, location = %s, aadhaar = %s, family_size = %s, details = %s::jsonb
             WHERE id = %s AND ngo_id = %s
             RETURNING id
             """,
-            (body.name, body.program, body.location, bool(body.aadhaar), int(body.familySize), ben_id, current_user.ngo_id),
+            (
+                body.name,
+                body.program,
+                body.location,
+                bool(body.aadhaar),
+                int(body.familySize),
+                json.dumps(body.details or {}),
+                ben_id,
+                current_user.ngo_id,
+            ),
         )
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Beneficiary not found")
@@ -824,6 +897,7 @@ class VolunteerCreate(BaseModel):
     name: str
     skills: List[str] = []
     verified: bool = False
+    profile: Optional[Dict[str, Any]] = None
 
 
 @app.get("/volunteers/roster", tags=["Volunteers"])
@@ -835,7 +909,7 @@ def list_volunteer_roster(current_user: TokenUser = Depends(require_role("ed", "
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, name, COALESCE(skills,'{}'), hours, verified
+            SELECT id, name, COALESCE(skills,'{}'), hours, verified, COALESCE(profile, '{}'::jsonb)
             FROM volunteer_roster
             WHERE ngo_id = %s
             ORDER BY created_at DESC
@@ -846,7 +920,14 @@ def list_volunteer_roster(current_user: TokenUser = Depends(require_role("ed", "
         rows = cur.fetchall()
         return {
             "volunteers": [
-                {"id": r[0], "name": r[1], "skills": list(r[2] or []), "hours": int(r[3] or 0), "verified": bool(r[4])}
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "skills": list(r[2] or []),
+                    "hours": int(r[3] or 0),
+                    "verified": bool(r[4]),
+                    "profile": _parse_jsonb(r[5]),
+                }
                 for r in rows
             ],
             "source": "db",
@@ -859,20 +940,41 @@ def create_volunteer_roster(body: VolunteerCreate, current_user: TokenUser = Dep
         if conn is None:
             _seed_memory_volunteer_roster(current_user.ngo_id)
             new_id = f"V-{100 + len(VOLUNTEERS_ROSTER_MEM_BY_NGO.get(current_user.ngo_id, [])) + 5}"
-            v = {"id": new_id, "name": body.name, "skills": body.skills or [], "hours": 0, "verified": bool(body.verified)}
+            v = {
+                "id": new_id,
+                "name": body.name,
+                "skills": body.skills or [],
+                "hours": 0,
+                "verified": bool(body.verified),
+                "profile": body.profile or {},
+            }
             VOLUNTEERS_ROSTER_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, v)
             return {"status": "created", "volunteer": v, "source": "memory"}
         cur = conn.cursor()
         new_id = f"V-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
         cur.execute(
             """
-            INSERT INTO volunteer_roster (id, ngo_id, name, skills, hours, verified)
-            VALUES (%s, %s, %s, %s, 0, %s)
+            INSERT INTO volunteer_roster (id, ngo_id, name, skills, hours, verified, profile)
+            VALUES (%s, %s, %s, %s, 0, %s, %s::jsonb)
             RETURNING id
             """,
-            (new_id, current_user.ngo_id, body.name, body.skills or [], bool(body.verified)),
+            (
+                new_id,
+                current_user.ngo_id,
+                body.name,
+                body.skills or [],
+                bool(body.verified),
+                json.dumps(body.profile or {}),
+            ),
         )
-        v = {"id": new_id, "name": body.name, "skills": body.skills or [], "hours": 0, "verified": bool(body.verified)}
+        v = {
+            "id": new_id,
+            "name": body.name,
+            "skills": body.skills or [],
+            "hours": 0,
+            "verified": bool(body.verified),
+            "profile": body.profile or {},
+        }
         return {"status": "created", "volunteer": v, "source": "db"}
 
 
@@ -887,7 +989,8 @@ def update_volunteer(v_id: str, body: VolunteerCreate, current_user: TokenUser =
                     lst[i].update({
                         "name": body.name,
                         "skills": body.skills or [],
-                        "verified": bool(body.verified)
+                        "verified": bool(body.verified),
+                        "profile": body.profile or lst[i].get("profile") or {},
                     })
                     return {"status": "updated", "volunteer": lst[i], "source": "memory"}
             raise HTTPException(status_code=404, detail="Volunteer not found")
@@ -895,11 +998,11 @@ def update_volunteer(v_id: str, body: VolunteerCreate, current_user: TokenUser =
         cur.execute(
             """
             UPDATE volunteer_roster
-            SET name = %s, skills = %s, verified = %s
+            SET name = %s, skills = %s, verified = %s, profile = %s::jsonb
             WHERE id = %s AND ngo_id = %s
             RETURNING id
             """,
-            (body.name, body.skills or [], bool(body.verified), v_id, current_user.ngo_id),
+            (body.name, body.skills or [], bool(body.verified), json.dumps(body.profile or {}), v_id, current_user.ngo_id),
         )
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Volunteer not found")
@@ -926,6 +1029,13 @@ def delete_volunteer(v_id: str, current_user: TokenUser = Depends(require_role("
 
 class VolunteerSignupRequest(BaseModel):
     volunteer_name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    transport_mode: Optional[str] = None
+    dietary_notes: Optional[str] = None
+    notes: Optional[str] = None
 
 
 @app.get("/volunteers/shifts", tags=["Volunteers"])
@@ -974,8 +1084,27 @@ def signup_volunteer_shift(
                 raise HTTPException(status_code=409, detail="Shift is full.")
 
             signup_id = f"vs_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            su_details = {
+                k: v
+                for k, v in {
+                    "phone": (body.phone or "").strip() or None,
+                    "email": (body.email or "").strip().lower() or None,
+                    "emergency_contact_name": (body.emergency_contact_name or "").strip() or None,
+                    "emergency_contact_phone": (body.emergency_contact_phone or "").strip() or None,
+                    "transport_mode": (body.transport_mode or "").strip() or None,
+                    "dietary_notes": (body.dietary_notes or "").strip() or None,
+                    "notes": (body.notes or "").strip() or None,
+                }.items()
+                if v
+            }
             VOLUNTEER_SIGNUPS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).append(
-                {"id": signup_id, "shiftId": int(shift_id), "volunteerName": body.volunteer_name, "createdAt": datetime.now(timezone.utc).isoformat()}
+                {
+                    "id": signup_id,
+                    "shiftId": int(shift_id),
+                    "volunteerName": body.volunteer_name,
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                    "details": su_details,
+                }
             )
             shift["filled"] = int(shift.get("filled", 0)) + 1
             event = {
@@ -1002,12 +1131,25 @@ def signup_volunteer_shift(
             raise HTTPException(status_code=409, detail="Shift is full.")
 
         signup_id = f"vs_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        su_details = {
+            k: v
+            for k, v in {
+                "phone": (body.phone or "").strip() or None,
+                "email": (body.email or "").strip().lower() or None,
+                "emergency_contact_name": (body.emergency_contact_name or "").strip() or None,
+                "emergency_contact_phone": (body.emergency_contact_phone or "").strip() or None,
+                "transport_mode": (body.transport_mode or "").strip() or None,
+                "dietary_notes": (body.dietary_notes or "").strip() or None,
+                "notes": (body.notes or "").strip() or None,
+            }.items()
+            if v
+        }
         cur.execute(
             """
-            INSERT INTO volunteer_shift_signups (id, ngo_id, shift_id, volunteer_name)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO volunteer_shift_signups (id, ngo_id, shift_id, volunteer_name, details)
+            VALUES (%s, %s, %s, %s, %s::jsonb)
             """,
-            (signup_id, current_user.ngo_id, int(shift_id), body.volunteer_name),
+            (signup_id, current_user.ngo_id, int(shift_id), body.volunteer_name, json.dumps(su_details)),
         )
         cur.execute(
             "UPDATE volunteer_shifts SET filled = filled + 1 WHERE ngo_id = %s AND id = %s",
@@ -1034,7 +1176,7 @@ def list_volunteer_signups(current_user: TokenUser = Depends(require_role("ed", 
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, shift_id, volunteer_name, created_at
+            SELECT id, shift_id, volunteer_name, created_at, COALESCE(details, '{}'::jsonb)
             FROM volunteer_shift_signups
             WHERE ngo_id = %s
             ORDER BY created_at DESC
@@ -1045,7 +1187,13 @@ def list_volunteer_signups(current_user: TokenUser = Depends(require_role("ed", 
         rows = cur.fetchall()
         return {
             "signups": [
-                {"id": r[0], "shiftId": int(r[1]), "volunteerName": r[2], "createdAt": r[3].isoformat() if hasattr(r[3], "isoformat") else str(r[3])}
+                {
+                    "id": r[0],
+                    "shiftId": int(r[1]),
+                    "volunteerName": r[2],
+                    "createdAt": r[3].isoformat() if hasattr(r[3], "isoformat") else str(r[3]),
+                    "details": _parse_jsonb(r[4]),
+                }
                 for r in rows
             ],
             "source": "db",
@@ -1060,6 +1208,7 @@ class CsrCardCreate(BaseModel):
     agent: str = "AD"
     col: str = "prospecting"
     date: str = "Just added"
+    details: Optional[Dict[str, Any]] = None
 
 
 class CsrCardMove(BaseModel):
@@ -1082,6 +1231,20 @@ def _ts_iso(val: Any) -> Optional[str]:
     return str(val)
 
 
+def _parse_jsonb(val: Any) -> Dict[str, Any]:
+    if val is None:
+        return {}
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str):
+        try:
+            out = json.loads(val)
+            return out if isinstance(out, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 @app.get("/csr/cards", tags=["CSR"])
 def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "programs", "board"))):
     with db_conn() as conn:
@@ -1094,7 +1257,8 @@ def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "
             SELECT id, company, amount::float, COALESCE(project,''), COALESCE(tags,'{}'), COALESCE(agent,''), col, COALESCE(date_label,''),
                    COALESCE(win_probability, 55)::int,
                    updated_at,
-                   created_at
+                   created_at,
+                   COALESCE(details, '{}'::jsonb)
             FROM csr_pipeline_cards
             WHERE ngo_id = %s
             ORDER BY created_at DESC
@@ -1107,6 +1271,7 @@ def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "
             wp = int(r[8] or 55)
             upd = _ts_iso(r[9])
             cre = _ts_iso(r[10])
+            det = _parse_jsonb(r[11])
             out.append(
                 {
                     "id": r[0],
@@ -1121,6 +1286,7 @@ def list_csr_cards(current_user: TokenUser = Depends(require_role("ed", "csr", "
                     "updated_at": upd,
                     "created_at": cre,
                     "last_activity_at": upd,
+                    "details": det,
                 }
             )
         return {"cards": out, "source": "db"}
@@ -1144,6 +1310,7 @@ def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(requi
                 "date": body.date,
                 "last_activity_at": ts,
                 "win_probability": 55,
+                "details": body.details or {},
             }
             CSR_CARDS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, card)
             return {"status": "created", "card": card, "source": "memory"}
@@ -1151,11 +1318,22 @@ def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(requi
         new_id = f"csr_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
         cur.execute(
             """
-            INSERT INTO csr_pipeline_cards (id, ngo_id, company, amount, project, tags, agent, col, date_label, win_probability)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 55)
+            INSERT INTO csr_pipeline_cards (id, ngo_id, company, amount, project, tags, agent, col, date_label, win_probability, details)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 55, %s::jsonb)
             RETURNING id, win_probability::int, updated_at
             """,
-            (new_id, current_user.ngo_id, body.company, float(body.amount), body.project, body.tags or [], body.agent, body.col, body.date),
+            (
+                new_id,
+                current_user.ngo_id,
+                body.company,
+                float(body.amount),
+                body.project,
+                body.tags or [],
+                body.agent,
+                body.col,
+                body.date,
+                json.dumps(body.details or {}),
+            ),
         )
         rid, rwp, rupd = cur.fetchone()
         upd_s = _ts_iso(rupd)
@@ -1171,6 +1349,7 @@ def create_csr_card(body: CsrCardCreate, current_user: TokenUser = Depends(requi
             "win_probability": int(rwp or 55),
             "updated_at": upd_s,
             "last_activity_at": upd_s,
+            "details": body.details or {},
         }
         return {"status": "created", "card": card, "source": "db"}
 
@@ -1191,7 +1370,8 @@ def update_csr_card(card_id: str, body: CsrCardCreate, current_user: TokenUser =
                         "agent": body.agent,
                         "col": body.col,
                         "date": body.date,
-                        "last_activity_at": datetime.now(timezone.utc).isoformat()
+                        "last_activity_at": datetime.now(timezone.utc).isoformat(),
+                        "details": body.details or card.get("details") or {},
                     })
                     return {"status": "updated", "card": card, "source": "memory"}
             raise HTTPException(status_code=404, detail="Card not found")
@@ -1199,11 +1379,23 @@ def update_csr_card(card_id: str, body: CsrCardCreate, current_user: TokenUser =
         cur.execute(
             """
             UPDATE csr_pipeline_cards
-            SET company = %s, amount = %s, project = %s, tags = %s, agent = %s, col = %s, date_label = %s, updated_at = CURRENT_TIMESTAMP
+            SET company = %s, amount = %s, project = %s, tags = %s, agent = %s, col = %s, date_label = %s,
+                details = %s::jsonb, updated_at = CURRENT_TIMESTAMP
             WHERE id = %s AND ngo_id = %s
             RETURNING id, updated_at
             """,
-            (body.company, float(body.amount), body.project, body.tags or [], body.agent, body.col, body.date, card_id, current_user.ngo_id)
+            (
+                body.company,
+                float(body.amount),
+                body.project,
+                body.tags or [],
+                body.agent,
+                body.col,
+                body.date,
+                json.dumps(body.details or {}),
+                card_id,
+                current_user.ngo_id,
+            ),
         )
         row = cur.fetchone()
         if not row:
@@ -1375,6 +1567,7 @@ class CampaignCreate(BaseModel):
     status: str = "active"  # active | draft
     image: Optional[str] = None
     cause: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
 
 
 @app.get("/fundraising/campaigns", tags=["Fundraising"])
@@ -1388,7 +1581,8 @@ def list_campaigns(current_user: TokenUser = Depends(require_role("ed", "fundrai
             """
             SELECT id, title, COALESCE(raised, 0)::float, COALESCE(goal, 0)::float,
                    COALESCE(donors_count, 0)::int, COALESCE(status, 'active')::text,
-                   COALESCE(image, '')::text, COALESCE(cause, '')::text
+                   COALESCE(image, '')::text, COALESCE(cause, '')::text,
+                   COALESCE(details, '{}'::jsonb)
             FROM campaigns
             WHERE ngo_id = %s
             ORDER BY created_at DESC
@@ -1408,6 +1602,7 @@ def list_campaigns(current_user: TokenUser = Depends(require_role("ed", "fundrai
                     "status": r[5],
                     "image": r[6] or "",
                     "cause": r[7] or "",
+                    "details": _parse_jsonb(r[8]),
                 }
             )
         return {"campaigns": out, "source": "db"}
@@ -1419,6 +1614,7 @@ def create_campaign(body: CampaignCreate, current_user: TokenUser = Depends(requ
         if conn is None:
             _seed_memory_campaigns(current_user.ngo_id)
             new_id = f"c{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            det = _parse_jsonb(body.details) if body.details else {}
             camp = {
                 "id": new_id,
                 "title": body.title,
@@ -1428,18 +1624,20 @@ def create_campaign(body: CampaignCreate, current_user: TokenUser = Depends(requ
                 "status": body.status,
                 "image": body.image or "linear-gradient(135deg, #10b981, #047857)",
                 "cause": body.cause or "",
+                "details": det,
             }
             CAMPAIGNS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, camp)
             return {"status": "created", "campaign": camp, "source": "memory"}
         cur = conn.cursor()
         new_id = f"c{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        det_json = json.dumps(body.details) if body.details else "{}"
         cur.execute(
             """
-            INSERT INTO campaigns (id, ngo_id, title, cause, goal, raised, donors_count, status, image)
-            VALUES (%s, %s, %s, %s, %s, 0, 0, %s, %s)
+            INSERT INTO campaigns (id, ngo_id, title, cause, goal, raised, donors_count, status, image, details)
+            VALUES (%s, %s, %s, %s, %s, 0, 0, %s, %s, %s::jsonb)
             RETURNING id
             """,
-            (new_id, current_user.ngo_id, body.title, body.cause, float(body.goal or 0), body.status, body.image),
+            (new_id, current_user.ngo_id, body.title, body.cause, float(body.goal or 0), body.status, body.image, det_json),
         )
         camp = {
             "id": new_id,
@@ -1450,6 +1648,7 @@ def create_campaign(body: CampaignCreate, current_user: TokenUser = Depends(requ
             "status": body.status,
             "image": body.image or "",
             "cause": body.cause or "",
+            "details": _parse_jsonb(body.details),
         }
         return {"status": "created", "campaign": camp, "source": "db"}
 
@@ -1466,20 +1665,33 @@ def update_campaign(c_id: str, body: CampaignCreate, current_user: TokenUser = D
                         "title": body.title,
                         "goal": float(body.goal or 0),
                         "status": body.status,
-                        "cause": body.cause or ""
+                        "cause": body.cause or "",
+                        "details": _parse_jsonb(body.details) if body.details is not None else c.get("details") or {},
                     })
                     return {"status": "updated", "campaign": c, "source": "memory"}
             raise HTTPException(status_code=404, detail="Campaign not found")
         cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE campaigns
-            SET title = %s, goal = %s, status = %s, cause = %s
-            WHERE id = %s AND ngo_id = %s
-            RETURNING id
-            """,
-            (body.title, float(body.goal or 0), body.status, body.cause or "", c_id, current_user.ngo_id)
-        )
+        det_json = json.dumps(body.details) if body.details is not None else None
+        if det_json is not None:
+            cur.execute(
+                """
+                UPDATE campaigns
+                SET title = %s, goal = %s, status = %s, cause = %s, details = %s::jsonb
+                WHERE id = %s AND ngo_id = %s
+                RETURNING id
+                """,
+                (body.title, float(body.goal or 0), body.status, body.cause or "", det_json, c_id, current_user.ngo_id),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE campaigns
+                SET title = %s, goal = %s, status = %s, cause = %s
+                WHERE id = %s AND ngo_id = %s
+                RETURNING id
+                """,
+                (body.title, float(body.goal or 0), body.status, body.cause or "", c_id, current_user.ngo_id),
+            )
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Campaign not found")
         return {"status": "updated", "id": c_id, "source": "db"}
@@ -1511,6 +1723,9 @@ class DonorCreate(BaseModel):
     pan: str = ""
     location: str = ""
     tags: List[str] = []
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
 
 
 @app.get("/crm/donors", tags=["CRM"])
@@ -1527,6 +1742,9 @@ def list_donors(current_user: TokenUser = Depends(require_role("ed", "crm", "fun
                    COALESCE(pan_masked, '') as pan_masked,
                    COALESCE(location_text, '') as location_text,
                    COALESCE(tags, '{}') as tags,
+                   COALESCE(email, '') as email,
+                   COALESCE(phone, '') as phone,
+                   COALESCE(meta, '{}'::jsonb),
                    created_at
             FROM donors
             WHERE ngo_id = %s::uuid
@@ -1548,6 +1766,9 @@ def list_donors(current_user: TokenUser = Depends(require_role("ed", "crm", "fun
                     "pan": r[4] or "",
                     "location": r[5] or "",
                     "tags": list(r[6] or []),
+                    "email": (r[7] or "").strip(),
+                    "phone": (r[8] or "").strip(),
+                    "meta": _parse_jsonb(r[9]),
                 }
             )
         return {"donors": out, "source": "db"}
@@ -1642,6 +1863,7 @@ def create_donor(body: DonorCreate, current_user: TokenUser = Depends(require_ro
         if conn is None:
             _seed_memory_crm(current_user.ngo_id)
             new_id = f"{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            meta_d = _parse_jsonb(body.meta) if body.meta else {}
             donor = {
                 "id": new_id,
                 "name": body.name,
@@ -1652,16 +1874,22 @@ def create_donor(body: DonorCreate, current_user: TokenUser = Depends(require_ro
                 "pan": _mask_pan(body.pan),
                 "location": body.location,
                 "tags": body.tags or ["New"],
+                "email": (body.email or "").strip(),
+                "phone": (body.phone or "").strip(),
+                "meta": meta_d,
             }
             DONORS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, donor)
             return {"status": "created", "donor": donor, "source": "memory"}
 
         cur = conn.cursor()
         donor_code = f"D{int(datetime.now(timezone.utc).timestamp())}"
+        meta_json = json.dumps(body.meta) if body.meta else "{}"
+        email_v = (body.email or "").strip() or None
+        phone_v = (body.phone or "").strip() or None
         cur.execute(
             """
-            INSERT INTO donors (ngo_id, donor_code, full_name, donor_type, pan_masked, location_text, tags, consent_given, consent_date)
-            VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, true, CURRENT_TIMESTAMP)
+            INSERT INTO donors (ngo_id, donor_code, full_name, donor_type, pan_masked, location_text, tags, email, phone, meta, consent_given, consent_date)
+            VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, true, CURRENT_TIMESTAMP)
             RETURNING id::text, created_at
             """,
             (
@@ -1672,6 +1900,9 @@ def create_donor(body: DonorCreate, current_user: TokenUser = Depends(require_ro
                 _mask_pan(body.pan),
                 body.location,
                 body.tags or [],
+                email_v,
+                phone_v,
+                meta_json,
             ),
         )
         new_id, created_at = cur.fetchone()
@@ -1685,6 +1916,9 @@ def create_donor(body: DonorCreate, current_user: TokenUser = Depends(require_ro
             "pan": _mask_pan(body.pan),
             "location": body.location,
             "tags": body.tags or [],
+            "email": (body.email or "").strip(),
+            "phone": (body.phone or "").strip(),
+            "meta": _parse_jsonb(body.meta),
         }
         return {"status": "created", "donor": donor, "source": "db"}
 
@@ -1716,6 +1950,9 @@ def bulk_import_donors(body: DonorBulkImport, current_user: TokenUser = Depends(
                     "pan": _mask_pan(d.pan),
                     "location": d.location,
                     "tags": d.tags or ["Imported"],
+                    "email": (d.email or "").strip(),
+                    "phone": (d.phone or "").strip(),
+                    "meta": _parse_jsonb(d.meta) if d.meta else {},
                 }
                 lst.insert(0, donor)
                 n += 1
@@ -1725,10 +1962,13 @@ def bulk_import_donors(body: DonorBulkImport, current_user: TokenUser = Depends(
             if not (d.name or "").strip():
                 continue
             donor_code = f"DBULK_{int(datetime.now(timezone.utc).timestamp())}_{i}"
+            meta_json = json.dumps(d.meta) if d.meta else "{}"
+            email_v = (d.email or "").strip() or None
+            phone_v = (d.phone or "").strip() or None
             cur.execute(
                 """
-                INSERT INTO donors (ngo_id, donor_code, full_name, donor_type, pan_masked, location_text, tags, consent_given, consent_date)
-                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, true, CURRENT_TIMESTAMP)
+                INSERT INTO donors (ngo_id, donor_code, full_name, donor_type, pan_masked, location_text, tags, email, phone, meta, consent_given, consent_date)
+                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, true, CURRENT_TIMESTAMP)
                 """,
                 (
                     current_user.ngo_id,
@@ -1738,6 +1978,9 @@ def bulk_import_donors(body: DonorBulkImport, current_user: TokenUser = Depends(
                     _mask_pan(d.pan),
                     d.location,
                     d.tags or ["Imported"],
+                    email_v,
+                    phone_v,
+                    meta_json,
                 ),
             )
             n += 1
@@ -1752,6 +1995,7 @@ def update_donor(donor_id: str, body: DonorCreate, current_user: TokenUser = Dep
             lst = DONORS_MEM_BY_NGO.get(current_user.ngo_id, [])
             for i, d in enumerate(lst):
                 if str(d.get("id")) == donor_id:
+                    next_meta = _parse_jsonb(body.meta) if body.meta is not None else dict(d.get("meta") or {})
                     lst[i].update({
                         "name": body.name,
                         "type": body.type,
@@ -1759,20 +2003,39 @@ def update_donor(donor_id: str, body: DonorCreate, current_user: TokenUser = Dep
                         "pan": _mask_pan(body.pan) if body.pan else lst[i].get("pan"),
                         "location": body.location,
                         "tags": body.tags if body.tags else lst[i].get("tags"),
+                        "email": (body.email or "").strip(),
+                        "phone": (body.phone or "").strip(),
+                        "meta": next_meta,
                     })
                     return {"status": "updated", "donor": lst[i], "source": "memory"}
             raise HTTPException(status_code=404, detail="Donor not found")
-            
+
         cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE donors
-            SET full_name = %s, donor_type = %s, pan_masked = %s, location_text = %s, tags = %s
-            WHERE id = %s::uuid AND ngo_id = %s::uuid
-            RETURNING id::text
-            """,
-            (body.name, body.type, _mask_pan(body.pan), body.location, body.tags or [], donor_id, current_user.ngo_id),
-        )
+        email_v = (body.email or "").strip() or None
+        phone_v = (body.phone or "").strip() or None
+        if body.meta is not None:
+            meta_json = json.dumps(_parse_jsonb(body.meta))
+            cur.execute(
+                """
+                UPDATE donors
+                SET full_name = %s, donor_type = %s, pan_masked = %s, location_text = %s, tags = %s,
+                    email = %s, phone = %s, meta = %s::jsonb
+                WHERE id = %s::uuid AND ngo_id = %s::uuid
+                RETURNING id::text
+                """,
+                (body.name, body.type, _mask_pan(body.pan), body.location, body.tags or [], email_v, phone_v, meta_json, donor_id, current_user.ngo_id),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE donors
+                SET full_name = %s, donor_type = %s, pan_masked = %s, location_text = %s, tags = %s,
+                    email = %s, phone = %s
+                WHERE id = %s::uuid AND ngo_id = %s::uuid
+                RETURNING id::text
+                """,
+                (body.name, body.type, _mask_pan(body.pan), body.location, body.tags or [], email_v, phone_v, donor_id, current_user.ngo_id),
+            )
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Donor not found")
         return {"status": "updated", "id": donor_id, "source": "db"}
@@ -1814,6 +2077,14 @@ class PublicDonationRequest(BaseModel):
     pan: Optional[str] = None
     amount: float
     method: str = "UPI"
+    phone: Optional[str] = None
+    address_line1: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+    company_name: Optional[str] = None
+    message: Optional[str] = None
+    consent_impact_updates: Optional[bool] = None
 
 
 @app.post("/public/donations", tags=["Public"])
@@ -1831,6 +2102,19 @@ def public_record_donation(body: PublicDonationRequest, user: Optional[TokenUser
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Invalid amount.")
 
+    phone = (body.phone or "").strip()[:20] or None
+    loc_parts = [body.city, body.state, body.pincode]
+    location_text = ", ".join(str(p).strip() for p in loc_parts if p and str(p).strip())[:500]
+    meta: Dict[str, Any] = {}
+    if body.message and body.message.strip():
+        meta["donor_message"] = body.message.strip()[:2000]
+    if body.company_name and body.company_name.strip():
+        meta["company_name"] = body.company_name.strip()[:200]
+    if body.address_line1 and body.address_line1.strip():
+        meta["address_line1"] = body.address_line1.strip()[:300]
+    if body.consent_impact_updates is not None:
+        meta["consent_impact_updates"] = bool(body.consent_impact_updates)
+
     # Demo/memory mode
     with db_conn() as conn:
         if conn is None:
@@ -1843,8 +2127,11 @@ def public_record_donation(body: PublicDonationRequest, user: Optional[TokenUser
                 "lastGift": datetime.now(timezone.utc).date().isoformat(),
                 "initial": (donor_name[:1] or "A").upper(),
                 "pan": _mask_pan(body.pan or ""),
-                "location": "",
+                "location": location_text,
+                "phone": phone or "",
+                "email": donor_email,
                 "tags": ["Public"],
+                "meta": meta,
             }
             DONORS_MEM_BY_NGO.setdefault(ngo_id, []).insert(0, donor)
             tx = {
@@ -1863,19 +2150,41 @@ def public_record_donation(body: PublicDonationRequest, user: Optional[TokenUser
 
         # DB mode: best-effort insert donor+tx
         cur = conn.cursor()
-        # donor upsert by email
-        cur.execute("SELECT id::text FROM donors WHERE ngo_id = %s::uuid AND full_name = %s LIMIT 1", (user.ngo_id if user else None, donor_name))
-        row = cur.fetchone()
-        donor_id = row[0] if row else None
+        # donor upsert by email when present, else by name
+        donor_id = None
+        if donor_email:
+            cur.execute(
+                "SELECT id::text FROM donors WHERE ngo_id = %s::uuid AND lower(coalesce(email,'')) = %s LIMIT 1",
+                (user.ngo_id if user else None, donor_email),
+            )
+            row = cur.fetchone()
+            donor_id = row[0] if row else None
+        if not donor_id:
+            cur.execute(
+                "SELECT id::text FROM donors WHERE ngo_id = %s::uuid AND full_name = %s LIMIT 1",
+                (user.ngo_id if user else None, donor_name),
+            )
+            row = cur.fetchone()
+            donor_id = row[0] if row else None
         if not donor_id:
             donor_code = f"D{int(datetime.now(timezone.utc).timestamp())}"
             cur.execute(
                 """
-                INSERT INTO donors (ngo_id, donor_code, full_name, donor_type, pan_masked, location_text, tags, consent_given, consent_date)
-                VALUES (%s::uuid, %s, %s, 'Public', %s, '', %s, true, CURRENT_TIMESTAMP)
+                INSERT INTO donors (ngo_id, donor_code, full_name, email, phone, donor_type, pan_masked, location_text, tags, meta, consent_given, consent_date)
+                VALUES (%s::uuid, %s, %s, %s, %s, 'Public', %s, %s, %s, %s::jsonb, true, CURRENT_TIMESTAMP)
                 RETURNING id::text
                 """,
-                (user.ngo_id if user else None, donor_code, donor_name, _mask_pan(body.pan or ""), ["Public"]),
+                (
+                    user.ngo_id if user else None,
+                    donor_code,
+                    donor_name,
+                    donor_email or None,
+                    phone,
+                    _mask_pan(body.pan or ""),
+                    location_text,
+                    ["Public"],
+                    json.dumps(meta),
+                ),
             )
             donor_id = cur.fetchone()[0]
         cur.execute(
@@ -3822,6 +4131,7 @@ class ComplianceDocCreate(BaseModel):
     status: str = "Valid"
     expiry_date: Optional[str] = None  # YYYY-MM-DD
     s3_key: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
 
 @app.get("/compliance/documents", tags=["Compliance"])
 def list_compliance_documents(
@@ -3845,7 +4155,8 @@ def list_compliance_documents(
         lim = max(1, min(limit, 500))
         cur.execute(
             f"""
-            SELECT id::text, name, doc_type, status, expiry_date::text, s3_key
+            SELECT id::text, name, doc_type, status, expiry_date::text, s3_key,
+                   COALESCE(details, '{{}}'::jsonb), created_at::text
             FROM compliance_documents
             WHERE {' AND '.join(where)}
             ORDER BY created_at DESC
@@ -3856,7 +4167,16 @@ def list_compliance_documents(
         rows = cur.fetchall()
         return {
             "documents": [
-                {"id": r[0], "name": r[1], "doc_type": r[2], "status": r[3], "expiry_date": r[4], "s3_key": r[5]}
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "doc_type": r[2],
+                    "status": r[3],
+                    "expiry_date": r[4],
+                    "s3_key": r[5],
+                    "details": _parse_jsonb(r[6]),
+                    "created_at": r[7],
+                }
                 for r in rows
             ],
             "source": "db",
@@ -3871,6 +4191,7 @@ def create_compliance_document(
         if conn is None:
             docs = COMPLIANCE_DOCS_MEM_BY_NGO.setdefault(current_user.ngo_id, [])
             doc_id = f"memdoc_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            det = _parse_jsonb(body.details) if body.details else {}
             docs.insert(
                 0,
                 {
@@ -3880,19 +4201,22 @@ def create_compliance_document(
                     "status": body.status,
                     "expiry_date": body.expiry_date,
                     "s3_key": body.s3_key,
+                    "details": det,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                     "snoozed_until": None,
                     "resolved_at": None,
                 },
             )
             return {"status": "created", "id": doc_id, "source": "memory"}
         cur = conn.cursor()
+        det_json = json.dumps(body.details) if body.details else "{}"
         cur.execute(
             """
-            INSERT INTO compliance_documents (ngo_id, name, doc_type, status, expiry_date, s3_key)
-            VALUES (%s, %s, %s, %s, %s::date, %s)
+            INSERT INTO compliance_documents (ngo_id, name, doc_type, status, expiry_date, s3_key, details)
+            VALUES (%s, %s, %s, %s, %s::date, %s, %s::jsonb)
             RETURNING id::text
             """,
-            (current_user.ngo_id, body.name, body.doc_type, body.status, body.expiry_date, body.s3_key),
+            (current_user.ngo_id, body.name, body.doc_type, body.status, body.expiry_date, body.s3_key, det_json),
         )
         return {"status": "created", "id": cur.fetchone()[0]}
 

@@ -4,6 +4,7 @@ import { ShieldCheck, Eye, EyeOff, Cpu } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth, ROLE_META, type UserRole } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
+import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import './Auth.css';
 
 const roles = [
@@ -240,12 +241,18 @@ const Login: React.FC = () => {
         )}
 
         {showRegister && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, backdropFilter: 'blur(4px)' }}>
-            <div className="card" style={{ width: '100%', maxWidth: '520px', padding: '1.5rem', position: 'relative' }}>
-              <button className="action-btn" style={{ position: 'absolute', right: '1rem', top: '1rem' }} onClick={() => setShowRegister(false)}>
+          <ModalOverlay elevated onBackdropClick={() => setShowRegister(false)}>
+            <div
+              className="modal-card modal-card--wide"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="login-register-title"
+            >
+              <button type="button" className="action-btn" style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} aria-label="Close registration" onClick={() => setShowRegister(false)}>
                 <EyeOff size={18} />
               </button>
-              <h2 style={{ marginBottom: '0.5rem' }}>Register your NGO</h2>
+              <h2 id="login-register-title" style={{ marginBottom: '0.5rem', paddingRight: '2.5rem' }}>Register your NGO</h2>
               <p style={{ marginBottom: '1.25rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
                 Creates an NGO + first Executive Director user in your hosted Postgres (Railway).
               </p>
@@ -319,7 +326,7 @@ const Login: React.FC = () => {
                 </button>
               </form>
             </div>
-          </div>
+          </ModalOverlay>
         )}
       </div>
     </div>

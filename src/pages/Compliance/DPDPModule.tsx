@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Shield, UserCheck, Trash2, AlertOctagon, FileText, Plus, X, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
+import { ModalOverlay } from '../../components/ui/ModalOverlay';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ConsentRecord {
@@ -657,10 +658,16 @@ const DPDPModule: React.FC = () => {
 
       {/* ── Erasure Modal ─────────────────────────────────────────────────── */}
       {showErasureModal && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, backdropFilter:'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '440px', padding:'1.5rem', position:'relative' }}>
-            <button onClick={()=>setShowErasureModal(false)} style={{ position:'absolute', right:'1rem', top:'1rem' }} className="action-btn"><X size={18}/></button>
-            <h3 style={{ marginBottom:'1.25rem' }}>Log Erasure Request (DPDP §12)</h3>
+        <ModalOverlay onBackdropClick={() => setShowErasureModal(false)}>
+          <div
+            className="modal-card modal-card--narrow"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dpdp-erasure-title"
+          >
+            <button type="button" onClick={() => setShowErasureModal(false)} style={{ position:'absolute', right:'1rem', top:'1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={18}/></button>
+            <h3 id="dpdp-erasure-title" style={{ marginBottom:'1.25rem', paddingRight:'2.5rem' }}>Log Erasure Request (DPDP §12)</h3>
             <form onSubmit={handleAddErasure} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom:0 }}><label className="input-label">Full Name</label>
                 <input required className="input-field" value={erasureForm.name} onChange={e=>setErasureForm({...erasureForm,name:e.target.value})} placeholder="Data subject's name"/></div>
@@ -671,15 +678,21 @@ const DPDPModule: React.FC = () => {
               <button type="submit" className="btn btn-primary" style={{ width:'100%' }}>Log Request (30-day clock starts now)</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* ── Breach Modal ──────────────────────────────────────────────────── */}
       {showBreachModal && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, backdropFilter:'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '480px', padding:'1.5rem', position:'relative' }}>
-            <button onClick={()=>setShowBreachModal(false)} style={{ position:'absolute', right:'1rem', top:'1rem' }} className="action-btn"><X size={18}/></button>
-            <h3 style={{ marginBottom:'1.25rem' }}>Log Security Breach (DPDP §8)</h3>
+        <ModalOverlay onBackdropClick={() => setShowBreachModal(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dpdp-breach-title"
+          >
+            <button type="button" onClick={() => setShowBreachModal(false)} style={{ position:'absolute', right:'1rem', top:'1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={18}/></button>
+            <h3 id="dpdp-breach-title" style={{ marginBottom:'1.25rem', paddingRight:'2.5rem' }}>Log Security Breach (DPDP §8)</h3>
             <div style={{ padding:'0.75rem', background:'#fff7ed', borderRadius:'var(--radius-sm)', border:'1px solid #fed7aa', marginBottom:'1rem', fontSize:'0.8rem', color:'#92400e' }}>
               <AlertTriangle size={14} style={{ display:'inline', verticalAlign:'middle', marginRight:6 }}/>
               You must notify the Data Protection Board within <strong>72 hours</strong> of discovery.
@@ -700,7 +713,7 @@ const DPDPModule: React.FC = () => {
               <button type="submit" className="btn btn-primary" style={{ width:'100%', background:'var(--color-danger)' }}>Log Breach (72-hr timer starts)</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

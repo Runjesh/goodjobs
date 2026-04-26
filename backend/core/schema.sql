@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
 
 CREATE INDEX IF NOT EXISTS idx_campaigns_ngo ON campaigns(ngo_id);
 
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- ── 3c. CSR: Pipeline Cards (ngo_id scoped) ────────────────────────────────
 CREATE TABLE IF NOT EXISTS csr_pipeline_cards (
     id          TEXT PRIMARY KEY,         -- frontend-friendly id
@@ -119,6 +121,7 @@ CREATE TABLE IF NOT EXISTS csr_pipeline_cards (
 
 ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS win_probability INTEGER NOT NULL DEFAULT 55;
+ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_csr_pipeline_ngo ON csr_pipeline_cards(ngo_id);
 
@@ -161,6 +164,7 @@ CREATE TABLE IF NOT EXISTS volunteer_shift_signups (
 );
 
 CREATE INDEX IF NOT EXISTS idx_volunteer_signups_ngo ON volunteer_shift_signups(ngo_id);
+ALTER TABLE volunteer_shift_signups ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- ── 3g. Volunteers: Events (reminders/broadcasts) for Inbox UX ──────────────
 CREATE TABLE IF NOT EXISTS volunteer_events (
@@ -186,6 +190,7 @@ CREATE TABLE IF NOT EXISTS program_beneficiaries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_program_beneficiaries_ngo ON program_beneficiaries(ngo_id);
+ALTER TABLE program_beneficiaries ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- ── 3f. Volunteers: Roster (ngo_id scoped) ─────────────────────────────────
 CREATE TABLE IF NOT EXISTS volunteer_roster (
@@ -199,6 +204,7 @@ CREATE TABLE IF NOT EXISTS volunteer_roster (
 );
 
 CREATE INDEX IF NOT EXISTS idx_volunteer_roster_ngo ON volunteer_roster(ngo_id);
+ALTER TABLE volunteer_roster ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- ── 4. RAG Vector Store (ngo_id scoped) ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vector_documents (
@@ -407,6 +413,7 @@ CREATE INDEX IF NOT EXISTS idx_compliance_docs_expiry ON compliance_documents(ex
 
 ALTER TABLE compliance_documents ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE;
 ALTER TABLE compliance_documents ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE compliance_documents ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- ── 15. Inbox item state (generic snooze/done for any kind) ─────────────────
 CREATE TABLE IF NOT EXISTS inbox_item_states (

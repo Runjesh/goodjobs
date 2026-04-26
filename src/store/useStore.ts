@@ -10,6 +10,10 @@ export interface Donor {
   pan: string;
   location: string;
   tags: string[];
+  email?: string;
+  phone?: string;
+  /** CRM profile: employer, notes, preferred_channel, consent flags, etc. */
+  meta?: Record<string, unknown>;
 }
 
 export interface Campaign {
@@ -20,6 +24,9 @@ export interface Campaign {
   donorsCount: number;
   status: 'active' | 'draft';
   image: string;
+  cause?: string;
+  /** Narrative, partner, public link — JSON from API. */
+  details?: Record<string, unknown>;
 }
 
 export interface Transaction {
@@ -43,6 +50,8 @@ export interface CSRCard {
   agent: string;
   col: string;
   date: string;
+  /** Schedule VII contacts, reporting cadence, outcomes, etc. */
+  details?: Record<string, unknown>;
   /** Deal health heuristic (0–100). */
   win_probability?: number;
   /** ISO timestamp — last pipeline activity (aligned with backend updated_at in DB mode). */
@@ -58,6 +67,8 @@ export interface Beneficiary {
   location: string;
   aadhaar: boolean;
   familySize: number;
+  /** Demographics, referral, ID refs, vulnerability flags, consent — JSON from API. */
+  details?: Record<string, unknown>;
 }
 
 export interface Volunteer {
@@ -66,6 +77,8 @@ export interface Volunteer {
   skills: string[];
   hours: number;
   verified: boolean;
+  /** Phone, city, availability, emergency contact, languages, notes. */
+  profile?: Record<string, unknown>;
 }
 
 export interface ShiftSignup {
@@ -80,6 +93,8 @@ export interface ComplianceDocument {
   status: 'Valid' | 'Expiring Soon' | 'Expired';
   expiry: string;
   uploadedAt: string;
+  /** Authority, registration ref, review notes — JSON from API. */
+  details?: Record<string, unknown>;
 }
 
 interface AppState {
@@ -92,6 +107,7 @@ interface AppState {
   complianceDocs: ComplianceDocument[];
 
   setDonors: (donors: Donor[]) => void;
+  setComplianceDocs: (docs: ComplianceDocument[]) => void;
   setTransactions: (txs: Transaction[]) => void;
   setCampaigns: (campaigns: Campaign[]) => void;
   setCsrCards: (cards: CSRCard[]) => void;
@@ -184,6 +200,7 @@ export const useStore = create<AppState>((set) => ({
   complianceDocs: [],
 
   setDonors: (donors) => set(() => ({ donors })),
+  setComplianceDocs: (complianceDocs) => set(() => ({ complianceDocs })),
   setTransactions: (transactions) => set(() => ({ transactions })),
   setCampaigns: (campaigns) => set(() => ({ campaigns })),
   setCsrCards: (csrCards) => set(() => ({ csrCards })),

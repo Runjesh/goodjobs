@@ -5,9 +5,67 @@ import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import './Volunteers.css';
 import { apiFetch } from '../../api/client';
+import { ModalOverlay } from '../../components/ui/ModalOverlay';
 
 type Shift = { id: number; title: string; date: string; location: string; filled: number; total: number; role: string };
-type Signup = { id: string; shiftId: number; volunteerName: string; createdAt?: string };
+type Signup = { id: string; shiftId: number; volunteerName: string; createdAt?: string; details?: Record<string, unknown> };
+
+type VolProfileForm = {
+  email: string;
+  phone: string;
+  city: string;
+  state: string;
+  availability: string;
+  languages: string;
+  emergencyName: string;
+  emergencyPhone: string;
+  notes: string;
+};
+
+const VOL_PROFILE_EMPTY: VolProfileForm = {
+  email: '',
+  phone: '',
+  city: '',
+  state: '',
+  availability: '',
+  languages: '',
+  emergencyName: '',
+  emergencyPhone: '',
+  notes: '',
+};
+
+function packVolProfile(p: VolProfileForm): Record<string, unknown> {
+  const o: Record<string, unknown> = {};
+  if (p.email.trim()) o.email = p.email.trim().toLowerCase();
+  if (p.phone.trim()) o.phone = p.phone.trim();
+  if (p.city.trim()) o.city = p.city.trim();
+  if (p.state.trim()) o.state = p.state.trim();
+  if (p.availability.trim()) o.availability = p.availability.trim();
+  if (p.languages.trim()) {
+    o.languages = p.languages.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  if (p.emergencyName.trim()) o.emergency_contact_name = p.emergencyName.trim();
+  if (p.emergencyPhone.trim()) o.emergency_contact_phone = p.emergencyPhone.trim();
+  if (p.notes.trim()) o.notes = p.notes.trim();
+  return o;
+}
+
+function unpackVolProfile(profile?: Record<string, unknown> | null): VolProfileForm {
+  const r = profile || {};
+  const langs = r.languages;
+  const languagesStr = Array.isArray(langs) ? langs.join(', ') : String(langs || '');
+  return {
+    email: String(r.email ?? ''),
+    phone: String(r.phone ?? ''),
+    city: String(r.city ?? ''),
+    state: String(r.state ?? ''),
+    availability: String(r.availability ?? ''),
+    languages: languagesStr,
+    emergencyName: String(r.emergency_contact_name ?? ''),
+    emergencyPhone: String(r.emergency_contact_phone ?? ''),
+    notes: String(r.notes ?? ''),
+  };
+}
 
 const Volunteers: React.FC = () => {
   const { volunteers, addVolunteer, updateVolunteer, deleteVolunteer } = useStore();
@@ -19,9 +77,20 @@ const Volunteers: React.FC = () => {
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
   const [reminderConfig, setReminderConfig] = useState({ timing: '24h', channel: 'whatsapp', message: '' });
   const [form, setForm] = useState({ name: '', skills: '', verified: false });
+  const [volExtra, setVolExtra] = useState<VolProfileForm>({ ...VOL_PROFILE_EMPTY });
+  const [editVolExtra, setEditVolExtra] = useState<VolProfileForm>({ ...VOL_PROFILE_EMPTY });
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [signupShift, setSignupShift] = useState<Shift | null>(null);
   const [signupName, setSignupName] = useState('');
+  const [signupExtra, setSignupExtra] = useState({
+    phone: '',
+    email: '',
+    emergencyName: '',
+    emergencyPhone: '',
+    transport: '',
+    dietary: '',
+    notes: '',
+  });
 
   const [showEditVol, setShowEditVol] = useState(false);
   const [editVol, setEditVol] = useState<any>(null);
@@ -80,7 +149,12 @@ const Volunteers: React.FC = () => {
       const res = await apiFetch('/volunteers/roster', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name, skills, verified: form.verified }),
+        body: JSON.stringify({
+          name: form.name,
+          skills,
+          verified: form.verified,
+          profile: packVolProfile(volExtra),
+        }),
       });
       if (!res.ok) throw new Error('create');
       // refresh roster from backend so IDs match canonical records
@@ -91,6 +165,7 @@ const Volunteers: React.FC = () => {
       }
       toast.success(`${form.name} added to volunteer roster!`);
       setForm({ name: '', skills: '', verified: false });
+      setVolExtra({ ...VOL_PROFILE_EMPTY });
       setShowModal(false);
     } catch {
       toast.error('Failed to add volunteer (backend not reachable).');
@@ -105,10 +180,15 @@ const Volunteers: React.FC = () => {
       const res = await apiFetch(`/volunteers/roster/${editVol.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editVol.name, skills, verified: editVol.verified }),
+        body: JSON.stringify({
+          name: editVol.name,
+          skills,
+          verified: editVol.verified,
+          profile: packVolProfile(editVolExtra),
+        }),
       });
       if (res.ok) {
-        updateVolunteer(editVol.id, { ...editVol, skills });
+        updateVolunteer(editVol.id, { ...editVol, skills, profile: packVolProfile(editVolExtra) });
         toast.success(`Volunteer updated!`);
         setShowEditVol(false);
       } else {
@@ -194,6 +274,15 @@ const Volunteers: React.FC = () => {
     const shift = shifts.find(s => s.id === shiftId) || null;
     setSignupShift(shift);
     setSignupName('');
+    setSignupExtra({
+      phone: '',
+      email: '',
+      emergencyName: '',
+      emergencyPhone: '',
+      transport: '',
+      dietary: '',
+      notes: '',
+    });
     setShowSignupModal(true);
   };
 
@@ -205,7 +294,16 @@ const Volunteers: React.FC = () => {
       const res = await apiFetch(`/volunteers/shifts/${encodeURIComponent(String(signupShift.id))}/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ volunteer_name: name }),
+        body: JSON.stringify({
+          volunteer_name: name,
+          phone: signupExtra.phone || undefined,
+          email: signupExtra.email || undefined,
+          emergency_contact_name: signupExtra.emergencyName || undefined,
+          emergency_contact_phone: signupExtra.emergencyPhone || undefined,
+          transport_mode: signupExtra.transport || undefined,
+          dietary_notes: signupExtra.dietary || undefined,
+          notes: signupExtra.notes || undefined,
+        }),
       });
       if (!res.ok) throw new Error('signup');
       toast.success('Signed up.');
@@ -230,7 +328,13 @@ const Volunteers: React.FC = () => {
           <button className="btn btn-secondary" onClick={() => { setSelectedShift(shifts[0] || null); setShowReminderModal(true); }}>
             <Bell size={16} /> Schedule Reminder
           </button>
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setVolExtra({ ...VOL_PROFILE_EMPTY });
+              setShowModal(true);
+            }}
+          >
             <UserPlus size={16} /> Add Volunteer
           </button>
         </div>
@@ -420,8 +524,19 @@ const Volunteers: React.FC = () => {
                                   )}
                                 </div>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-                                  {vol.skills.join(', ')}
+                                  {vol.skills.join(', ') || '—'}
                                 </div>
+                                {(() => {
+                                  const p = vol.profile;
+                                  if (!p) return null;
+                                  const bits = [p['phone'], p['email'], p['city']].filter((x): x is string => typeof x === 'string' && x.length > 0);
+                                  if (!bits.length) return null;
+                                  return (
+                                    <div style={{ fontSize: '0.68rem', color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                                      {bits.join(' · ')}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                             <div className="flex items-center gap-4">
@@ -430,7 +545,15 @@ const Volunteers: React.FC = () => {
                                 <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>YTD</div>
                               </div>
                               <div className="flex gap-2">
-                                <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setEditVol({ ...vol, skills: vol.skills.join(', ') }); setShowEditVol(true); }}>
+                                <button
+                                  className="btn-icon-only"
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                  onClick={() => {
+                                    setEditVolExtra(unpackVolProfile(vol.profile));
+                                    setEditVol({ ...vol, skills: vol.skills.join(', ') });
+                                    setShowEditVol(true);
+                                  }}
+                                >
                                   <Edit size={14} color="var(--color-text-secondary)" />
                                 </button>
                                 <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setVolToDelete(vol); setShowDeleteVolConfirm(true); }}>
@@ -451,10 +574,17 @@ const Volunteers: React.FC = () => {
       </div>
 
       {showReminderModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '480px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowReminderModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Bell size={20} color="#f59e0b" /> Schedule Volunteer Reminder</h2>
+        <ModalOverlay onBackdropClick={() => setShowReminderModal(false)}>
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vol-reminder-title"
+            style={{ maxWidth: '480px' }}
+          >
+            <button type="button" onClick={() => setShowReminderModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="vol-reminder-title" style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', paddingRight: '2.5rem' }}><Bell size={20} color="#f59e0b" /> Schedule Volunteer Reminder</h2>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>Send an automated WhatsApp/SMS reminder to volunteers before their shift.</p>
 
             <div className="input-group" style={{ marginBottom: '1rem' }}>
@@ -493,42 +623,101 @@ const Volunteers: React.FC = () => {
               ✅ Will send to <strong>{selectedShift?.filled || 0} confirmed volunteers</strong> for "{selectedShift?.title || '—'}" at {selectedShift?.location || '—'}
             </div>
             <div className="flex gap-3">
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowReminderModal(false)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSendReminder}><Bell size={15} /> Schedule Reminder</button>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowReminderModal(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" style={{ flex: 2 }} onClick={handleSendReminder}><Bell size={15} /> Schedule Reminder</button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '1.5rem' }}>Add New Volunteer</h2>
+        <ModalOverlay onBackdropClick={() => setShowModal(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vol-add-title"
+            style={{ maxWidth: '520px', maxHeight: 'min(90vh, 720px)' }}
+          >
+            <button type="button" onClick={() => setShowModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="vol-add-title" style={{ marginBottom: '0.25rem', paddingRight: '2.5rem' }}>Add New Volunteer</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '1.25rem' }}>
+              Roster profile is used for reminders, emergency contact, and shift assignments.
+            </p>
             <form onSubmit={handleAddVolunteer} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
                 <input required type="text" className="input-field" placeholder="e.g. Arjun Mehta" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
               </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Mobile (WhatsApp)</label>
+                  <input type="tel" className="input-field" placeholder="+91 …" value={volExtra.phone} onChange={e => setVolExtra({ ...volExtra, phone: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Email</label>
+                  <input type="email" className="input-field" placeholder="name@email.com" value={volExtra.email} onChange={e => setVolExtra({ ...volExtra, email: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">City</label>
+                  <input type="text" className="input-field" placeholder="Pune" value={volExtra.city} onChange={e => setVolExtra({ ...volExtra, city: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">State / UT</label>
+                  <input type="text" className="input-field" placeholder="Maharashtra" value={volExtra.state} onChange={e => setVolExtra({ ...volExtra, state: e.target.value })} />
+                </div>
+              </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Skills (comma separated)</label>
                 <input type="text" className="input-field" placeholder="e.g. Teaching, Medical, Logistics" value={form.skills} onChange={e => setForm({ ...form, skills: e.target.value })} />
               </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Languages</label>
+                <input type="text" className="input-field" placeholder="e.g. Hindi, English, Marathi" value={volExtra.languages} onChange={e => setVolExtra({ ...volExtra, languages: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Typical availability</label>
+                <input type="text" className="input-field" placeholder="e.g. Weekends • 9am–1pm" value={volExtra.availability} onChange={e => setVolExtra({ ...volExtra, availability: e.target.value })} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Emergency contact name</label>
+                  <input type="text" className="input-field" placeholder="Family member" value={volExtra.emergencyName} onChange={e => setVolExtra({ ...volExtra, emergencyName: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Emergency phone</label>
+                  <input type="tel" className="input-field" placeholder="+91 …" value={volExtra.emergencyPhone} onChange={e => setVolExtra({ ...volExtra, emergencyPhone: e.target.value })} />
+                </div>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Notes (medical / access needs — keep minimal)</label>
+                <textarea className="input-field" rows={2} placeholder="Optional; stored securely with your NGO access only." value={volExtra.notes} onChange={e => setVolExtra({ ...volExtra, notes: e.target.value })} />
+              </div>
               <div className="flex items-center gap-2" style={{ marginTop: '0.25rem' }}>
                 <input type="checkbox" id="verified" checked={form.verified} onChange={e => setForm({ ...form, verified: e.target.checked })} />
-                <label htmlFor="verified" style={{ fontSize: '0.875rem' }}>Background Verified</label>
+                <label htmlFor="verified" style={{ fontSize: '0.875rem' }}>Background verified (ID / reference check done)</label>
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Add to Roster</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {showSignupModal && signupShift && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowSignupModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '0.5rem' }}>Join shift</h2>
+        <ModalOverlay elevated onBackdropClick={() => setShowSignupModal(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vol-signup-title"
+            style={{ maxWidth: '500px', maxHeight: 'min(90vh, 680px)' }}
+          >
+            <button type="button" onClick={() => setShowSignupModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="vol-signup-title" style={{ marginBottom: '0.5rem', paddingRight: '2.5rem' }}>Shift application</h2>
             <p style={{ marginBottom: '1rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
               {signupShift.title} • {signupShift.date} • {signupShift.location}
             </p>
@@ -550,62 +739,157 @@ const Volunteers: React.FC = () => {
               </div>
             </div>
 
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Day-of phone (optional)</label>
+                <input type="tel" className="input-field" placeholder="If different from roster" value={signupExtra.phone} onChange={e => setSignupExtra({ ...signupExtra, phone: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Email (optional)</label>
+                <input type="email" className="input-field" value={signupExtra.email} onChange={e => setSignupExtra({ ...signupExtra, email: e.target.value })} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Emergency contact</label>
+                <input type="text" className="input-field" placeholder="Name" value={signupExtra.emergencyName} onChange={e => setSignupExtra({ ...signupExtra, emergencyName: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Emergency phone</label>
+                <input type="tel" className="input-field" value={signupExtra.emergencyPhone} onChange={e => setSignupExtra({ ...signupExtra, emergencyPhone: e.target.value })} />
+              </div>
+            </div>
+            <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+              <label className="input-label">How will you travel?</label>
+              <select className="input-field" value={signupExtra.transport} onChange={e => setSignupExtra({ ...signupExtra, transport: e.target.value })}>
+                <option value="">—</option>
+                <option value="own_two_wheeler">Own two-wheeler</option>
+                <option value="own_four_wheeler">Own car</option>
+                <option value="public">Public transport</option>
+                <option value="ngo_pickup">Need pickup / carpool</option>
+              </select>
+            </div>
+            <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+              <label className="input-label">Dietary / accessibility (optional)</label>
+              <input type="text" className="input-field" placeholder="e.g. Jain meal, wheelchair access" value={signupExtra.dietary} onChange={e => setSignupExtra({ ...signupExtra, dietary: e.target.value })} />
+            </div>
+            <div className="input-group" style={{ marginBottom: '1rem' }}>
+              <label className="input-label">Notes for coordinator</label>
+              <textarea className="input-field" rows={2} placeholder="Anything the field team should know" value={signupExtra.notes} onChange={e => setSignupExtra({ ...signupExtra, notes: e.target.value })} />
+            </div>
+
             <div className="flex gap-3">
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowSignupModal(false)}>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowSignupModal(false)}>
                 Cancel
               </button>
-              <button className="btn btn-primary" style={{ flex: 2 }} onClick={submitSignup} disabled={!signupName}>
+              <button type="button" className="btn btn-primary" style={{ flex: 2 }} onClick={submitSignup} disabled={!signupName}>
                 Confirm signup
               </button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* ── Edit Volunteer Modal ───────────────────────────────────── */}
       {showEditVol && editVol && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowEditVol(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '1.5rem' }}>Edit Volunteer</h2>
+        <ModalOverlay onBackdropClick={() => setShowEditVol(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vol-edit-title"
+            style={{ maxWidth: '520px', maxHeight: 'min(90vh, 720px)' }}
+          >
+            <button type="button" onClick={() => setShowEditVol(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="vol-edit-title" style={{ marginBottom: '1rem', paddingRight: '2.5rem' }}>Edit Volunteer</h2>
             <form onSubmit={handleEditVolunteer} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
                 <input required type="text" className="input-field" value={editVol.name} onChange={e => setEditVol({ ...editVol, name: e.target.value })} />
               </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Mobile</label>
+                  <input type="tel" className="input-field" value={editVolExtra.phone} onChange={e => setEditVolExtra({ ...editVolExtra, phone: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Email</label>
+                  <input type="email" className="input-field" value={editVolExtra.email} onChange={e => setEditVolExtra({ ...editVolExtra, email: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">City</label>
+                  <input type="text" className="input-field" value={editVolExtra.city} onChange={e => setEditVolExtra({ ...editVolExtra, city: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">State</label>
+                  <input type="text" className="input-field" value={editVolExtra.state} onChange={e => setEditVolExtra({ ...editVolExtra, state: e.target.value })} />
+                </div>
+              </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Skills (comma separated)</label>
                 <input type="text" className="input-field" value={editVol.skills} onChange={e => setEditVol({ ...editVol, skills: e.target.value })} />
               </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Languages</label>
+                <input type="text" className="input-field" value={editVolExtra.languages} onChange={e => setEditVolExtra({ ...editVolExtra, languages: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Typical availability</label>
+                <input type="text" className="input-field" value={editVolExtra.availability} onChange={e => setEditVolExtra({ ...editVolExtra, availability: e.target.value })} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Emergency contact</label>
+                  <input type="text" className="input-field" value={editVolExtra.emergencyName} onChange={e => setEditVolExtra({ ...editVolExtra, emergencyName: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Emergency phone</label>
+                  <input type="tel" className="input-field" value={editVolExtra.emergencyPhone} onChange={e => setEditVolExtra({ ...editVolExtra, emergencyPhone: e.target.value })} />
+                </div>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Notes</label>
+                <textarea className="input-field" rows={2} value={editVolExtra.notes} onChange={e => setEditVolExtra({ ...editVolExtra, notes: e.target.value })} />
+              </div>
               <div className="flex items-center gap-2" style={{ marginTop: '0.25rem' }}>
                 <input type="checkbox" id="edit-verified" checked={editVol.verified} onChange={e => setEditVol({ ...editVol, verified: e.target.checked })} />
-                <label htmlFor="edit-verified" style={{ fontSize: '0.875rem' }}>Background Verified</label>
+                <label htmlFor="edit-verified" style={{ fontSize: '0.875rem' }}>Background verified</label>
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Volunteer</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* ── Delete Confirm Modal ───────────────────────────────────── */}
       {showDeleteVolConfirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative', textAlign: 'center' }}>
+        <ModalOverlay onBackdropClick={() => setShowDeleteVolConfirm(false)}>
+          <div
+            className="modal-card modal-card--narrow"
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="vol-del-title"
+            style={{ textAlign: 'center' }}
+          >
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
               <div style={{ background: 'var(--color-danger)', color: 'white', padding: '1rem', borderRadius: '50%' }}>
                 <Trash2 size={32} />
               </div>
             </div>
-            <h2 style={{ marginBottom: '0.5rem' }}>Delete Volunteer?</h2>
+            <h2 id="vol-del-title" style={{ marginBottom: '0.5rem' }}>Delete Volunteer?</h2>
             <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
               Are you sure you want to delete <strong>{volToDelete?.name}</strong>? This action cannot be undone.
             </p>
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-              <button className="btn btn-secondary" onClick={() => setShowDeleteVolConfirm(false)} style={{ flex: 1 }}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleDeleteVolunteer} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowDeleteVolConfirm(false)} style={{ flex: 1 }}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={handleDeleteVolunteer} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

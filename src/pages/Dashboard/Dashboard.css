@@ -158,9 +158,14 @@
 }
 
 .quick-action-btn:hover {
-  border-color: var(--color-primary-light);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border));
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
+}
+
+.quick-action-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .qa-icon { font-size: 1.5rem; }
@@ -231,6 +236,23 @@
   .quick-actions-row {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+html.dark .icon-blue {
+  background: color-mix(in srgb, #0ea5e9 22%, transparent);
+  color: #7dd3fc;
+}
+html.dark .icon-green {
+  background: color-mix(in srgb, var(--color-success) 22%, transparent);
+  color: #6ee7b7;
+}
+html.dark .icon-purple {
+  background: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  color: #c4b5fd;
+}
+html.dark .icon-orange {
+  background: color-mix(in srgb, var(--color-warning) 22%, transparent);
+  color: #fcd34d;
 }
 
 @media (max-width: 640px) {

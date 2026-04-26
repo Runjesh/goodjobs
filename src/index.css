@@ -134,10 +134,17 @@
   /* mobile:  < 768px  */
   /* tablet:  768–1199px */
   /* desktop: 1200px+ */
+
+  /* Focus & surfaces (keyboard / a11y — visible rings without cluttering mouse UX) */
+  --focus-ring-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
 }
 
 /* ── Dark Mode ───────────────────────────────────────── */
 html.dark {
+  --focus-ring-color: color-mix(in srgb, var(--color-primary) 65%, transparent);
+
   /* Backgrounds */
   --color-bg-main:        #0f172a;
   --color-bg-card:        #1e293b;
@@ -189,11 +196,17 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   -webkit-tap-highlight-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
   touch-action: manipulation;
   min-height: 100vh;
   min-height: -webkit-fill-available;
   overflow-x: hidden;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  color: inherit;
 }
 
 /* ── Typography ──────────────────────────────────────── */
@@ -210,6 +223,12 @@ a {
   transition: color var(--transition-fast);
 }
 a:hover { color: var(--color-primary-hover); }
+
+a:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
 
 button {
   cursor: pointer;
@@ -247,6 +266,12 @@ img { max-width: 100%; height: auto; }
 }
 
 .btn:active { transform: scale(0.97); }
+
+.btn:focus-visible,
+.action-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
 
 .btn-primary {
   background-color: var(--color-primary);
@@ -348,14 +373,21 @@ select.input-field {
 /* ── Cards ───────────────────────────────────────────── */
 .card {
   background: var(--color-bg-card);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-2xl);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--color-text-primary) 4%, transparent),
+    0 4px 16px color-mix(in srgb, var(--color-text-primary) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
   overflow: hidden;
-  transition: box-shadow var(--transition-fast);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
-.card:hover { box-shadow: var(--shadow-md); }
+.card:hover {
+  box-shadow:
+    0 2px 4px color-mix(in srgb, var(--color-text-primary) 5%, transparent),
+    0 12px 28px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+  border-color: color-mix(in srgb, var(--color-border) 65%, var(--color-primary) 8%);
+}
 
 .card-header {
   padding: 1.25rem 1.5rem;
@@ -578,6 +610,7 @@ select.input-field {
   font-weight: 700;
   margin-bottom: var(--space-1);
   letter-spacing: -0.025em;
+  text-wrap: balance;
 }
 
 .page-subtitle {
@@ -712,6 +745,10 @@ select.input-field {
     animation: none;
     background: var(--color-border-light);
   }
+  .chart-skeleton {
+    animation: none;
+    background: var(--color-border-light);
+  }
   .agent-avatar--running {
     animation: none;
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 35%, transparent);
@@ -719,6 +756,16 @@ select.input-field {
   .animate-fade-in,
   .animate-slide-up {
     animation: none;
+  }
+  .btn:hover,
+  .btn-primary:hover,
+  .btn-success:hover,
+  .btn:active,
+  .stat-card:hover,
+  .metric-card:hover,
+  .quick-action-btn:hover,
+  .campaign-card:hover {
+    transform: none;
   }
 }
 
@@ -732,9 +779,13 @@ select.input-field {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 500;
+  z-index: 1000;
   padding: var(--space-4);
   animation: fadeIn 150ms ease both;
+}
+
+.modal-overlay--elevated {
+  z-index: 1200;
 }
 
 .modal-card {
@@ -746,7 +797,25 @@ select.input-field {
   max-height: calc(100dvh - 3rem);
   overflow-y: auto;
   padding: 1.75rem;
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
   animation: slideUp var(--duration-fast) var(--ease-spring) both;
+}
+
+.modal-card--narrow {
+  max-width: 400px;
+}
+
+.modal-card--wide {
+  max-width: 560px;
+}
+
+.modal-card--xl {
+  max-width: 720px;
+}
+
+.modal-card--tall {
+  max-height: min(90dvh, 900px);
 }
 
 @media (max-width: 767px) {
@@ -755,5 +824,12 @@ select.input-field {
     border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
     max-height: 90dvh;
     padding-bottom: calc(1.75rem + var(--safe-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  .modal-card {
+    animation: none;
   }
 }

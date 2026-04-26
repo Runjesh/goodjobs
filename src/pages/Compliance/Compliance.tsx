@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ShieldCheck, Upload, Calendar, Users, X, CheckCircle2, AlertTriangle, Download, Plus, Shield, Trash2, RefreshCw } from 'lucide-react';
-import { useStore } from '../../store/useStore';
+import { useStore, type ComplianceDocument } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import DPDPModule from './DPDPModule';
 import './Compliance.css';
 import { apiFetch } from '../../api/client';
+import { ModalOverlay } from '../../components/ui/ModalOverlay';
 
 const PAGE_TABS = [
   { id: 'vault',  label: '📁 Registration Vault' },
@@ -17,10 +18,18 @@ type Filing = { id: number; name: string; due: string; assignee: string; status:
 type BoardMember = { id: string; name: string; role: string; din: string; tenure?: string };
 
 const Compliance: React.FC = () => {
-  const { complianceDocs } = useStore();
+  const { complianceDocs, setComplianceDocs } = useStore();
   const [pageTab, setPageTab] = useState('vault');
   const [showDocModal, setShowDocModal] = useState(false);
-  const [docForm, setDocForm] = useState({ name: '', type: 'Tax Exemption', status: 'Valid' as 'Valid' | 'Expiring Soon' | 'Expired', expiry: '' });
+  const [docForm, setDocForm] = useState({
+    name: '',
+    type: 'Tax Exemption',
+    status: 'Valid' as 'Valid' | 'Expiring Soon' | 'Expired',
+    expiry: '',
+    issuing_authority: '',
+    registration_ref: '',
+    review_notes: '',
+  });
   const [vaultFiles, setVaultFiles] = useState<{ key: string; filename: string; size: number; last_modified: string }[]>([]);
   const [vaultLoading, setVaultLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -49,6 +58,38 @@ const Compliance: React.FC = () => {
     overscan: 12,
   });
 
+  const mapApiComplianceDoc = (d: Record<string, unknown>): ComplianceDocument => {
+    const st = String(d.status ?? 'Valid');
+    const status: ComplianceDocument['status'] =
+      st === 'Expired' || st === 'Expiring Soon' ? st : 'Valid';
+    const det = d.details;
+    return {
+      id: String(d.id ?? ''),
+      name: String(d.name ?? ''),
+      type: String(d.doc_type ?? ''),
+      status,
+      expiry: String(d.expiry_date ?? ''),
+      uploadedAt: String(d.created_at ?? '').slice(0, 10),
+      details:
+        typeof det === 'object' && det !== null && !Array.isArray(det)
+          ? (det as Record<string, unknown>)
+          : undefined,
+    };
+  };
+
+  const refreshRegistrationDocs = async () => {
+    try {
+      const res = await apiFetch('/compliance/documents');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.documents)) {
+        setComplianceDocs(data.documents.map((x: Record<string, unknown>) => mapApiComplianceDoc(x)));
+      }
+    } catch {
+      /* non-fatal */
+    }
+  };
+
   const refreshVault = async () => {
     setVaultLoading(true);
     try {
@@ -66,6 +107,7 @@ const Compliance: React.FC = () => {
   useEffect(() => {
     if (pageTab !== 'vault') return;
     refreshVault();
+    refreshRegistrationDocs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageTab]);
 
@@ -181,15 +223,29 @@ const Compliance: React.FC = () => {
           status: docForm.status,
           expiry_date: docForm.expiry || null,
           s3_key: presign.key,
+          details: {
+            ...(docForm.issuing_authority.trim() ? { issuing_authority: docForm.issuing_authority.trim() } : {}),
+            ...(docForm.registration_ref.trim() ? { registration_ref: docForm.registration_ref.trim() } : {}),
+            ...(docForm.review_notes.trim() ? { review_notes: docForm.review_notes.trim() } : {}),
+          },
         }),
       });
       if (!metaRes.ok) throw new Error('metadata failed');
 
       toast.success('Uploaded to Compliance Vault.');
-    setDocForm({ name: '', type: 'Tax Exemption', status: 'Valid', expiry: '' });
+      setDocForm({
+        name: '',
+        type: 'Tax Exemption',
+        status: 'Valid',
+        expiry: '',
+        issuing_authority: '',
+        registration_ref: '',
+        review_notes: '',
+      });
       setSelectedFile(null);
-    setShowDocModal(false);
+      setShowDocModal(false);
       await refreshVault();
+      await refreshRegistrationDocs();
     } catch {
       toast.error('Upload failed. Check backend/S3 settings.');
     } finally {
@@ -392,7 +448,16 @@ const Compliance: React.FC = () => {
                         borderBottom: '1px solid var(--color-border-light)',
                       }}
                     >
-                      <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.name}</span>
+                      <span
+                        style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                        title={[
+                          doc.name,
+                          (doc.details?.registration_ref as string) && `Ref: ${doc.details?.registration_ref}`,
+                          (doc.details?.issuing_authority as string) && `Authority: ${doc.details?.issuing_authority}`,
+                        ].filter(Boolean).join(' · ')}
+                      >
+                        {doc.name}
+                      </span>
                       <span style={{ color: 'var(--color-text-secondary)' }}>{doc.type}</span>
                       <span>
                         <span
@@ -594,10 +659,16 @@ const Compliance: React.FC = () => {
 
       {/* Add Board Member Modal */}
       {showBoardModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowBoardModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '1.5rem' }}>Add Board Member</h2>
+        <ModalOverlay onBackdropClick={() => setShowBoardModal(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comp-board-title"
+          >
+            <button type="button" onClick={() => setShowBoardModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="comp-board-title" style={{ marginBottom: '1.5rem', paddingRight: '2.5rem' }}>Add Board Member</h2>
             <form onSubmit={handleAddBoardMember} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
@@ -620,14 +691,20 @@ const Compliance: React.FC = () => {
               <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Add Member</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {showDocModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowDocModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '1.5rem' }}>Upload Compliance Document</h2>
+        <ModalOverlay onBackdropClick={() => !uploading && setShowDocModal(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comp-doc-title"
+          >
+            <button type="button" disabled={uploading} onClick={() => setShowDocModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="comp-doc-title" style={{ marginBottom: '1.5rem', paddingRight: '2.5rem' }}>Upload Compliance Document</h2>
             <form onSubmit={handleAddDoc} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Document Name</label>
@@ -651,6 +728,18 @@ const Compliance: React.FC = () => {
                   <option>Expired</option>
                 </select>
               </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Issuing authority (optional)</label>
+                <input type="text" className="input-field" placeholder="e.g. Income Tax / MCA" value={docForm.issuing_authority} onChange={e => setDocForm({ ...docForm, issuing_authority: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Registration / certificate ref (optional)</label>
+                <input type="text" className="input-field" value={docForm.registration_ref} onChange={e => setDocForm({ ...docForm, registration_ref: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Internal review notes (optional)</label>
+                <textarea className="input-field" rows={2} value={docForm.review_notes} onChange={e => setDocForm({ ...docForm, review_notes: e.target.value })} />
+              </div>
               <div style={{ border: '2px dashed var(--color-border)', borderRadius: 'var(--radius-md)', padding: '1.5rem', textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>
                 <Upload size={20} style={{ margin: '0 auto 0.5rem' }} />
                 <div style={{ marginBottom: '0.5rem' }}>
@@ -672,9 +761,10 @@ const Compliance: React.FC = () => {
               </button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
-      </>}
+      </>
+      )}
     </div>
   );
 };

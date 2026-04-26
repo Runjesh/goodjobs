@@ -9,6 +9,7 @@ import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 import { parseCsvToRecords } from '../../utils/csvParse';
+import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import './CRM.css';
 
 const WA_TEMPLATES = [
@@ -18,7 +19,7 @@ const WA_TEMPLATES = [
   { id: 'event', label: 'Event Invite', body: 'Dear {name}, you\'re invited to our Annual Gala on Dec 15th in Mumbai 🌟 As a valued donor, your seat is reserved. RSVP: [link]' },
 ];
 
-const CSV_TEMPLATE = 'name,type,pan,location\nAnita Sharma,Recurring,ABCDE1234F,"Mumbai, Maharashtra"\nRaj Kumar,Major Donor,XYZAB5678G,"Delhi, NCR"';
+const CSV_TEMPLATE = 'name,type,pan,location,email,phone,employer\nAnita Sharma,Recurring,ABCDE1234F,"Mumbai, Maharashtra",a@x.com,9876500000,Acme\nRaj Kumar,Major Donor,XYZAB5678G,"Delhi, NCR",,,';
 
 const CRM: React.FC = () => {
   const { donors, transactions, addDonor, updateDonor, deleteDonor } = useStore();
@@ -34,7 +35,17 @@ const CRM: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState(WA_TEMPLATES[0]);
   const [customMessage, setCustomMessage] = useState('');
   const [bulkMode, setBulkMode] = useState(false);
-  const [newContact, setNewContact] = useState({ name: '', type: 'Recurring', pan: '', location: '' });
+  const [newContact, setNewContact] = useState({
+    name: '',
+    type: 'Recurring',
+    pan: '',
+    location: '',
+    email: '',
+    phone: '',
+    employer: '',
+    notes: '',
+    preferredChannel: 'whatsapp',
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [csvPreview, setCsvPreview] = useState<any[]>([]);
   const [propensity, setPropensity] = useState<{score: number, recommendation: string, insights?: any} | null>(null);
@@ -142,8 +153,14 @@ const CRM: React.FC = () => {
 
   const filteredDonors = useMemo(() => {
     return donors.filter(d => {
-      const matchesSearch = d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        d.pan.toLowerCase().includes(searchQuery.toLowerCase());
+      const q = searchQuery.toLowerCase();
+      const meta = (d.meta || {}) as Record<string, unknown>;
+      const emp = String(meta.employer || '').toLowerCase();
+      const matchesSearch = d.name.toLowerCase().includes(q) ||
+        d.pan.toLowerCase().includes(q) ||
+        (d.email || '').toLowerCase().includes(q) ||
+        (d.phone || '').toLowerCase().includes(q) ||
+        emp.includes(q);
       const matchesFilter = activeFilter === 'All' ||
         (activeFilter === 'Major' && d.type === 'Major Donor') ||
         (activeFilter === 'Recurring' && d.type === 'Recurring') ||
@@ -196,6 +213,13 @@ const CRM: React.FC = () => {
           pan: newContact.pan,
           location: newContact.location,
           tags: ['New'],
+          email: newContact.email.trim() || null,
+          phone: newContact.phone.trim() || null,
+          meta: {
+            ...(newContact.employer.trim() ? { employer: newContact.employer.trim() } : {}),
+            ...(newContact.notes.trim() ? { notes: newContact.notes.trim() } : {}),
+            ...(newContact.preferredChannel ? { preferred_channel: newContact.preferredChannel } : {}),
+          },
         }),
       });
       if (res.ok) {
@@ -213,7 +237,17 @@ const CRM: React.FC = () => {
       return;
     }
     setShowAddContact(false);
-    setNewContact({ name: '', type: 'Recurring', pan: '', location: '' });
+    setNewContact({
+      name: '',
+      type: 'Recurring',
+      pan: '',
+      location: '',
+      email: '',
+      phone: '',
+      employer: '',
+      notes: '',
+      preferredChannel: 'whatsapp',
+    });
   };
 
   const handleEditSubmit = async (e: React.FormEvent) => {
@@ -228,6 +262,12 @@ const CRM: React.FC = () => {
           pan: editContact.pan,
           location: editContact.location,
           tags: editContact.tags || [],
+          email: (editContact.email || '').trim() || null,
+          phone: (editContact.phone || '').trim() || null,
+          meta:
+            editContact.meta && typeof editContact.meta === 'object' && !Array.isArray(editContact.meta)
+              ? (editContact.meta as Record<string, unknown>)
+              : {},
         }),
       });
       if (res.ok) {
@@ -315,8 +355,12 @@ const CRM: React.FC = () => {
 
   const handleExportSelected = () => {
     const toExport = selectedIds.size > 0 ? donors.filter(d => selectedIds.has(d.id)) : donors;
-    const csv = ['Name,Type,PAN,Location,Total Given,Last Gift',
-      ...toExport.map(d => `${d.name},${d.type},${d.pan},"${d.location}",${d.totalGiven},${d.lastGift}`)
+    const csv = ['Name,Type,PAN,Location,Email,Phone,Employer,Total Given,Last Gift',
+      ...toExport.map(d => {
+        const m = (d.meta || {}) as Record<string, unknown>;
+        const emp = String(m.employer || '').replace(/"/g, '""');
+        return `${d.name},${d.type},${d.pan},"${d.location}",${d.email || ''},${d.phone || ''},"${emp}",${d.totalGiven},${d.lastGift}`;
+      })
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -356,13 +400,19 @@ const CRM: React.FC = () => {
   const handleCSVImport = async () => {
     if (!csvPreview.length) return;
     const donors = csvPreview
-      .map((row: any) => ({
-        name: (row.name || '').trim(),
-        type: ((row.type || 'Recurring').trim() || 'Recurring'),
-        pan: (row.pan || '').trim(),
-        location: (row.location || '').trim(),
-        tags: ['Imported'],
-      }))
+      .map((row: any) => {
+        const employer = (row.employer || '').trim();
+        return {
+          name: (row.name || '').trim(),
+          type: ((row.type || 'Recurring').trim() || 'Recurring'),
+          pan: (row.pan || '').trim(),
+          location: (row.location || '').trim(),
+          email: (row.email || '').trim() || undefined,
+          phone: (row.phone || '').trim() || undefined,
+          tags: ['Imported'],
+          ...(employer ? { meta: { employer } } : {}),
+        };
+      })
       .filter((d: { name: string }) => d.name);
     if (!donors.length) {
       toast.error('No valid rows — CSV needs a name column.');
@@ -585,10 +635,17 @@ const CRM: React.FC = () => {
                 <div className="profile-avatar">{activeDonor.initial}</div>
                 <div className="profile-info">
                   <h2>{activeDonor.name}</h2>
-                  <div style={{ color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.875rem' }}>
+                  <div style={{ color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.875rem', flexWrap: 'wrap' }}>
                     <span className="flex items-center gap-1"><MapPin size={14} /> {activeDonor.location}</span>
                     <span>PAN: {activeDonor.pan}</span>
+                    {activeDonor.email ? <span className="flex items-center gap-1"><Mail size={14} /> {activeDonor.email}</span> : null}
+                    {activeDonor.phone ? <span className="flex items-center gap-1"><Phone size={14} /> {activeDonor.phone}</span> : null}
                   </div>
+                  {(() => {
+                    const m = (activeDonor.meta || {}) as Record<string, unknown>;
+                    const sub = [m.employer && `Employer: ${m.employer}`, m.notes && String(m.notes)].filter(Boolean).join(' · ');
+                    return sub ? <p style={{ fontSize: '0.8rem', color: 'var(--color-text-tertiary)', marginTop: '0.35rem' }}>{sub}</p> : null;
+                  })()}
                   <div className="profile-tags">
                     <span className="badge badge-success">{activeDonor.type}</span>
                     {activeDonor.tags.map(tag => <span key={tag} className="badge badge-outline">{tag}</span>)}
@@ -639,7 +696,10 @@ const CRM: React.FC = () => {
                   className="btn btn-secondary"
                   title="Edit Profile"
                   onClick={() => {
-                    setEditContact(activeDonor);
+                    setEditContact({
+                      ...activeDonor,
+                      meta: { ...(typeof activeDonor.meta === 'object' && activeDonor.meta && !Array.isArray(activeDonor.meta) ? activeDonor.meta as object : {}) },
+                    });
                     setShowEditContact(true);
                   }}
                 >
@@ -807,10 +867,16 @@ const CRM: React.FC = () => {
 
       {/* ── Message Composer Modal ───────────────────────────────── */}
       {showComposer && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '560px', maxHeight: '90vh', overflow: 'auto', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowComposer(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <ModalOverlay onBackdropClick={() => setShowComposer(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="crm-composer-title"
+          >
+            <button type="button" onClick={() => setShowComposer(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close composer"><X size={20} /></button>
+            <h2 id="crm-composer-title" style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', paddingRight: '2.5rem' }}>
               {composerChannel === 'whatsapp' ? <MessageCircle size={22} color="#16a34a" /> : <Mail size={22} color="var(--color-primary)" />}
               {composerChannel === 'whatsapp' ? 'WhatsApp' : 'Email'} Composer
             </h2>
@@ -876,15 +942,21 @@ const CRM: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* ── CSV Import Modal ─────────────────────────────────────── */}
       {showCSVImport && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '560px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => { setShowCSVImport(false); setCsvPreview([]); }} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '0.5rem' }}>Import Donors from CSV</h2>
+        <ModalOverlay onBackdropClick={() => { setShowCSVImport(false); setCsvPreview([]); }}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="crm-csv-title"
+          >
+            <button type="button" onClick={() => { setShowCSVImport(false); setCsvPreview([]); }} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close import"><X size={20} /></button>
+            <h2 id="crm-csv-title" style={{ marginBottom: '0.5rem', paddingRight: '2.5rem' }}>Import Donors from CSV</h2>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
               Bulk import donor records from Excel or any CSV file.
             </p>
@@ -916,7 +988,7 @@ const CRM: React.FC = () => {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                     <thead>
                       <tr style={{ background: 'var(--color-bg-main)' }}>
-                        {['Name', 'Type', 'PAN', 'Location'].map(h => (
+                        {['Name', 'Type', 'PAN', 'Location', 'Email', 'Phone', 'Employer'].map(h => (
                           <th key={h} style={{ textAlign: 'left', padding: '0.5rem 0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>{h}</th>
                         ))}
                       </tr>
@@ -928,6 +1000,9 @@ const CRM: React.FC = () => {
                           <td style={{ padding: '0.5rem 0.75rem' }}>{row.type}</td>
                           <td style={{ padding: '0.5rem 0.75rem', fontFamily: 'monospace' }}>{row.pan}</td>
                           <td style={{ padding: '0.5rem 0.75rem' }}>{row.location}</td>
+                          <td style={{ padding: '0.5rem 0.75rem' }}>{row.email}</td>
+                          <td style={{ padding: '0.5rem 0.75rem' }}>{row.phone}</td>
+                          <td style={{ padding: '0.5rem 0.75rem' }}>{row.employer}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -940,15 +1015,21 @@ const CRM: React.FC = () => {
               </>
             )}
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* ── Add Contact Modal ───────────────────────────────────── */}
       {showAddContact && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowAddContact(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '1.5rem' }}>Add New Contact</h2>
+        <ModalOverlay onBackdropClick={() => setShowAddContact(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="crm-add-title"
+          >
+            <button type="button" onClick={() => setShowAddContact(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="crm-add-title" style={{ marginBottom: '1.5rem', paddingRight: '2.5rem' }}>Add New Contact</h2>
             <form onSubmit={handleAddContact} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
@@ -960,6 +1041,16 @@ const CRM: React.FC = () => {
                   {['Major Donor', 'Recurring', 'Event Attendee', 'CSR Partner', 'Lapsing'].map(t => <option key={t}>{t}</option>)}
                 </select>
               </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Email</label>
+                  <input type="email" className="input-field" value={newContact.email} onChange={e => setNewContact({ ...newContact, email: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Phone</label>
+                  <input type="text" className="input-field" value={newContact.phone} onChange={e => setNewContact({ ...newContact, phone: e.target.value })} />
+                </div>
+              </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">PAN Number</label>
                 <input type="text" className="input-field" value={newContact.pan} onChange={e => setNewContact({ ...newContact, pan: e.target.value.toUpperCase() })} />
@@ -968,17 +1059,39 @@ const CRM: React.FC = () => {
                 <label className="input-label">Location</label>
                 <input required type="text" className="input-field" value={newContact.location} onChange={e => setNewContact({ ...newContact, location: e.target.value })} placeholder="e.g. Mumbai, Maharashtra" />
               </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Employer / org (optional)</label>
+                <input type="text" className="input-field" value={newContact.employer} onChange={e => setNewContact({ ...newContact, employer: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Preferred channel</label>
+                <select className="input-field" value={newContact.preferredChannel} onChange={e => setNewContact({ ...newContact, preferredChannel: e.target.value })}>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="email">Email</option>
+                  <option value="phone">Phone</option>
+                </select>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Notes</label>
+                <textarea className="input-field" rows={2} value={newContact.notes} onChange={e => setNewContact({ ...newContact, notes: e.target.value })} placeholder="Consent, referrals, nurture notes…" />
+              </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Save Contact</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
       {/* ── Edit Contact Modal ───────────────────────────────────── */}
       {showEditContact && editContact && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowEditContact(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '1.5rem' }}>Edit Contact</h2>
+        <ModalOverlay onBackdropClick={() => setShowEditContact(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="crm-edit-title"
+          >
+            <button type="button" onClick={() => setShowEditContact(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="crm-edit-title" style={{ marginBottom: '1.5rem', paddingRight: '2.5rem' }}>Edit Contact</h2>
             <form onSubmit={handleEditSubmit} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
@@ -990,6 +1103,16 @@ const CRM: React.FC = () => {
                   {['Major Donor', 'Recurring', 'Event Attendee', 'CSR Partner', 'Lapsing'].map(t => <option key={t}>{t}</option>)}
                 </select>
               </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Email</label>
+                  <input type="email" className="input-field" value={editContact.email || ''} onChange={e => setEditContact({ ...editContact, email: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Phone</label>
+                  <input type="text" className="input-field" value={editContact.phone || ''} onChange={e => setEditContact({ ...editContact, phone: e.target.value })} />
+                </div>
+              </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">PAN Number</label>
                 <input type="text" className="input-field" value={editContact.pan || ''} onChange={e => setEditContact({ ...editContact, pan: e.target.value.toUpperCase() })} />
@@ -998,22 +1121,68 @@ const CRM: React.FC = () => {
                 <label className="input-label">Location</label>
                 <input required type="text" className="input-field" value={editContact.location || ''} onChange={e => setEditContact({ ...editContact, location: e.target.value })} placeholder="e.g. Mumbai, Maharashtra" />
               </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Employer / org</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  value={String((editContact.meta as Record<string, unknown>)?.employer || '')}
+                  onChange={e => setEditContact({
+                    ...editContact,
+                    meta: { ...(typeof editContact.meta === 'object' && editContact.meta ? editContact.meta as object : {}), employer: e.target.value },
+                  })}
+                />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Preferred channel</label>
+                <select
+                  className="input-field"
+                  value={String((editContact.meta as Record<string, unknown>)?.preferred_channel || 'whatsapp')}
+                  onChange={e => setEditContact({
+                    ...editContact,
+                    meta: { ...(typeof editContact.meta === 'object' && editContact.meta ? editContact.meta as object : {}), preferred_channel: e.target.value },
+                  })}
+                >
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="email">Email</option>
+                  <option value="phone">Phone</option>
+                </select>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Notes</label>
+                <textarea
+                  className="input-field"
+                  rows={2}
+                  value={String((editContact.meta as Record<string, unknown>)?.notes || '')}
+                  onChange={e => setEditContact({
+                    ...editContact,
+                    meta: { ...(typeof editContact.meta === 'object' && editContact.meta ? editContact.meta as object : {}), notes: e.target.value },
+                  })}
+                />
+              </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Contact</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* ── Delete Confirm Modal ───────────────────────────────────── */}
       {showDeleteConfirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative', textAlign: 'center' }}>
+        <ModalOverlay onBackdropClick={() => setShowDeleteConfirm(false)}>
+          <div
+            className="modal-card modal-card--narrow"
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="crm-delete-title"
+            style={{ textAlign: 'center' }}
+          >
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
               <div style={{ background: 'var(--color-danger)', color: 'white', padding: '1rem', borderRadius: '50%' }}>
                 <Trash2 size={32} />
               </div>
             </div>
-            <h2 style={{ marginBottom: '0.5rem' }}>Delete Donor?</h2>
+            <h2 id="crm-delete-title" style={{ marginBottom: '0.5rem' }}>Delete Donor?</h2>
             <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
               Are you sure you want to delete <strong>{activeDonor?.name}</strong>? This action cannot be undone and will remove them from all campaigns.
             </p>
@@ -1022,7 +1191,7 @@ const CRM: React.FC = () => {
               <button className="btn btn-primary" onClick={handleDeleteDonor} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

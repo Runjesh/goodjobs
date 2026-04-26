@@ -23,7 +23,30 @@ const Settings = lazy(() => import('./pages/Settings/Settings'));
 function App() {
   return (
     <AuthProvider>
-      <Toaster position="top-center" toastOptions={{ duration: 4000, style: { fontSize: '0.875rem' } }} />
+      <Toaster
+        position="top-center"
+        containerStyle={{ top: 'calc(var(--header-height) + 8px)' }}
+        toastOptions={{
+          duration: 4000,
+          style: {
+            fontSize: '0.875rem',
+            fontWeight: 500,
+            background: 'var(--color-bg-elevated)',
+            color: 'var(--color-text-primary)',
+            border: '1px solid color-mix(in srgb, var(--color-border) 80%, transparent)',
+            borderRadius: 'var(--radius-xl)',
+            boxShadow: 'var(--shadow-lg)',
+            padding: '0.75rem 1.125rem',
+            maxWidth: 'min(28rem, calc(100vw - 2rem))',
+          },
+          success: {
+            iconTheme: { primary: 'var(--color-success)', secondary: 'var(--color-bg-card)' },
+          },
+          error: {
+            iconTheme: { primary: 'var(--color-danger)', secondary: 'var(--color-bg-card)' },
+          },
+        }}
+      />
       <Suspense fallback={<PageLoading />}>
         <Routes>
           <Route path="/login" element={<Login />} />

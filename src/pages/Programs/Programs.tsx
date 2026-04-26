@@ -9,12 +9,100 @@ import '../../components/FormBuilder/FormBuilder.css';
 import './Programs.css';
 import { apiFetch } from '../../api/client';
 import { parseCsvToRecords } from '../../utils/csvParse';
+import { ModalOverlay } from '../../components/ui/ModalOverlay';
 
-const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize\nSita Devi,Health,"Pune, MH",false,4\nRavi K,Education,Delhi,true,3\n';
+const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize,phone,email,gender,dob,referral_source,referral_detail,vulnerability,id_doc_type,id_doc_ref,notes\nSita Devi,Health,"Pune, MH",false,4,+9198***01,,female,1992-03-01,shg,Block 4 AWC,"woman_headed,pwd",aadhaar_masked,****8212,\nRavi K,Education,Delhi,true,3,,,male,,camp,,,election_id,ABC1234567,\n';
 
 function parseBoolCell(v: string): boolean {
   const s = (v || '').trim().toLowerCase();
   return s === '1' || s === 'true' || s === 'yes' || s === 'y';
+}
+
+type BenExtraForm = {
+  phone: string;
+  email: string;
+  gender: string;
+  dob: string;
+  referralSource: string;
+  referralDetail: string;
+  vulnerabilityTags: string;
+  idDocType: string;
+  idDocRef: string;
+  notes: string;
+  consentData: boolean;
+};
+
+const BEN_EXTRA_EMPTY: BenExtraForm = {
+  phone: '',
+  email: '',
+  gender: '',
+  dob: '',
+  referralSource: '',
+  referralDetail: '',
+  vulnerabilityTags: '',
+  idDocType: '',
+  idDocRef: '',
+  notes: '',
+  consentData: true,
+};
+
+function packBenDetails(e: BenExtraForm): Record<string, unknown> {
+  const o: Record<string, unknown> = {};
+  if (e.phone.trim()) o.phone = e.phone.trim();
+  if (e.email.trim()) o.email = e.email.trim().toLowerCase();
+  if (e.gender) o.gender = e.gender;
+  if (e.dob.trim()) o.dob = e.dob.trim();
+  if (e.referralSource) o.referral_source = e.referralSource;
+  if (e.referralDetail.trim()) o.referral_detail = e.referralDetail.trim();
+  if (e.vulnerabilityTags.trim()) {
+    o.vulnerability_flags = e.vulnerabilityTags.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  if (e.idDocType) o.id_doc_type = e.idDocType;
+  if (e.idDocRef.trim()) o.id_doc_ref = e.idDocRef.trim();
+  if (e.notes.trim()) o.notes = e.notes.trim();
+  o.consent_program_data = e.consentData;
+  return o;
+}
+
+function unpackBenDetails(details?: Record<string, unknown> | null): BenExtraForm {
+  const d = details || {};
+  const vf = d.vulnerability_flags;
+  const vulnStr = Array.isArray(vf) ? vf.join(', ') : String(vf || '');
+  return {
+    phone: String(d.phone ?? ''),
+    email: String(d.email ?? ''),
+    gender: String(d.gender ?? ''),
+    dob: String(d.dob ?? ''),
+    referralSource: String(d.referral_source ?? ''),
+    referralDetail: String(d.referral_detail ?? ''),
+    vulnerabilityTags: vulnStr,
+    idDocType: String(d.id_doc_type ?? ''),
+    idDocRef: String(d.id_doc_ref ?? ''),
+    notes: String(d.notes ?? ''),
+    consentData: d.consent_program_data !== false,
+  };
+}
+
+function benDetailsFromCsvRow(row: Record<string, string>): Record<string, unknown> | undefined {
+  const d: Record<string, unknown> = {};
+  const g = (k: string) => (row[k] || '').trim();
+  if (g('phone')) d.phone = g('phone');
+  if (g('email')) d.email = g('email').toLowerCase();
+  if (g('gender')) d.gender = g('gender');
+  if (g('dob')) d.dob = g('dob');
+  if (g('referral_source')) d.referral_source = g('referral_source');
+  if (g('referral_detail')) d.referral_detail = g('referral_detail');
+  if (g('vulnerability')) d.vulnerability_flags = g('vulnerability').split(',').map(s => s.trim()).filter(Boolean);
+  if (g('id_doc_type')) d.id_doc_type = g('id_doc_type');
+  if (g('id_doc_ref')) d.id_doc_ref = g('id_doc_ref');
+  if (g('notes')) d.notes = g('notes');
+  return Object.keys(d).length ? d : undefined;
+}
+
+function csvEscapeCell(v: string | number | boolean): string {
+  const s = String(v ?? '');
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 }
 
 const Programs: React.FC = () => {
@@ -23,6 +111,8 @@ const Programs: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'mis' | 'forms' | 'toc'>('mis');
   const [form, setForm] = useState({ name: '', program: '', location: '', aadhaar: false, familySize: 1 });
+  const [benExtra, setBenExtra] = useState<BenExtraForm>({ ...BEN_EXTRA_EMPTY });
+  const [editBenExtra, setEditBenExtra] = useState<BenExtraForm>({ ...BEN_EXTRA_EMPTY });
   const [showEditBen, setShowEditBen] = useState(false);
   const [editBen, setEditBen] = useState<any>(null);
   const [showDeleteBenConfirm, setShowDeleteBenConfirm] = useState(false);
@@ -70,12 +160,14 @@ const Programs: React.FC = () => {
           location: form.location,
           aadhaar: form.aadhaar,
           familySize: Number(form.familySize),
+          details: packBenDetails(benExtra),
         }),
       });
       if (!res.ok) throw new Error('create');
       await refreshBeneficiaries();
       toast.success(`${form.name} enrolled in ${form.program}!`);
       setForm({ name: '', program: programs[0] || '', location: '', aadhaar: false, familySize: 1 });
+      setBenExtra({ ...BEN_EXTRA_EMPTY });
       setShowModal(false);
     } catch {
       toast.error('Failed to enroll (backend not reachable).');
@@ -94,10 +186,11 @@ const Programs: React.FC = () => {
           location: editBen.location,
           aadhaar: editBen.aadhaar,
           familySize: Number(editBen.familySize),
+          details: packBenDetails(editBenExtra),
         }),
       });
       if (res.ok) {
-        updateBeneficiary(editBen.id, editBen);
+        await refreshBeneficiaries();
         toast.success(`Beneficiary updated!`);
         setShowEditBen(false);
       } else {
@@ -126,8 +219,23 @@ const Programs: React.FC = () => {
   };
 
   const handleExport = () => {
-    const csv = ['ID,Name,Program,Location,Aadhaar,Family Size',
-      ...beneficiaries.map(b => `${b.id},${b.name},${b.program},${b.location},${b.aadhaar},${b.familySize}`)
+    const header = 'ID,Name,Program,Location,Aadhaar,Family Size,Phone,Referral,Gender';
+    const csv = [
+      header,
+      ...beneficiaries.map((b) => {
+        const d = b.details || {};
+        return [
+          csvEscapeCell(b.id),
+          csvEscapeCell(b.name),
+          csvEscapeCell(b.program),
+          csvEscapeCell(b.location),
+          csvEscapeCell(b.aadhaar),
+          csvEscapeCell(b.familySize),
+          csvEscapeCell(String(d['phone'] ?? '')),
+          csvEscapeCell(String(d['referral_source'] ?? '')),
+          csvEscapeCell(String(d['gender'] ?? '')),
+        ].join(',');
+      }),
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -151,13 +259,17 @@ const Programs: React.FC = () => {
   const runBenBulkImport = async () => {
     if (!benCsvRows.length) return;
     const beneficiariesPayload = benCsvRows
-      .map(row => ({
-        name: (row.name || '').trim(),
-        program: (row.program || '').trim(),
-        location: (row.location || '').trim(),
-        aadhaar: row.aadhaar !== undefined && row.aadhaar !== '' ? parseBoolCell(row.aadhaar) : false,
-        familySize: Math.max(1, parseInt(row.familysize || row.family_size || '1', 10) || 1),
-      }))
+      .map(row => {
+        const details = benDetailsFromCsvRow(row);
+        return {
+          name: (row.name || '').trim(),
+          program: (row.program || '').trim(),
+          location: (row.location || '').trim(),
+          aadhaar: row.aadhaar !== undefined && row.aadhaar !== '' ? parseBoolCell(row.aadhaar) : false,
+          familySize: Math.max(1, parseInt(row.familysize || row.family_size || '1', 10) || 1),
+          ...(details ? { details } : {}),
+        };
+      })
       .filter(b => b.name);
     if (!beneficiariesPayload.length) {
       toast.error('No valid rows — need name, program, location columns.');
@@ -190,7 +302,7 @@ const Programs: React.FC = () => {
   const benVirtualizer = useVirtualizer({
     count: beneficiaries.length,
     getScrollElement: () => benScrollRef.current,
-    estimateSize: () => 90,
+    estimateSize: () => 108,
     overscan: 10,
   });
 
@@ -214,7 +326,13 @@ const Programs: React.FC = () => {
           <button className="btn btn-secondary" onClick={() => setActiveTab('forms')}>
             <ClipboardList size={16} /> Form Builder
           </button>
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setBenExtra({ ...BEN_EXTRA_EMPTY });
+              setShowModal(true);
+            }}
+          >
             <UserCheck size={16} /> Enroll Beneficiary
           </button>
         </div>
@@ -273,7 +391,16 @@ const Programs: React.FC = () => {
           <div className="card">
             <div className="card-header flex justify-between items-center">
               <h3 className="card-title">Enrollments ({beneficiaries.length})</h3>
-              <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => setShowModal(true)}>+ Enroll</button>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                onClick={() => {
+                  setBenExtra({ ...BEN_EXTRA_EMPTY });
+                  setShowModal(true);
+                }}
+              >
+                + Enroll
+              </button>
             </div>
             <div className="card-body" style={{ paddingBottom: '0.75rem' }}>
               {beneficiaries.length === 0 ? (
@@ -311,12 +438,30 @@ const Programs: React.FC = () => {
                               <div className="ben-meta">
                                 {ben.program} • {ben.location} • Family of {ben.familySize}
                               </div>
+                              {(() => {
+                                const d = ben.details || {};
+                                const bits = [d['referral_source'], d['phone']].filter((x): x is string => typeof x === 'string' && x.length > 0);
+                                if (!bits.length) return null;
+                                return (
+                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                                    {bits.join(' · ')}
+                                  </div>
+                                );
+                              })()}
                             </div>
                             <div className="flex gap-2 items-center">
                               <span className="badge badge-outline" style={{ fontSize: '0.7rem' }}>
                                 {ben.id}
                               </span>
-                              <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setEditBen(ben); setShowEditBen(true); }}>
+                              <button
+                                className="btn-icon-only"
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                onClick={() => {
+                                  setEditBenExtra(unpackBenDetails(ben.details));
+                                  setEditBen(ben);
+                                  setShowEditBen(true);
+                                }}
+                              >
                                 <Edit size={14} color="var(--color-text-secondary)" />
                               </button>
                               <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setBenToDelete(ben); setShowDeleteBenConfirm(true); }}>
@@ -369,10 +514,20 @@ const Programs: React.FC = () => {
       </div>
 
       {activeTab === 'mis' && showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '1.5rem' }}>Enroll Beneficiary</h2>
+        <ModalOverlay onBackdropClick={() => setShowModal(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prog-enroll-title"
+            style={{ maxWidth: '540px', maxHeight: 'min(90vh, 780px)' }}
+          >
+            <button type="button" onClick={() => setShowModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="prog-enroll-title" style={{ marginBottom: '0.25rem', paddingRight: '2.5rem' }}>Enroll Beneficiary</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '1.25rem' }}>
+              Core MIS fields plus referral, safeguards, and ID references (store masked / last digits only).
+            </p>
             <form onSubmit={handleEnroll} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
@@ -388,27 +543,121 @@ const Programs: React.FC = () => {
                 <label className="input-label">Location (District, State)</label>
                 <input required type="text" className="input-field" placeholder="e.g. Nashik, MH" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} />
               </div>
-              <div className="input-group" style={{ marginBottom: 0 }}>
-                <label className="input-label">Family Size</label>
-                <input type="number" className="input-field" min="1" max="20" value={form.familySize} onChange={e => setForm({ ...form, familySize: Number(e.target.value) })} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Family size</label>
+                  <input type="number" className="input-field" min="1" max="20" value={form.familySize} onChange={e => setForm({ ...form, familySize: Number(e.target.value) })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Gender (optional)</label>
+                  <select className="input-field" value={benExtra.gender} onChange={e => setBenExtra({ ...benExtra, gender: e.target.value })}>
+                    <option value="">—</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                    <option value="other">Other</option>
+                    <option value="prefer_not">Prefer not to say</option>
+                  </select>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <input type="checkbox" id="aadhaar" checked={form.aadhaar} onChange={e => setForm({ ...form, aadhaar: e.target.checked })} />
-                <label htmlFor="aadhaar" style={{ fontSize: '0.875rem' }}>Aadhaar Verified</label>
+                <label htmlFor="aadhaar" style={{ fontSize: '0.875rem' }}>Aadhaar verified (consent on file)</label>
               </div>
+
+              <div style={{ marginTop: '0.5rem', paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Contact</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Phone</label>
+                    <input type="tel" className="input-field" placeholder="+91 …" value={benExtra.phone} onChange={e => setBenExtra({ ...benExtra, phone: e.target.value })} />
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Email</label>
+                    <input type="email" className="input-field" value={benExtra.email} onChange={e => setBenExtra({ ...benExtra, email: e.target.value })} />
+                  </div>
+                </div>
+                <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
+                  <label className="input-label">Date of birth</label>
+                  <input type="date" className="input-field" value={benExtra.dob} onChange={e => setBenExtra({ ...benExtra, dob: e.target.value })} />
+                </div>
+              </div>
+
+              <div style={{ marginTop: '0.5rem', paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Referral &amp; safeguards</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Referral source</label>
+                    <select className="input-field" value={benExtra.referralSource} onChange={e => setBenExtra({ ...benExtra, referralSource: e.target.value })}>
+                      <option value="">—</option>
+                      <option value="anganwadi">Anganwadi</option>
+                      <option value="shg">SHG / community group</option>
+                      <option value="camp">Outreach camp</option>
+                      <option value="walk_in">Walk-in</option>
+                      <option value="other_org">Partner NGO / govt</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Referral detail</label>
+                    <input type="text" className="input-field" placeholder="AWC code, staff name…" value={benExtra.referralDetail} onChange={e => setBenExtra({ ...benExtra, referralDetail: e.target.value })} />
+                  </div>
+                </div>
+                <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
+                  <label className="input-label">Vulnerability tags (comma separated)</label>
+                  <input type="text" className="input-field" placeholder="e.g. woman_headed, pwd, sc_st, migrant" value={benExtra.vulnerabilityTags} onChange={e => setBenExtra({ ...benExtra, vulnerabilityTags: e.target.value })} />
+                </div>
+              </div>
+
+              <div style={{ marginTop: '0.5rem', paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>ID reference (no full Aadhaar)</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">ID type</label>
+                    <select className="input-field" value={benExtra.idDocType} onChange={e => setBenExtra({ ...benExtra, idDocType: e.target.value })}>
+                      <option value="">—</option>
+                      <option value="aadhaar_masked">Aadhaar (masked)</option>
+                      <option value="election_id">Election ID</option>
+                      <option value="ration_card">Ration card</option>
+                      <option value="birth_cert">Birth certificate</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">ID reference</label>
+                    <input type="text" className="input-field" placeholder="Last 4 digits / doc no." value={benExtra.idDocRef} onChange={e => setBenExtra({ ...benExtra, idDocRef: e.target.value })} />
+                  </div>
+                </div>
+                <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
+                  <label className="input-label">Case notes</label>
+                  <textarea className="input-field" rows={2} placeholder="Internal programme notes" value={benExtra.notes} onChange={e => setBenExtra({ ...benExtra, notes: e.target.value })} />
+                </div>
+                <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
+                  <input type="checkbox" id="consentBen" checked={benExtra.consentData} onChange={e => setBenExtra({ ...benExtra, consentData: e.target.checked })} />
+                  <label htmlFor="consentBen" style={{ fontSize: '0.875rem' }}>Beneficiary / guardian consented to data use for this programme</label>
+                </div>
+              </div>
+
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Enroll Beneficiary</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {activeTab === 'mis' && showBenImport && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '520px', padding: '1.5rem', position: 'relative' }}>
-            <button type="button" onClick={() => { setShowBenImport(false); setBenCsvRows([]); }} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '0.5rem' }}>Import beneficiaries (CSV)</h2>
+        <ModalOverlay onBackdropClick={() => { setShowBenImport(false); setBenCsvRows([]); }}>
+          <div
+            className="modal-card modal-card--wide"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prog-import-ben-title"
+            style={{ maxWidth: '520px' }}
+          >
+            <button type="button" onClick={() => { setShowBenImport(false); setBenCsvRows([]); }} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="prog-import-ben-title" style={{ marginBottom: '0.5rem', paddingRight: '2.5rem' }}>Import beneficiaries (CSV)</h2>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
-              Columns: <code style={{ fontSize: '0.8rem' }}>name, program, location, aadhaar, familySize</code>
+              Required: <code style={{ fontSize: '0.8rem' }}>name, program, location</code>. Optional:{' '}
+              <code style={{ fontSize: '0.75rem' }}>aadhaar, familySize, phone, email, gender, dob, referral_source, referral_detail, vulnerability, id_doc_type, id_doc_ref, notes</code>
             </p>
             <div className="flex gap-2" style={{ marginBottom: '1rem' }}>
               <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => benFileRef.current?.click()}>
@@ -441,7 +690,7 @@ const Programs: React.FC = () => {
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: 'var(--color-bg-main)' }}>
-                        {['name', 'program', 'location'].map(h => (
+                        {['name', 'program', 'location', 'phone', 'referral_source'].map(h => (
                           <th key={h} style={{ textAlign: 'left', padding: '0.35rem 0.5rem' }}>{h}</th>
                         ))}
                       </tr>
@@ -452,6 +701,8 @@ const Programs: React.FC = () => {
                           <td style={{ padding: '0.35rem 0.5rem' }}>{row.name}</td>
                           <td style={{ padding: '0.35rem 0.5rem' }}>{row.program}</td>
                           <td style={{ padding: '0.35rem 0.5rem' }}>{row.location}</td>
+                          <td style={{ padding: '0.35rem 0.5rem' }}>{row.phone}</td>
+                          <td style={{ padding: '0.35rem 0.5rem' }}>{row.referral_source}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -463,18 +714,25 @@ const Programs: React.FC = () => {
               </>
             )}
           </div>
-        </div>
+        </ModalOverlay>
       )}
       </>)}
 
       {/* Conversational MIS Modal */}
       {showConversationalModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '500px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowConversationalModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <div className="flex items-center gap-2 mb-4">
+        <ModalOverlay onBackdropClick={() => setShowConversationalModal(false)}>
+          <div
+            className="modal-card modal-card--wide"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prog-conv-mis-title"
+            style={{ maxWidth: '500px' }}
+          >
+            <button type="button" onClick={() => setShowConversationalModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <div className="flex items-center gap-2 mb-4" style={{ paddingRight: '2.5rem' }}>
               <MessageCircle size={22} color="#16a34a" />
-              <h2 style={{ fontSize: '1.25rem' }}>Conversational MIS (WhatsApp)</h2>
+              <h2 id="prog-conv-mis-title" style={{ fontSize: '1.25rem', margin: 0 }}>Conversational MIS (WhatsApp)</h2>
             </div>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
               Field staff can send activity narratives. The MIS Agent extracts structured data and geo-tags automatically.
@@ -495,7 +753,7 @@ const Programs: React.FC = () => {
                 onChange={(e) => setConversationalInput(e.target.value)}
               />
             </div>
-            <button className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} 
+            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} 
               disabled={!conversationalInput || isParsing}
               onClick={async () => {
                 setIsParsing(true);
@@ -528,15 +786,22 @@ const Programs: React.FC = () => {
               {isParsing ? 'Agent Parsing...' : 'Submit to MIS Agent'}
             </button>
           </div>
-        </div>
+        </ModalOverlay>
       )}
       
       {/* ── Edit Beneficiary Modal ───────────────────────────────────── */}
       {showEditBen && editBen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '1.5rem', position: 'relative' }}>
-            <button onClick={() => setShowEditBen(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn"><X size={20} /></button>
-            <h2 style={{ marginBottom: '1.5rem' }}>Edit Beneficiary</h2>
+        <ModalOverlay onBackdropClick={() => setShowEditBen(false)}>
+          <div
+            className="modal-card modal-card--wide modal-card--tall"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prog-edit-ben-title"
+            style={{ maxWidth: '540px', maxHeight: 'min(90vh, 780px)' }}
+          >
+            <button type="button" onClick={() => setShowEditBen(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="prog-edit-ben-title" style={{ marginBottom: '1rem', paddingRight: '2.5rem' }}>Edit Beneficiary</h2>
             <form onSubmit={handleEditBenSubmit} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
@@ -550,39 +815,125 @@ const Programs: React.FC = () => {
                 <label className="input-label">Location (District, State)</label>
                 <input required type="text" className="input-field" value={editBen.location} onChange={e => setEditBen({ ...editBen, location: e.target.value })} />
               </div>
-              <div className="input-group" style={{ marginBottom: 0 }}>
-                <label className="input-label">Family Size</label>
-                <input type="number" className="input-field" min="1" max="20" value={editBen.familySize} onChange={e => setEditBen({ ...editBen, familySize: Number(e.target.value) })} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Family size</label>
+                  <input type="number" className="input-field" min="1" max="20" value={editBen.familySize} onChange={e => setEditBen({ ...editBen, familySize: Number(e.target.value) })} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Gender</label>
+                  <select className="input-field" value={editBenExtra.gender} onChange={e => setEditBenExtra({ ...editBenExtra, gender: e.target.value })}>
+                    <option value="">—</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                    <option value="other">Other</option>
+                    <option value="prefer_not">Prefer not to say</option>
+                  </select>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <input type="checkbox" id="edit-aadhaar" checked={editBen.aadhaar} onChange={e => setEditBen({ ...editBen, aadhaar: e.target.checked })} />
-                <label htmlFor="edit-aadhaar" style={{ fontSize: '0.875rem' }}>Aadhaar Verified</label>
+                <label htmlFor="edit-aadhaar" style={{ fontSize: '0.875rem' }}>Aadhaar verified</label>
+              </div>
+              <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Phone</label>
+                    <input type="tel" className="input-field" value={editBenExtra.phone} onChange={e => setEditBenExtra({ ...editBenExtra, phone: e.target.value })} />
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Email</label>
+                    <input type="email" className="input-field" value={editBenExtra.email} onChange={e => setEditBenExtra({ ...editBenExtra, email: e.target.value })} />
+                  </div>
+                </div>
+                <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
+                  <label className="input-label">Date of birth</label>
+                  <input type="date" className="input-field" value={editBenExtra.dob} onChange={e => setEditBenExtra({ ...editBenExtra, dob: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Referral source</label>
+                    <select className="input-field" value={editBenExtra.referralSource} onChange={e => setEditBenExtra({ ...editBenExtra, referralSource: e.target.value })}>
+                      <option value="">—</option>
+                      <option value="anganwadi">Anganwadi</option>
+                      <option value="shg">SHG</option>
+                      <option value="camp">Camp</option>
+                      <option value="walk_in">Walk-in</option>
+                      <option value="other_org">Partner</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Referral detail</label>
+                    <input type="text" className="input-field" value={editBenExtra.referralDetail} onChange={e => setEditBenExtra({ ...editBenExtra, referralDetail: e.target.value })} />
+                  </div>
+                </div>
+                <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
+                  <label className="input-label">Vulnerability tags</label>
+                  <input type="text" className="input-field" value={editBenExtra.vulnerabilityTags} onChange={e => setEditBenExtra({ ...editBenExtra, vulnerabilityTags: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">ID type</label>
+                    <select className="input-field" value={editBenExtra.idDocType} onChange={e => setEditBenExtra({ ...editBenExtra, idDocType: e.target.value })}>
+                      <option value="">—</option>
+                      <option value="aadhaar_masked">Aadhaar (masked)</option>
+                      <option value="election_id">Election ID</option>
+                      <option value="ration_card">Ration card</option>
+                      <option value="birth_cert">Birth certificate</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">ID reference</label>
+                    <input type="text" className="input-field" value={editBenExtra.idDocRef} onChange={e => setEditBenExtra({ ...editBenExtra, idDocRef: e.target.value })} />
+                  </div>
+                </div>
+                <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
+                  <label className="input-label">Case notes</label>
+                  <textarea className="input-field" rows={2} value={editBenExtra.notes} onChange={e => setEditBenExtra({ ...editBenExtra, notes: e.target.value })} />
+                </div>
+                <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
+                  <input type="checkbox" id="edit-consentBen" checked={editBenExtra.consentData} onChange={e => setEditBenExtra({ ...editBenExtra, consentData: e.target.checked })} />
+                  <label htmlFor="edit-consentBen" style={{ fontSize: '0.875rem' }}>Consent on file for programme data</label>
+                </div>
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Beneficiary</button>
             </form>
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* ── Delete Confirm Modal ───────────────────────────────────── */}
       {showDeleteBenConfirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.5rem', position: 'relative', textAlign: 'center' }}>
+        <ModalOverlay onBackdropClick={() => setShowDeleteBenConfirm(false)}>
+          <div
+            className="modal-card modal-card--narrow"
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="prog-del-ben-title"
+            style={{ textAlign: 'center' }}
+          >
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
               <div style={{ background: 'var(--color-danger)', color: 'white', padding: '1rem', borderRadius: '50%' }}>
                 <Trash2 size={32} />
               </div>
             </div>
-            <h2 style={{ marginBottom: '0.5rem' }}>Delete Beneficiary?</h2>
+            <h2 id="prog-del-ben-title" style={{ marginBottom: '0.5rem' }}>Delete Beneficiary?</h2>
             <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
               Are you sure you want to delete <strong>{benToDelete?.name}</strong>? This action cannot be undone.
             </p>
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-              <button className="btn btn-secondary" onClick={() => setShowDeleteBenConfirm(false)} style={{ flex: 1 }}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleDeleteBen} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowDeleteBenConfirm(false)} style={{ flex: 1 }}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={handleDeleteBen} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

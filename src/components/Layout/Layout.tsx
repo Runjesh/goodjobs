@@ -16,7 +16,7 @@ import { useAuth, ROLE_META } from '../../context/AuthContext';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
-import { useStore } from '../../store/useStore';
+import { useStore, type ComplianceDocument } from '../../store/useStore';
 import { getPageVariants } from '../../motion/variants';
 import './Layout.css';
 
@@ -43,7 +43,7 @@ const Layout: React.FC = () => {
   const [isDarkMode,     setIsDarkMode]     = useState(false);
   const { user, can } = useAuth();
   const { t, lang, setLanguage } = useTranslation();
-  const { setDonors, setTransactions, setCampaigns, setCsrCards } = useStore();
+  const { setDonors, setTransactions, setCampaigns, setCsrCards, setComplianceDocs } = useStore();
   const { setVolunteers, setBeneficiaries } = useStore();
   const navigate       = useNavigate();
   const location       = useLocation();
@@ -192,6 +192,44 @@ const Layout: React.FC = () => {
     return () => { cancelled = true; };
   }, [can, setBeneficiaries]);
 
+  useEffect(() => {
+    if (!can('compliance', 'canView')) return;
+    let cancelled = false;
+    const mapApiComplianceDoc = (d: Record<string, unknown>): ComplianceDocument => {
+      const st = String(d.status ?? 'Valid');
+      const status: ComplianceDocument['status'] =
+        st === 'Expired' || st === 'Expiring Soon' ? st : 'Valid';
+      const det = d.details;
+      return {
+        id: String(d.id ?? ''),
+        name: String(d.name ?? ''),
+        type: String(d.doc_type ?? ''),
+        status,
+        expiry: String(d.expiry_date ?? ''),
+        uploadedAt: String(d.created_at ?? '').slice(0, 10),
+        details:
+          typeof det === 'object' && det !== null && !Array.isArray(det)
+            ? (det as Record<string, unknown>)
+            : undefined,
+      };
+    };
+    const run = async () => {
+      try {
+        const res = await apiFetch('/compliance/documents');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (Array.isArray(data.documents)) {
+          setComplianceDocs(data.documents.map((x: Record<string, unknown>) => mapApiComplianceDoc(x)));
+        }
+      } catch {
+        /* keep store */
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [can, setComplianceDocs]);
+
   // Dark mode init
   useEffect(() => {
     const isDark = localStorage.getItem('theme') === 'dark' || 
@@ -317,9 +355,10 @@ const Layout: React.FC = () => {
           {/* Actions */}
           <div className="header-actions">
             <select
+              className="header-lang-select"
               value={lang}
               onChange={(e) => setLanguage(e.target.value as any)}
-              style={{ background: 'transparent', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 6px', fontSize: '0.8rem', color: 'var(--color-text-secondary)', outline: 'none', cursor: 'pointer' }}
+              aria-label="Interface language"
             >
               <option value="en">English</option>
               <option value="hi">हिंदी (HI)</option>
@@ -376,7 +415,9 @@ const Layout: React.FC = () => {
               exit="exit"
               style={{ minHeight: '100%' }}
             >
-              <Outlet />
+              <div className="page-content-inner">
+                <Outlet />
+              </div>
             </motion.div>
           </AnimatePresence>
         </div>

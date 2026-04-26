@@ -78,6 +78,28 @@
   color: var(--color-success);
 }
 
+.csr-card-meta {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  margin-top: 0.25rem;
+  line-height: 1.35;
+}
+
+.csr-form-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.csr-form-section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.75rem;
+}
+
 .csr-project {
   font-size: 0.75rem;
   color: var(--color-text-secondary);

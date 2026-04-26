@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 import { tasksInboxHref, notificationTasksHref } from '../../utils/inboxLinks';
 import { listItemEnterDelay } from '../../motion/variants';
+import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import './Dashboard.css';
 
 const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
@@ -598,7 +599,7 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Metrics & Anomaly section below */}
-      <div style={{ marginBottom: '2rem' }}>
+      <div className="metrics-row">
         <div className="card metric-card">
           <div className="metric-header">
             <span>Total Raised (YTD)</span>
@@ -804,11 +805,18 @@ const Dashboard: React.FC = () => {
 
       {/* Activity Log Modal */}
       {showWhatsApp && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)' }}>
-          <div className="card" style={{ width: '100%', maxWidth: '500px', maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div className="card-header flex justify-between items-center">
-              <h3 className="card-title flex items-center gap-2"><MessageCircle size={18} color="#16a34a" /> Activity Log</h3>
-              <button className="action-btn" onClick={() => setShowWhatsApp(false)}><X size={20} /></button>
+        <ModalOverlay onBackdropClick={() => setShowWhatsApp(false)}>
+          <div
+            className="modal-card modal-card--wide"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dash-activity-title"
+            style={{ maxHeight: '70vh', padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+          >
+            <div className="card-header flex justify-between items-center" style={{ flexShrink: 0 }}>
+              <h3 id="dash-activity-title" className="card-title flex items-center gap-2"><MessageCircle size={18} color="#16a34a" /> Activity Log</h3>
+              <button type="button" className="action-btn" aria-label="Close activity log" onClick={() => setShowWhatsApp(false)}><X size={20} /></button>
             </div>
             <div ref={activityLogScrollRef} style={{ overflowY: 'auto', padding: '1rem 1.5rem 1.5rem', flex: 1, minHeight: 0 }}>
               {activityLoading ? (
@@ -865,7 +873,7 @@ const Dashboard: React.FC = () => {
               )}
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );
