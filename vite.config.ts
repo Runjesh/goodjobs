@@ -13,6 +13,11 @@ const NAV_FALLBACK_ALLOWLIST = [
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    host: '0.0.0.0',
+    port: 5000,
+    allowedHosts: true,
+  },
   plugins: [
     react(),
     VitePWA({
