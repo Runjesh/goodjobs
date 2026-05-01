@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   BarChart2, TrendingUp, Users, IndianRupee,
   Activity, AlertTriangle, CheckCircle2, Target,
   ArrowUpRight, ArrowDownRight, BarChart, Download,
-  Sparkles, Info, UserCheck, ChevronRight
+  Sparkles, Info, UserCheck, ChevronRight, X
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
@@ -167,11 +167,67 @@ const KPICard: React.FC<KPICardProps & { onClick: () => void }> = ({
   </motion.div>
 );
 
+// ── Funder export dialog ──────────────────────────────────────────────────────
+const FUNDER_OPTIONS = ['Tata Trusts', 'HDFC Bank CSR', 'Azim Premji Foundation', 'GiveIndia', 'Infosys Foundation', 'Other'];
+
+interface ExportDialogProps {
+  onClose: () => void;
+  onExport: (funder: string, period: Period) => void;
+}
+const ExportDialog: React.FC<ExportDialogProps> = ({ onClose, onExport }) => {
+  const [funder, setFunder] = useState(FUNDER_OPTIONS[0]);
+  const [p,      setPeriod] = useState<Period>('30d');
+  return (
+    <div className="export-dialog-overlay" onClick={onClose}>
+      <motion.div
+        className="export-dialog"
+        initial={{ opacity: 0, scale: 0.95, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="export-dialog-header">
+          <h3>Export Funder Data</h3>
+          <button className="export-dialog-close" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="export-dialog-body">
+          <div className="export-dialog-field">
+            <label>Which funder?</label>
+            <select value={funder} onChange={e => setFunder(e.target.value)}>
+              {FUNDER_OPTIONS.map(f => <option key={f}>{f}</option>)}
+            </select>
+          </div>
+          <div className="export-dialog-field">
+            <label>Which period?</label>
+            <select value={p} onChange={e => setPeriod(e.target.value as Period)}>
+              {PERIODS.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="export-dialog-footer">
+          <button className="export-dialog-cancel" onClick={onClose}>Cancel</button>
+          <button className="export-dialog-confirm" onClick={() => onExport(funder, p)}>
+            <Download size={14} /> Generate file
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 // ── Main Component ────────────────────────────────────────────────────────────
 const Insights: React.FC = () => {
-  const [period, setPeriod] = useState<Period>('30d');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawPeriod = searchParams.get('period') as Period | null;
+  const period: Period = rawPeriod && ['7d','30d','90d','year'].includes(rawPeriod) ? rawPeriod : '30d';
+
+  const [showExportDialog, setShowExportDialog] = useState(false);
   const navigate = useNavigate();
   const { donors, transactions, campaigns, beneficiaries, complianceDocs } = useStore();
+
+  const setPeriod = (p: Period) => {
+    setSearchParams(params => { params.set('period', p); return params; }, { replace: true });
+  };
 
   const now = Date.now();
   const periodDays = period === '7d' ? 7 : period === '30d' ? 30 : period === '90d' ? 90 : 365;
@@ -213,22 +269,30 @@ const Insights: React.FC = () => {
     [retentionRate, campaignProgress, complianceScore, period]
   );
 
-  const handleFunderExport = () => {
+  const doFunderExport = (funder: string, exportPeriod: Period) => {
+    const pDays = exportPeriod === '7d' ? 7 : exportPeriod === '30d' ? 30 : exportPeriod === '90d' ? 90 : 365;
+    const pLabel = PERIODS.find(p => p.id === exportPeriod)?.label ?? exportPeriod;
+    const periodLabel = exportPeriod === 'year' ? 'FY2026' : `${pDays}d`;
+    const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const funderSlug = funder.replace(/\s+/g, '');
+    const filename = `${funderSlug}_GoodJobs_${pLabel.replace(/\s/g,'')}_${today}.csv`;
+
     const rows = [
       ['Metric', 'Value', 'Period', 'Sector Benchmark'],
-      ['Active Beneficiaries', activeBeneficiaries.length, period, SECTOR_BENCHMARKS.retentionRate + '% retention'],
-      ['Funds Raised', `₹${periodTotal.toFixed(0)}`, period, '—'],
-      ['Campaign Progress', `${campaignProgress}%`, period, `${SECTOR_BENCHMARKS.campaignProgress}%`],
-      ['Compliance Score', `${complianceScore}%`, period, `${SECTOR_BENCHMARKS.complianceScore}%`],
-      ['Donor Completeness', `${donorCompleteness || 72}%`, period, `${SECTOR_BENCHMARKS.donorCompleteness}%`],
+      ['Active Beneficiaries', activeBeneficiaries.length, pLabel, SECTOR_BENCHMARKS.retentionRate + '% retention avg'],
+      ['Funds Raised', `₹${periodTotal.toFixed(0)}`, pLabel, '—'],
+      ['Campaign Progress', `${campaignProgress}%`, pLabel, `${SECTOR_BENCHMARKS.campaignProgress}%`],
+      ['Compliance Score', `${complianceScore}%`, pLabel, `${SECTOR_BENCHMARKS.complianceScore}%`],
+      ['Donor Completeness', `${donorCompleteness || 72}%`, pLabel, `${SECTOR_BENCHMARKS.donorCompleteness}%`],
     ];
     const csv = rows.map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href = url; a.download = `goodjobs-impact-data-${period}.csv`;
+    a.href = url; a.download = filename;
     a.click(); URL.revokeObjectURL(url);
-    toast.success('Funder-formatted data exported');
+    setShowExportDialog(false);
+    toast.success(`Exported: ${filename}`);
   };
 
   return (
@@ -251,7 +315,7 @@ const Insights: React.FC = () => {
               </button>
             ))}
           </div>
-          <button className="insights-export-btn" onClick={handleFunderExport} title="Export funder-formatted CSV">
+          <button className="insights-export-btn" onClick={() => setShowExportDialog(true)} title="Export funder-formatted CSV">
             <Download size={14} /> Export data
           </button>
         </div>
@@ -292,7 +356,7 @@ const Insights: React.FC = () => {
         />
       </div>
 
-      {/* ── "So what?" panel ──────────────────────────────────────── */}
+      {/* ── "So what?" panel — headline + 2 supporting lines ────── */}
       <div className="insights-sowhat-card">
         <div className="insights-sowhat-header">
           <div className="insights-sowhat-icon">
@@ -301,24 +365,46 @@ const Insights: React.FC = () => {
           <h3 className="insights-sowhat-title">What the data means</h3>
           <span className="insights-sowhat-badge">AI interpretation</span>
         </div>
-        <div className="insights-sowhat-list">
-          {interpretations.map((item, i) => (
+        {interpretations.length > 0 && (
+          <>
+            {/* Bold headline — most important signal */}
             <motion.div
-              key={item.id}
-              className={`insights-sowhat-item insights-sowhat-item--${item.type}`}
-              initial={{ opacity: 0, x: -6 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.07 }}
+              className={`insights-sowhat-headline insights-sowhat-headline--${interpretations[0].type}`}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+              key={`headline-${period}`}
             >
-              <div className="insights-sowhat-item-icon">
-                {item.type === 'positive' && <CheckCircle2 size={14} />}
-                {item.type === 'warning'  && <AlertTriangle size={14} />}
-                {item.type === 'info'     && <Info size={14} />}
+              <div className="insights-sowhat-headline-icon">
+                {interpretations[0].type === 'positive' && <CheckCircle2 size={15} />}
+                {interpretations[0].type === 'warning'  && <AlertTriangle size={15} />}
+                {interpretations[0].type === 'info'     && <Info size={15} />}
               </div>
-              <p className="insights-sowhat-text">{item.text}</p>
+              <p className="insights-sowhat-headline-text">{interpretations[0].text}</p>
             </motion.div>
-          ))}
-        </div>
+            {/* Two supporting lines */}
+            {interpretations.length > 1 && (
+              <div className="insights-sowhat-supporting">
+                {interpretations.slice(1, 3).map((item, i) => (
+                  <motion.div
+                    key={item.id}
+                    className={`insights-sowhat-item insights-sowhat-item--${item.type}`}
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 + i * 0.07 }}
+                  >
+                    <div className="insights-sowhat-item-icon">
+                      {item.type === 'positive' && <CheckCircle2 size={13} />}
+                      {item.type === 'warning'  && <AlertTriangle size={13} />}
+                      {item.type === 'info'     && <Info size={13} />}
+                    </div>
+                    <p className="insights-sowhat-text">{item.text}</p>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* ── Charts Row ────────────────────────────────────────────── */}
@@ -514,6 +600,12 @@ const Insights: React.FC = () => {
           <div className="insights-impact-label">Compliance Health</div>
         </div>
       </div>
+      {/* ── Export dialog ──────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showExportDialog && (
+          <ExportDialog onClose={() => setShowExportDialog(false)} onExport={doFunderExport} />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

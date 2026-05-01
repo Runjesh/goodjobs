@@ -45,6 +45,17 @@ const REPORT_TYPES: { id: ReportType; label: string; icon: React.ElementType; de
   },
 ];
 
+// Data readiness scores per report (simulated — in prod, computed from live data completeness)
+const DATA_READINESS: Record<string, number> = {
+  '1': 94,
+  '2': 81,
+  '3': 100,
+  '4': 87,
+  '5': 63,
+};
+
+const REPORTS_READY_FOR_DRAFT = 3; // how many have enough data to auto-draft
+
 interface MockReport {
   id: string;
   title: string;
@@ -119,6 +130,43 @@ const Reports: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* ── AI Assembler banner — proactive, at top ───────────────── */}
+      {can('reports', 'canEdit') && (
+        <div className="reports-ai-banner reports-ai-banner--top">
+          <div className="reports-ai-icon">
+            <Sparkles size={18} />
+          </div>
+          <div className="reports-ai-content">
+            <div className="reports-ai-title">
+              {REPORTS_READY_FOR_DRAFT} reports have enough data to auto-draft right now
+            </div>
+            <div className="reports-ai-desc">
+              The AI agent pre-fills reports from live program data, financials, and M&E records. Review in minutes.
+            </div>
+          </div>
+          <div className="reports-ai-actions">
+            <button
+              className="reports-ai-btn reports-ai-btn--primary"
+              onClick={() => handleDraftReport('funder')}
+              disabled={!!draftingReport}
+            >
+              {draftingReport ? '…' : 'Draft All'}
+            </button>
+            {REPORT_TYPES.map(rt => (
+              <button
+                key={rt.id}
+                className="reports-ai-btn"
+                style={{ borderColor: rt.color, color: rt.color }}
+                onClick={() => handleDraftReport(rt.id)}
+                disabled={draftingReport === rt.id}
+              >
+                {draftingReport === rt.id ? '…' : rt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Status KPIs ───────────────────────────────────────────── */}
       <div className="reports-kpi-row">
@@ -215,6 +263,17 @@ const Reports: React.FC = () => {
                     {' · '}
                     <span className="reports-item-date">{report.date}</span>
                   </div>
+                  {DATA_READINESS[report.id] !== undefined && (
+                    <div className="reports-item-readiness">
+                      <div
+                        className="reports-item-readiness-bar"
+                        style={{ width: `${DATA_READINESS[report.id]}%`, background: DATA_READINESS[report.id] >= 85 ? '#16A34A' : DATA_READINESS[report.id] >= 60 ? '#d97706' : '#DC2626' }}
+                      />
+                      <span className="reports-item-readiness-label" style={{ color: DATA_READINESS[report.id] >= 85 ? '#16A34A' : DATA_READINESS[report.id] >= 60 ? '#d97706' : '#DC2626' }}>
+                        {DATA_READINESS[report.id]}% data ready
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <span className="reports-item-badge" style={{ background: sm.bg, color: sm.color }}>
                   {sm.label}
@@ -242,34 +301,6 @@ const Reports: React.FC = () => {
         </div>
       </div>
 
-      {/* ── AI Draft Prompt ───────────────────────────────────────── */}
-      {can('reports', 'canEdit') && (
-        <div className="reports-ai-banner">
-          <div className="reports-ai-icon">
-            <Sparkles size={20} />
-          </div>
-          <div className="reports-ai-content">
-            <div className="reports-ai-title">AI Report Assembler</div>
-            <div className="reports-ai-desc">
-              The AI agent can pre-fill any report from live program data, financials, and M&E records.
-              Review and approve in minutes — not hours.
-            </div>
-          </div>
-          <div className="reports-ai-actions">
-            {REPORT_TYPES.map(rt => (
-              <button
-                key={rt.id}
-                className="reports-ai-btn"
-                style={{ borderColor: rt.color, color: rt.color }}
-                onClick={() => handleDraftReport(rt.id)}
-                disabled={draftingReport === rt.id}
-              >
-                {draftingReport === rt.id ? '…' : `Draft ${rt.label}`}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
