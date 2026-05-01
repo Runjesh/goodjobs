@@ -1,0 +1,396 @@
+/* ═══════════════════════════════════════════════════════
+   Insights — M&E Dashboard
+   ═══════════════════════════════════════════════════════ */
+
+.insights-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* ── Header ──────────────────────────────────────────── */
+.insights-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.insights-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+.insights-subtitle {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+  margin-top: 0.25rem;
+  font-weight: 500;
+}
+
+.insights-period-selector {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  padding: 0.25rem;
+}
+
+.insights-period-btn {
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--radius-lg);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+.insights-period-btn:hover { background: var(--color-bg-main); }
+.insights-period-btn.active {
+  background: var(--color-primary);
+  color: white;
+  font-weight: 600;
+}
+
+/* ── KPI Row ─────────────────────────────────────────── */
+.insights-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.insights-kpi-card {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-xs);
+  position: relative;
+}
+.insights-kpi-card:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.insights-kpi-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.insights-kpi-body { flex: 1; min-width: 0; }
+
+.insights-kpi-value {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: -0.025em;
+  line-height: 1;
+}
+
+.insights-kpi-label {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  margin-top: 3px;
+  font-weight: 500;
+}
+
+.insights-kpi-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.insights-kpi-change.positive { background: #d1fae5; color: #059669; }
+.insights-kpi-change.negative { background: #fee2e2; color: #DC2626; }
+
+/* ── Charts Row ──────────────────────────────────────── */
+.insights-charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+/* ── Card ────────────────────────────────────────────── */
+.insights-card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-xs);
+}
+
+.insights-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-bottom: 1.25rem;
+}
+
+.insights-card-icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.insights-card-title {
+  flex: 1;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.insights-card-badge {
+  padding: 3px 8px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.insights-empty {
+  font-size: 0.875rem;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  padding: 1.5rem 0;
+  line-height: 1.6;
+}
+
+.insights-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: gap var(--transition-fast);
+}
+.insights-card-link:hover { gap: 5px; }
+
+/* ── Beneficiary breakdown ───────────────────────────── */
+.insights-ben-breakdown {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.insights-ben-donut {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: conic-gradient(#059669 var(--pct, 75%), #e2e8f0 0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 6px solid var(--color-bg-card);
+  box-shadow: 0 0 0 3px #059669;
+}
+
+.insights-ben-donut-inner {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--color-bg-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.insights-ben-donut-value {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1;
+}
+.insights-ben-donut-label {
+  font-size: 0.625rem;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+}
+
+.insights-ben-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.insights-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.insights-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Campaigns list ──────────────────────────────────── */
+.insights-campaigns-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.insights-campaign-row {}
+
+.insights-campaign-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+
+.insights-campaign-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.insights-campaign-pct {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.insights-campaign-bar-track {
+  height: 6px;
+  background: var(--color-bg-main);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.insights-campaign-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+}
+
+/* ── Data Quality ────────────────────────────────────── */
+.insights-dq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.dq-bar-row {
+  display: grid;
+  grid-template-columns: 1fr 160px 44px;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dq-bar-label {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.dq-bar-track {
+  height: 8px;
+  background: var(--color-bg-main);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.dq-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+}
+
+.dq-bar-score {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+/* ── Impact Row ──────────────────────────────────────── */
+.insights-impact-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.insights-impact-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.5rem;
+  padding: 1.5rem 1rem;
+  background: var(--color-bg-card);
+  border: 2px solid;
+  border-radius: var(--radius-xl);
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-xs);
+}
+.insights-impact-card:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+}
+
+.insights-impact-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.insights-impact-value {
+  font-size: 1.625rem;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.insights-impact-label {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+}
+
+/* ── Mobile ──────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .insights-kpi-row    { grid-template-columns: repeat(2, 1fr); }
+  .insights-charts-row { grid-template-columns: 1fr; }
+  .insights-impact-row { grid-template-columns: repeat(2, 1fr); }
+  .insights-header     { flex-direction: column; }
+  .insights-period-selector { flex-wrap: wrap; }
+  .dq-bar-row { grid-template-columns: 1fr 80px 36px; }
+}

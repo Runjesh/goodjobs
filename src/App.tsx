@@ -6,19 +6,22 @@ import Layout from './components/Layout/Layout';
 import PageLoading from './components/ui/PageLoading';
 import { Toaster } from 'react-hot-toast';
 
-const Dashboard = lazy(() => import('./pages/Dashboard/Dashboard'));
-const Tasks = lazy(() => import('./pages/Tasks/Tasks'));
-const Fundraising = lazy(() => import('./pages/Fundraising/Fundraising'));
-const CRM = lazy(() => import('./pages/CRM/CRM'));
-const Compliance = lazy(() => import('./pages/Compliance/Compliance'));
-const Finance = lazy(() => import('./pages/Finance/Finance'));
-const CSR = lazy(() => import('./pages/CSR/CSR'));
-const Programs = lazy(() => import('./pages/Programs/Programs'));
-const Volunteers = lazy(() => import('./pages/Volunteers/Volunteers'));
-const AgentHQ = lazy(() => import('./pages/AgentHQ/AgentHQ'));
-const Login = lazy(() => import('./pages/Auth/Login'));
+const Dashboard    = lazy(() => import('./pages/Dashboard/Dashboard'));
+const Tasks        = lazy(() => import('./pages/Tasks/Tasks'));
+const Funding      = lazy(() => import('./pages/Funding/Funding'));
+const Insights     = lazy(() => import('./pages/Insights/Insights'));
+const Reports      = lazy(() => import('./pages/Reports/Reports'));
+const Fundraising  = lazy(() => import('./pages/Fundraising/Fundraising'));
+const CRM          = lazy(() => import('./pages/CRM/CRM'));
+const Compliance   = lazy(() => import('./pages/Compliance/Compliance'));
+const Finance      = lazy(() => import('./pages/Finance/Finance'));
+const CSR          = lazy(() => import('./pages/CSR/CSR'));
+const Programs     = lazy(() => import('./pages/Programs/Programs'));
+const Volunteers   = lazy(() => import('./pages/Volunteers/Volunteers'));
+const AgentHQ      = lazy(() => import('./pages/AgentHQ/AgentHQ'));
+const Login        = lazy(() => import('./pages/Auth/Login'));
 const DonationPage = lazy(() => import('./pages/DonationPage/DonationPage'));
-const Settings = lazy(() => import('./pages/Settings/Settings'));
+const Settings     = lazy(() => import('./pages/Settings/Settings'));
 
 function App() {
   return (
@@ -60,17 +63,27 @@ function App() {
               </ProtectedRoute>
             }
           >
+            {/* ── Primary Workspaces ─────────────────────────────── */}
             <Route index element={<Dashboard />} />
-            <Route path="tasks" element={<ProtectedRoute module="tasks"><Tasks /></ProtectedRoute>} />
-            <Route path="agent-hq" element={<ProtectedRoute module="agent-hq"><AgentHQ /></ProtectedRoute>} />
+            <Route path="programs"    element={<ProtectedRoute module="programs"><Programs /></ProtectedRoute>} />
+            <Route path="funding"     element={<ProtectedRoute module="funding"><Funding /></ProtectedRoute>} />
+            <Route path="insights"    element={<ProtectedRoute module="insights"><Insights /></ProtectedRoute>} />
+            <Route path="reports"     element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />
+
+            {/* ── Tools ─────────────────────────────────────────── */}
+            <Route path="tasks"       element={<ProtectedRoute module="tasks"><Tasks /></ProtectedRoute>} />
+            <Route path="agent-hq"   element={<ProtectedRoute module="agent-hq"><AgentHQ /></ProtectedRoute>} />
+
+            {/* ── Module pages (accessible from Funding workspace) ─ */}
             <Route path="fundraising" element={<ProtectedRoute module="fundraising"><Fundraising /></ProtectedRoute>} />
-            <Route path="crm" element={<ProtectedRoute module="crm"><CRM /></ProtectedRoute>} />
-            <Route path="finance" element={<ProtectedRoute module="finance"><Finance /></ProtectedRoute>} />
-            <Route path="programs" element={<ProtectedRoute module="programs"><Programs /></ProtectedRoute>} />
-            <Route path="csr" element={<ProtectedRoute module="csr"><CSR /></ProtectedRoute>} />
-            <Route path="volunteers" element={<ProtectedRoute module="volunteers"><Volunteers /></ProtectedRoute>} />
-            <Route path="compliance" element={<ProtectedRoute module="compliance"><Compliance /></ProtectedRoute>} />
-            <Route path="settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
+            <Route path="crm"         element={<ProtectedRoute module="crm"><CRM /></ProtectedRoute>} />
+            <Route path="finance"     element={<ProtectedRoute module="finance"><Finance /></ProtectedRoute>} />
+            <Route path="csr"         element={<ProtectedRoute module="csr"><CSR /></ProtectedRoute>} />
+            <Route path="volunteers"  element={<ProtectedRoute module="volunteers"><Volunteers /></ProtectedRoute>} />
+            <Route path="compliance"  element={<ProtectedRoute module="compliance"><Compliance /></ProtectedRoute>} />
+
+            {/* ── System ────────────────────────────────────────── */}
+            <Route path="settings"    element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
           </Route>
         </Routes>
       </Suspense>

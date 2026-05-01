@@ -9,7 +9,7 @@
 
 /* Left Panel */
 .auth-left {
-  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4f46e5 100%);
+  background: linear-gradient(135deg, #0d3d39 0%, #134e4a 40%, #0F766E 100%);
   padding: 3rem;
   display: flex;
   flex-direction: column;
@@ -24,7 +24,7 @@
   position: absolute;
   width: 400px;
   height: 400px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.3) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.25) 0%, transparent 70%);
   top: -100px;
   right: -100px;
   border-radius: 50%;

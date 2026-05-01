@@ -6,11 +6,11 @@
 
 :root {
   /* Brand Colors */
-  --color-primary:        #4f46e5;
-  --color-primary-hover:  #4338ca;
-  --color-primary-light:  #e0e7ff;
-  --color-secondary:      #8b5cf6;
-  --color-accent:         #06b6d4;
+  --color-primary:        #0F766E;
+  --color-primary-hover:  #0d6561;
+  --color-primary-light:  #ccfbf1;
+  --color-secondary:      #6366f1;
+  --color-accent:         #f59e0b;
 
   /* Semantic Colors */
   --color-success:        #10b981;
@@ -161,9 +161,9 @@ html.dark {
   --color-border-light:   #1e293b;
 
   /* Adjust Primary for better contrast */
-  --color-primary:        #818cf8;
-  --color-primary-hover:  #6366f1;
-  --color-primary-light:  #3730a3;
+  --color-primary:        #2dd4bf;
+  --color-primary-hover:  #14b8a6;
+  --color-primary-light:  #134e4a;
 
   /* Shadows */
   --shadow-xs:  0 1px 2px rgba(0,0,0,0.25);

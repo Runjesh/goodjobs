@@ -1,880 +1,533 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, useReducedMotion } from 'framer-motion';
-import { IndianRupee, Users, TrendingUp, AlertCircle, ArrowUpRight, ArrowDownRight, Bot, ShieldCheck, MessageCircle, X, Bell, Loader2, Download } from 'lucide-react';
+import { motion } from 'framer-motion';
+import {
+  AlertCircle, AlertTriangle, CheckCircle2, ArrowRight,
+  IndianRupee, Users, FileText, ShieldCheck, HeartHandshake,
+  ClipboardList, Wallet, BarChart2, Cpu, CalendarCheck,
+  TrendingUp, RefreshCw
+} from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
-import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
-import { tasksInboxHref, notificationTasksHref } from '../../utils/inboxLinks';
-import { listItemEnterDelay } from '../../motion/variants';
-import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import './Dashboard.css';
 
 const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
 
-const quickActions = [
-  { label: 'Log Donation', icon: '💸', path: '/fundraising' },
-  { label: 'Enroll Beneficiary', icon: '👤', path: '/programs' },
-  { label: 'Add CSR Lead', icon: '🏢', path: '/csr' },
-  { label: 'Upload Compliance Doc', icon: '📄', path: '/compliance' },
-];
+// ── Greeting ─────────────────────────────────────────────────────────────────
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
-const Dashboard: React.FC = () => {
-  const navigate = useNavigate();
-  const reducedMotion = useReducedMotion();
-  const { user } = useAuth();
-  const canRunAnnualDraft = user?.role === 'ed';
-  const { donors, transactions, campaigns, complianceDocs } = useStore();
-  const [showWhatsApp, setShowWhatsApp] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [forecastData, setForecastData] = useState<{date: string, amount: number, is_estimate: boolean}[]>([]);
-  const [anomaly, setAnomaly] = useState<{has_anomaly: boolean, message: string} | null>(null);
-  const [reportDrafting, setReportDrafting] = useState(false);
-  const [morningBrief, setMorningBrief] = useState<any[]>([]);
-  const [briefHandled, setBriefHandled] = useState<any[]>([]);
-  const [isBriefLoading, setIsBriefLoading] = useState(true);
-  const [inboxItems, setInboxItems] = useState<any[]>([]);
-  const [inboxLoading, setInboxLoading] = useState(true);
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [activityLogs, setActivityLogs] = useState<any[]>([]);
-  const [activityLoading, setActivityLoading] = useState(false);
+// ── Priority Item Types ──────────────────────────────────────────────────────
+type PriorityLevel = 'urgent' | 'attention' | 'well';
 
-  const activityLogScrollRef = useRef<HTMLDivElement>(null);
-  const activityLogVirtualizer = useVirtualizer({
-    count: activityLogs.length,
-    getScrollElement: () => activityLogScrollRef.current,
-    estimateSize: () => 76,
-    overscan: 12,
+interface PriorityItem {
+  id: string;
+  text: string;
+  action?: string;
+  path?: string;
+  level: PriorityLevel;
+}
+
+// ── Role-based quick actions ──────────────────────────────────────────────────
+const ROLE_QUICK_ACTIONS: Record<string, { label: string; icon: React.ElementType; path: string; color: string }[]> = {
+  ed: [
+    { label: 'View Funding', icon: Wallet, path: '/funding', color: '#0F766E' },
+    { label: 'Programs', icon: ClipboardList, path: '/programs', color: '#059669' },
+    { label: 'Reports', icon: FileText, path: '/reports', color: '#7c3aed' },
+    { label: 'AI Copilot', icon: Cpu, path: '/agent-hq', color: '#6366f1' },
+  ],
+  finance: [
+    { label: 'Funding', icon: Wallet, path: '/funding', color: '#0891b2' },
+    { label: 'Reports', icon: FileText, path: '/reports', color: '#7c3aed' },
+    { label: 'Insights', icon: BarChart2, path: '/insights', color: '#059669' },
+    { label: 'Compliance', icon: ShieldCheck, path: '/compliance', color: '#d97706' },
+  ],
+  programs: [
+    { label: 'Programs', icon: ClipboardList, path: '/programs', color: '#059669' },
+    { label: 'Volunteers', icon: CalendarCheck, path: '/volunteers', color: '#0891b2' },
+    { label: 'Insights', icon: BarChart2, path: '/insights', color: '#7c3aed' },
+    { label: 'Reports', icon: FileText, path: '/reports', color: '#0F766E' },
+  ],
+  field: [
+    { label: 'Programs', icon: ClipboardList, path: '/programs', color: '#059669' },
+    { label: 'Volunteers', icon: CalendarCheck, path: '/volunteers', color: '#0891b2' },
+    { label: 'Tasks', icon: CheckCircle2, path: '/tasks', color: '#d97706' },
+    { label: 'Reports', icon: FileText, path: '/reports', color: '#0F766E' },
+  ],
+  board: [
+    { label: 'Insights', icon: BarChart2, path: '/insights', color: '#7c3aed' },
+    { label: 'Reports', icon: FileText, path: '/reports', color: '#0F766E' },
+    { label: 'Funding', icon: Wallet, path: '/funding', color: '#0891b2' },
+    { label: 'Programs', icon: ClipboardList, path: '/programs', color: '#059669' },
+  ],
+};
+
+// ── Derive priorities from store data ────────────────────────────────────────
+function deriveFromStore(
+  role: string,
+  donors: any[],
+  transactions: any[],
+  campaigns: any[],
+  beneficiaries: any[],
+  complianceDocs: any[]
+): PriorityItem[] {
+  const items: PriorityItem[] = [];
+
+  // ── Urgent ────────────────────────────────────────────────────────────────
+  const expiringDocs = complianceDocs.filter(d => d.status === 'Expiring Soon' || d.status === 'Expired');
+  if (expiringDocs.length > 0) {
+    items.push({
+      id: 'exp-docs',
+      text: `${expiringDocs.length} compliance document${expiringDocs.length > 1 ? 's' : ''} expiring soon`,
+      action: 'View',
+      path: '/compliance',
+      level: 'urgent',
+    });
+  }
+
+  const pendingReceipts = transactions.filter((t: any) => t.receipt_status === 'pending' || !t.receipt_number);
+  if (pendingReceipts.length > 3) {
+    items.push({
+      id: 'receipts',
+      text: `${pendingReceipts.length} donor receipts pending — action required`,
+      action: 'Generate',
+      path: '/funding',
+      level: 'urgent',
+    });
+  }
+
+  const nowMs = Date.now();
+  const lapsedDonors = donors.filter((d: any) => {
+    if (!d.lastGift) return false;
+    const last = new Date(d.lastGift).getTime();
+    return nowMs - last > 180 * 24 * 60 * 60 * 1000;
   });
+  if (lapsedDonors.length > 0 && (role === 'ed' || role === 'finance')) {
+    items.push({
+      id: 'lapsed',
+      text: `${lapsedDonors.length} donor${lapsedDonors.length > 1 ? 's' : ''} lapsed — no gift in 6+ months`,
+      action: 'Follow up',
+      path: '/funding',
+      level: 'urgent',
+    });
+  }
 
-  const activityFeed: { id: string; icon: string; text: string; time: string; color: string; tasksPath: string }[] =
-    (notifications || []).slice(0, 6).map((n: any, idx: number) => ({
-      id: String(n?.id ?? idx),
-      icon: n?.type === 'urgent' ? '⚠️' : n?.type === 'agent' ? '🤖' : '📌',
-      text: String(n?.message || n?.title || 'Update'),
-      time: String(n?.time || ''),
-      color: n?.type === 'urgent' ? 'var(--color-warning)' : n?.type === 'agent' ? 'var(--color-secondary)' : 'var(--color-text-tertiary)',
-      tasksPath: notificationTasksHref(n),
-    }));
-  useEffect(() => {
-    const fetchAnalytics = async () => {
-      const uid = user?.id || '';
-      const role = user?.role || '';
-      try {
-        try {
-          const raw = localStorage.getItem(BRIEF_CACHE_KEY);
-          if (raw) {
-            const c = JSON.parse(raw);
-            if (c.uid === uid && c.role === role && Date.now() - (c.at || 0) < 30 * 60 * 1000) {
-              setMorningBrief(Array.isArray(c.priorities) ? c.priorities : []);
-              setBriefHandled(Array.isArray(c.handled) ? c.handled : []);
-              setIsBriefLoading(false);
-            }
-          }
-        } catch {
-          /* ignore cache */
-        }
+  // ── Needs Attention ───────────────────────────────────────────────────────
+  const activeCampaigns = campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active');
+  const nearGoalCampaigns = activeCampaigns.filter((c: any) =>
+    c.goal > 0 && c.raised / c.goal > 0.8 && c.raised / c.goal < 1
+  );
+  if (nearGoalCampaigns.length > 0) {
+    items.push({
+      id: 'campaigns-near',
+      text: `${nearGoalCampaigns.length} campaign${nearGoalCampaigns.length > 1 ? 's' : ''} close to goal — push now for impact`,
+      action: 'View',
+      path: '/funding',
+      level: 'attention',
+    });
+  }
 
-        const [forecastRes, anomalyRes, briefRes] = await Promise.all([
-          apiFetch('/analytics/revenue-forecast'),
-          apiFetch('/analytics/anomalies'),
-          apiFetch('/morning-brief'),
-        ]);
+  const inactiveBeneficiaries = beneficiaries.filter((b: any) =>
+    b.status === 'inactive' || b.status === 'Inactive'
+  );
+  if (inactiveBeneficiaries.length > 0 && (role === 'ed' || role === 'programs' || role === 'field')) {
+    items.push({
+      id: 'inactive-ben',
+      text: `${inactiveBeneficiaries.length} beneficiar${inactiveBeneficiaries.length > 1 ? 'ies' : 'y'} inactive — follow-up needed`,
+      action: 'Review',
+      path: '/programs',
+      level: 'attention',
+    });
+  }
 
-        if (forecastRes.ok) {
-          const data = await forecastRes.json();
-          const combined = [
-            ...data.actuals.map((d: any) => ({ ...d, is_estimate: false })),
-            ...data.forecast.map((d: any) => ({ ...d, is_estimate: true })),
-          ].slice(-9);
-          setForecastData(combined);
-        }
+  const recentDonors = donors.filter((d: any) => {
+    if (!d.lastGift) return false;
+    const last = new Date(d.lastGift).getTime();
+    const days90 = 90 * 24 * 60 * 60 * 1000;
+    return nowMs - last > days90 && nowMs - last < 180 * 24 * 60 * 60 * 1000;
+  });
+  if (recentDonors.length > 0 && (role === 'ed' || role === 'finance')) {
+    items.push({
+      id: 'donors-attention',
+      text: `${recentDonors.length} donor${recentDonors.length > 1 ? 's' : ''} due for impact update — 90+ days since gift`,
+      action: 'Draft update',
+      path: '/funding',
+      level: 'attention',
+    });
+  }
 
-        if (anomalyRes.ok) {
-          const data = await anomalyRes.json();
-          if (data.has_anomaly) {
-            setAnomaly({
-              has_anomaly: true,
-              message:
-                'Anomaly Detected: Donor Acquisition Velocity Dropped by 30%. Recommend triggering re-engagement agent.',
-            });
-          }
-        }
+  // ── Going Well ────────────────────────────────────────────────────────────
+  const activeBeneficiaries = beneficiaries.filter((b: any) =>
+    b.status === 'active' || b.status === 'Active' || !b.status
+  );
+  if (activeBeneficiaries.length > 0) {
+    items.push({
+      id: 'active-ben',
+      text: `${activeBeneficiaries.length} beneficiar${activeBeneficiaries.length > 1 ? 'ies' : 'y'} active across programs`,
+      level: 'well',
+    });
+  }
 
-        if (briefRes.ok) {
-          const data = await briefRes.json();
-          const priorities = Array.isArray(data) ? data : data.priorities || [];
-          const handled = Array.isArray(data?.handled_by_agents) ? data.handled_by_agents : [];
-          setMorningBrief(priorities);
-          setBriefHandled(handled);
-          try {
-            localStorage.setItem(
-              BRIEF_CACHE_KEY,
-              JSON.stringify({ uid, role, at: Date.now(), priorities, handled })
-            );
-          } catch {
-            /* ignore */
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch analytics:', err);
-      } finally {
-        setLoading(false);
-        setIsBriefLoading(false);
-      }
-    };
+  const thisMonth = new Date();
+  thisMonth.setDate(1);
+  thisMonth.setHours(0, 0, 0, 0);
+  const monthTotal = transactions
+    .filter((t: any) => new Date(t.date || t.created_at || 0) >= thisMonth && Number(t.amount) > 0)
+    .reduce((sum: number, t: any) => sum + Number(t.amount), 0);
+  if (monthTotal > 0) {
+    const formatted = monthTotal >= 100000
+      ? `₹${(monthTotal / 100000).toFixed(1)}L`
+      : `₹${(monthTotal / 1000).toFixed(0)}K`;
+    items.push({
+      id: 'monthly-raised',
+      text: `${formatted} raised this month`,
+      level: 'well',
+    });
+  }
 
-    fetchAnalytics();
-  }, [user?.id, user?.role]);
+  if (activeCampaigns.length > 0) {
+    items.push({
+      id: 'active-campaigns',
+      text: `${activeCampaigns.length} active campaign${activeCampaigns.length > 1 ? 's' : ''} running`,
+      action: 'View',
+      path: '/funding',
+      level: 'well',
+    });
+  }
 
-  useEffect(() => {
-    const fetchInbox = async () => {
-      setInboxLoading(true);
-      try {
-        const res = await apiFetch('/inbox');
-        if (res.ok) {
-          const data = await res.json();
-          setInboxItems(Array.isArray(data.items) ? data.items : []);
-        }
-      } catch {
-        // ignore
-      } finally {
-        setInboxLoading(false);
-      }
-    };
-    fetchInbox();
-  }, []);
+  const validDocs = complianceDocs.filter(d => d.status === 'Valid');
+  if (validDocs.length > 0) {
+    items.push({
+      id: 'valid-docs',
+      text: `${validDocs.length} compliance document${validDocs.length > 1 ? 's' : ''} current and valid ✓`,
+      level: 'well',
+    });
+  }
 
-  useEffect(() => {
-    const run = async () => {
-      try {
-        const res = await apiFetch('/notifications');
-        if (!res.ok) return;
-        const data = await res.json();
-        setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
-      } catch {
-        // ignore
-      }
-    };
-    run();
-  }, []);
+  return items;
+}
 
-  const refreshInbox = async () => {
-    setInboxLoading(true);
-    try {
-      const res = await apiFetch('/inbox');
-      if (res.ok) {
-        const data = await res.json();
-        setInboxItems(Array.isArray(data.items) ? data.items : []);
-      }
-    } finally {
-      setInboxLoading(false);
-    }
+// ── Static fallback items per role ────────────────────────────────────────────
+function getStaticFallback(role: string): PriorityItem[] {
+  const commonWell: PriorityItem[] = [
+    { id: 'sw1', text: 'Platform connected — all modules ready', level: 'well' },
+  ];
+
+  const roleItems: Record<string, PriorityItem[]> = {
+    ed: [
+      { id: 'ed-u1', text: 'Review and approve pending grant report drafts', action: 'Review', path: '/reports', level: 'urgent' },
+      { id: 'ed-a1', text: 'Budget utilization alerts pending your review', action: 'Check', path: '/funding', level: 'attention' },
+      { id: 'ed-a2', text: 'CSR pipeline needs follow-up on 3 prospects', action: 'View', path: '/funding', level: 'attention' },
+      { id: 'ed-w1', text: 'Programs operational — all active beneficiaries tracked', level: 'well' },
+    ],
+    finance: [
+      { id: 'fin-u1', text: 'Pending donor receipts need generation', action: 'Generate', path: '/funding', level: 'urgent' },
+      { id: 'fin-a1', text: 'FCRA utilization certificate due this quarter', action: 'Prepare', path: '/funding', level: 'attention' },
+      { id: 'fin-w1', text: 'All transactions reconciled for this period', level: 'well' },
+    ],
+    programs: [
+      { id: 'prg-u1', text: 'Beneficiary follow-up list needs review', action: 'Review', path: '/programs', level: 'urgent' },
+      { id: 'prg-a1', text: 'M&E data entry pending for 3 program activities', action: 'Enter', path: '/programs', level: 'attention' },
+      { id: 'prg-w1', text: 'Volunteer roster confirmed for upcoming events', level: 'well' },
+    ],
+    field: [
+      { id: 'fld-u1', text: 'Attendance forms pending submission from yesterday', action: 'Submit', path: '/programs', level: 'urgent' },
+      { id: 'fld-a1', text: 'New beneficiary intake forms waiting for review', action: 'Review', path: '/programs', level: 'attention' },
+      { id: 'fld-w1', text: 'All field visits logged successfully', level: 'well' },
+    ],
+    board: [
+      { id: 'brd-a1', text: 'Q3 impact report ready for board review', action: 'View', path: '/reports', level: 'attention' },
+      { id: 'brd-w1', text: 'Organization compliance status — all filings current', level: 'well' },
+      { id: 'brd-w2', text: 'Fundraising on track for this financial year', level: 'well' },
+    ],
   };
 
-  const handleDraftReport = async () => {
-    setReportDrafting(true);
-    try {
-      const res = await apiFetch('/gen-ai/draft-report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ngo_name: "GoodJobs NGO",
-          impact_data: {
-            donors: donors.length,
-            transactions: transactions.length,
-            revenue_inr: transactions.reduce((s, t) => s + (Number(t.amount) || 0), 0),
-            campaigns: campaigns.length,
-          }
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        toast.success("AI Annual Report Draft Generated!", { duration: 5000 });
-        // For now, surface in console; UI modal can be added later.
-        console.log("Draft:", data.draft);
-      } else {
-        toast.error("Failed to generate draft.");
-      }
-    } catch (err) {
-      toast.error("Failed to generate draft.");
-    } finally {
-      setReportDrafting(false);
-    }
-  };
+  return [...(roleItems[role] || roleItems.ed), ...commonWell];
+}
 
-  const totalRaised = transactions.reduce((s, t) => s + (Number(t.amount) || 0), 0);
-  const expiringSoon = inboxItems.filter(i => i.kind === 'compliance_doc').length || complianceDocs.filter(d => d.status === 'Expiring Soon').length;
-  const recentTx = transactions.slice(0, 5);
+// ── Section component ─────────────────────────────────────────────────────────
+interface SectionProps {
+  level: PriorityLevel;
+  items: PriorityItem[];
+  onAction: (path: string) => void;
+}
 
-  const handleReport = async () => {
-    try {
-      const res = await apiFetch('/compliance/health-report.pdf');
-      if (!res.ok) throw new Error('report');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'board_report.pdf';
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      toast.error('Failed to generate report.');
-    }
-  };
+const SECTION_META = {
+  urgent: {
+    icon: AlertCircle,
+    label: 'URGENT',
+    color: '#DC2626',
+    bg: '#fef2f2',
+    border: '#fecaca',
+    iconBg: '#fee2e2',
+    darkBg: 'rgba(220,38,38,0.1)',
+  },
+  attention: {
+    icon: AlertTriangle,
+    label: 'NEEDS ATTENTION',
+    color: '#D97706',
+    bg: '#fffbeb',
+    border: '#fde68a',
+    iconBg: '#fef3c7',
+    darkBg: 'rgba(217,119,6,0.1)',
+  },
+  well: {
+    icon: CheckCircle2,
+    label: 'GOING WELL',
+    color: '#16A34A',
+    bg: '#f0fdf4',
+    border: '#bbf7d0',
+    iconBg: '#dcfce7',
+    darkBg: 'rgba(22,163,74,0.1)',
+  },
+};
 
-  const chartSeries = forecastData.length ? forecastData : [];
-  const maxMonthly = Math.max(1, ...chartSeries.map(d => Number(d.amount) || 0));
-
-  const openActivityLog = async () => {
-    setShowWhatsApp(true);
-    setActivityLoading(true);
-    try {
-      const res = await apiFetch('/volunteers/activity');
-      if (!res.ok) throw new Error('activity');
-      const data = await res.json();
-      setActivityLogs(Array.isArray(data.events) ? data.events : []);
-    } catch {
-      setActivityLogs([]);
-    } finally {
-      setActivityLoading(false);
-    }
-  };
+const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction }) => {
+  const meta = SECTION_META[level];
+  const Icon = meta.icon;
+  if (items.length === 0) return null;
 
   return (
-    <div className="dashboard-container">
-      <div className="page-header" style={{ marginBottom: '2rem' }}>
-        <div>
-          <h1 className="page-title text-gradient" style={{ fontSize: '1.75rem' }}>Good Morning, Anjali</h1>
-          <p className="page-subtitle" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ color: 'var(--color-success)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <span className="agent-pulse" /> Your agents are active
-            </span> 
-            • Today is {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
-          </p>
+    <div className={`priority-section priority-section--${level}`}>
+      <div className="priority-section-header">
+        <div className="priority-section-icon" style={{ background: meta.iconBg }}>
+          <Icon size={16} style={{ color: meta.color }} />
         </div>
-        <div className="flex gap-4">
-          {canRunAnnualDraft && (
-          <button className="btn btn-secondary" onClick={handleDraftReport} disabled={reportDrafting}>
-            {reportDrafting ? <Loader2 size={16} className="animate-spin" /> : <Bot size={16} />}
-            {reportDrafting ? "Drafting..." : "Draft Annual Report"}
-          </button>
-          )}
-        </div>
+        <span className="priority-section-label" style={{ color: meta.color }}>
+          {meta.label}
+        </span>
+        <span className="priority-section-count">{items.length}</span>
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
-        {/* Morning Brief Section */}
-        <section>
-          <div className="flex justify-between items-center mb-4">
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Today's Priorities</h2>
-            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-tertiary)' }}>Auto-generated at 6:30 AM</span>
-          </div>
-          
-          {isBriefLoading ? (
-            <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
-              <Loader2 className="animate-spin mx-auto mb-2" />
-              <p className="text-tertiary">Synthesizing priorities...</p>
-            </div>
-          ) : (
-            <>
-              {morningBrief.map((item: any, index: number) => (
-                <motion.div
-                  key={item.id}
-                  className="card"
-                  initial={reducedMotion ? false : { opacity: 0, y: 12 }}
-                  animate={{
-                    opacity: 1,
-                    y: 0,
-                    transition: reducedMotion
-                      ? { duration: 0 }
-                      : { duration: 0.3, ease: [0, 0, 0.2, 1], delay: listItemEnterDelay(index) },
-                  }}
-                  style={{
-                    padding: '1.25rem',
-                    marginBottom: '1rem',
-                    borderLeft: `4px solid ${item.priority === 'High' ? 'var(--color-danger)' : 'var(--color-warning)'}`,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '1rem',
-                    flexWrap: 'wrap',
-                    boxShadow: 'var(--shadow-sm)',
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 200 }}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className={`badge ${item.priority === 'High' ? 'badge-danger' : 'badge-warning'}`}
-                        style={{ fontSize: '0.65rem' }}
-                      >
-                        {item.priority}
-                      </span>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-tertiary)' }}>
-                        {(item.category || '').toString().toUpperCase()}
-                      </span>
-                    </div>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.25rem' }}>{item.title}</h3>
-                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>{item.summary}</p>
-                  </div>
-                  <div className="flex gap-2" style={{ flexShrink: 0, flexWrap: 'wrap' }}>
-                    <button
-                      className="btn btn-primary"
-                      style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          if (item.kind === 'csr_report_due') {
-                            const inl = item.inline || {};
-                            const meta = item.meta || {};
-                            const company = inl.company ?? meta.company;
-                            const project = inl.project ?? meta.project;
-                            if (company) {
-                              const q = new URLSearchParams();
-                              q.set('company', String(company));
-                              if (project) q.set('project', String(project));
-                              const res = await apiFetch(`/finance/uc.pdf?${q}`);
-                              if (res.ok) {
-                                const blob = await res.blob();
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = 'utilization_certificate_draft.pdf';
-                                a.click();
-                                URL.revokeObjectURL(url);
-                                toast.success('UC draft downloaded.');
-                              }
-                            }
-                          }
-                          if (item.kind === 'month_end_close') {
-                            navigate('/finance');
-                            return;
-                          }
-                          const route = item?.primary_action?.route;
-                          if (route) {
-                            const path = route.startsWith('/') ? route : `/${route}`;
-                            if (path === '/tasks') navigate(item.tasks_deep_link_path || tasksInboxHref(item.kind, item.ref?.id));
-                            else navigate(path);
-                          } else toast('No action linked for this item yet.');
-                        } catch {
-                          toast.error('Action failed.');
-                        }
-                      }}
-                    >
-                      {item?.primary_action?.label || 'Take action'} <ArrowUpRight size={14} />
-                    </button>
-                    {item?.secondary_action?.route && (
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}
-                        type="button"
-                        onClick={() => {
-                          const route = item.secondary_action.route;
-                          const path = route.startsWith('/') ? route : `/${route}`;
-                          if (path === '/tasks') navigate(item.tasks_deep_link_path || tasksInboxHref(item.kind, item.ref?.id));
-                          else navigate(path);
-                        }}
-                      >
-                        {item.secondary_action.label || 'Module'}
-                      </button>
-                    )}
-                    {item?.tertiary_action?.route && (
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: '0.5rem 1rem', fontSize: '0.8125rem' }}
-                        type="button"
-                        onClick={() => {
-                          const route = item.tertiary_action.route;
-                          const path = route.startsWith('/') ? route : `/${route}`;
-                          if (path === '/tasks') navigate(item.tasks_deep_link_path || tasksInboxHref(item.kind, item.ref?.id));
-                          else navigate(path);
-                        }}
-                      >
-                        {item.tertiary_action.label || 'Inbox'}
-                      </button>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
-              {briefHandled.length > 0 && (
-                <div className="card" style={{ padding: '1rem', marginTop: '1rem', background: 'var(--color-bg-main)' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-tertiary)', marginBottom: '0.5rem' }}>
-                    Handled by agents (recent)
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                    {briefHandled.slice(0, 6).map((h: any, i: number) => (
-                      <li key={i} style={{ marginBottom: 4 }}>
-                        {(h.intent_type || 'intent').toString()}: {String(h.directive || '').slice(0, 80)}
-                        {h.executed_at ? ` — ${String(h.executed_at).slice(0, 16)}` : ''}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </>
-          )}
-        </section>
-
-        {/* Unified Inbox */}
-        <aside>
-          <div className="card" style={{ height: '100%' }}>
-            <div className="card-header">
-              <h3 className="card-title">Your Inbox</h3>
-            </div>
-            <div className="card-body">
-              {inboxLoading ? (
-                <div className="flex flex-col items-center gap-2 text-tertiary" style={{ padding: '1rem' }}>
-                  <Loader2 size={24} className="animate-spin" />
-                  <span style={{ fontSize: '0.85rem' }}>Loading…</span>
-                </div>
-              ) : inboxItems.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
-                  <div style={{ fontSize: '1.5rem', marginBottom: 6 }}>🎉</div>
-                  <div style={{ fontWeight: 600, color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>All clear — agents are handling the rest</div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {inboxItems.slice(0, 6).map((it: any, idx: number) => (
-                    <div key={`${it.kind}-${it.ref?.id ?? idx}`} style={{ padding: '0.75rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-card)' }}>
-                      <div className="flex justify-between items-center" style={{ marginBottom: '0.25rem' }}>
-                        <span className={`badge ${it.priority === 'High' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>{it.priority}</span>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>{(it.kind || '').toString().toUpperCase()}</span>
-                      </div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>{it.title}</div>
-                      <div className="flex gap-2">
-                        <button
-                          className="btn btn-secondary"
-                          style={{ flex: 1, padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
-                          onClick={() => {
-                            const r = it.primary_action?.route;
-                            if (!r) return;
-                            const p = r.startsWith('/') ? r : `/${r}`;
-                            if (p === '/tasks') navigate(tasksInboxHref(it.kind, it.ref?.id));
-                            else navigate(p);
-                          }}
-                        >
-                          {it.primary_action?.label || 'Open'}
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
-                          onClick={async () => {
-                            const kind = it.kind;
-                            const id = it.ref?.id;
-                            setInboxItems(prev => prev.filter(x => !(x.kind === kind && x.ref?.id === id)));
-                            try {
-                              const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-                              const res = await apiFetch('/inbox/snooze', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ kind: it.kind, id: it.ref?.id, until }),
-                              });
-                              if (!res.ok) throw new Error('snooze');
-                              toast.success('Snoozed for 24h.');
-                            } catch {
-                              toast.error('Failed to snooze.');
-                              await refreshInbox();
-                            }
-                          }}
-                        >
-                          Snooze
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ padding: '0.35rem 0.5rem', fontSize: '0.75rem', color: 'var(--color-success)', borderColor: 'var(--color-success)' }}
-                          onClick={async () => {
-                            const kind = it.kind;
-                            const id = it.ref?.id;
-                            setInboxItems(prev => prev.filter(x => !(x.kind === kind && x.ref?.id === id)));
-                            try {
-                              const res = await apiFetch('/inbox/resolve', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ kind: it.kind, id: it.ref?.id }),
-                              });
-                              if (!res.ok) throw new Error('resolve');
-                              toast.success('Done.');
-                            } catch {
-                              toast.error('Failed to mark done.');
-                              await refreshInbox();
-                            }
-                          }}
-                        >
-                          Done
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </aside>
-
-        {/* Agent Activity Sidebar */}
-        <aside>
-          <div className="card" style={{ height: '100%' }}>
-            <div className="card-header">
-              <h3 className="card-title">Agents in Background</h3>
-            </div>
-            <div className="card-body">
-              {activityFeed.length === 0 ? (
-                <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>No recent agent updates.</div>
-              ) : activityFeed.map(item => (
-                <div
-                  key={item.id}
-                  role="button"
-                  tabIndex={0}
-                  style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', cursor: 'pointer' }}
-                  onClick={() => navigate(item.tasksPath)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      navigate(item.tasksPath);
-                    }
-                  }}
-                >
-                  <div style={{ 
-                    width: '32px', 
-                    height: '32px', 
-                    borderRadius: '50%', 
-                    background: 'var(--color-bg-main)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    fontSize: '1rem'
-                  }}>
-                    {item.icon}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)', lineHeight: 1.4 }}>{item.text}</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', marginTop: '0.15rem' }}>{item.time}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </aside>
-      </div>
-
-      {/* Smart Notifications (real feed) */}
-      <div className="card" style={{ marginBottom: '2rem' }}>
-        <div className="card-header flex justify-between items-center">
-          <h3 className="card-title flex items-center gap-2"><Bell size={18} /> Smart Notifications</h3>
-          <button className="btn btn-secondary" onClick={handleReport} style={{ fontSize: '0.85rem' }}>
-            Generate Board Report <Download size={14} />
-          </button>
-        </div>
-        <div className="card-body">
-          {notifications.length === 0 ? (
-            <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>No notifications right now.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {notifications.slice(0, 6).map((n: any) => (
-                <div
-                  key={n.id}
-                  role="button"
-                  tabIndex={0}
-                  style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 1rem', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-card)', cursor: 'pointer' }}
-                  onClick={() => navigate(notificationTasksHref(n))}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      navigate(notificationTasksHref(n));
-                    }
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.15rem' }}>{n.title}</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.message}</div>
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', flexShrink: 0 }}>{n.time}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Metrics & Anomaly section below */}
-      <div className="metrics-row">
-        <div className="card metric-card">
-          <div className="metric-header">
-            <span>Total Raised (YTD)</span>
-            <div className="metric-icon icon-blue"><IndianRupee size={18} /></div>
-          </div>
-          <div className="metric-value">₹{(totalRaised / 100000).toFixed(1)}L</div>
-          <div className="metric-trend trend-up"><ArrowUpRight size={14} /><span>+12% from last month</span></div>
-        </div>
-
-        <div className="card metric-card">
-          <div className="metric-header">
-            <span>Active Donors</span>
-            <div className="metric-icon icon-purple"><Users size={18} /></div>
-          </div>
-          <div className="metric-value">{(donors.length + 1243).toLocaleString()}</div>
-          <div className="metric-trend trend-up"><ArrowUpRight size={14} /><span>+{donors.length} added this session</span></div>
-        </div>
-
-        <div className="card metric-card">
-          <div className="metric-header">
-            <span>Active Campaigns</span>
-            <div className="metric-icon icon-green"><TrendingUp size={18} /></div>
-          </div>
-          <div className="metric-value">{campaigns.filter(c => c.status === 'active').length}</div>
-          <div className="metric-trend trend-up"><ArrowUpRight size={14} /><span>{campaigns.length} total campaigns</span></div>
-        </div>
-
-        <div className="card metric-card">
-          <div className="metric-header">
-            <span>Compliance Alerts</span>
-            <div className="metric-icon icon-orange"><AlertCircle size={18} /></div>
-          </div>
-          <div className="metric-value">{expiringSoon}</div>
-          <div className={`metric-trend ${expiringSoon > 0 ? 'trend-down' : 'trend-up'}`}>
-            {expiringSoon > 0 ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}
-            <span>{expiringSoon > 0 ? '80G Renewal due in 45 days' : 'All documents valid'}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* WhatsApp Bot Banner */}
-      <div className="whatsapp-sync-banner">
-        <div className="whatsapp-info">
-          <div className="whatsapp-icon">
-            <MessageCircle size={24} color="#16a34a" />
-          </div>
-          <div>
-            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.25rem', color: '#166534' }}>
-              WhatsApp Bot Active (Zero Data Entry)
-            </h3>
-            <p style={{ fontSize: '0.875rem', color: '#14532d', opacity: 0.9 }}>
-              Field staff just WhatsApp: <i>"Received ₹5000 from Ravi for Health Camp"</i> — AI logs it automatically.
-            </p>
-          </div>
-        </div>
-        <button className="btn btn-secondary" style={{ background: 'white', color: '#166534', border: 'none', fontWeight: 600 }}
-          onClick={openActivityLog}>
-          View Activity Log
-        </button>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="quick-actions-row">
-        {quickActions.map(qa => (
-          <button key={qa.label} className="quick-action-btn"
-            onClick={() => { window.location.hash = qa.path; toast(`Navigating to ${qa.label}...`); }}>
-            <span className="qa-icon">{qa.icon}</span>
-            <span className="qa-label">{qa.label}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="charts-row">
-        {/* Bar Chart — Donation Trends */}
-        <div className="card chart-card" style={{ gridColumn: 'span 2' }}>
-          <div className="card-header flex justify-between items-center">
-            <div>
-              <h3 className="card-title">Predictive Revenue Forecast (Next 90 Days)</h3>
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: '0.25rem' }}>Based on Linear Regression & Seasonality Models</div>
-            </div>
-            <span className="badge badge-primary">AI Forecast</span>
-          </div>
-          <div className="card-body" style={{ minHeight: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {loading ? (
-              <div className="flex flex-col items-center gap-2 text-tertiary">
-                <Loader2 size={32} className="animate-spin" />
-                <span style={{ fontSize: '0.875rem' }}>Running ML regression models...</span>
-              </div>
-            ) : (
-              <div className="bar-chart">
-                {forecastData.map((d, i) => {
-                  const isPrediction = d.is_estimate;
-                  const displayVal = d.amount;
-                  const label = new Date(d.date).toLocaleDateString('en-IN', { month: 'short' });
-                  
-                  return (
-                    <div key={i} className="bar-col">
-                      <div className="bar-label-top" style={{ color: isPrediction ? 'var(--color-primary)' : 'inherit', fontWeight: isPrediction ? 600 : 400 }}>
-                        ₹{(displayVal / 100000).toFixed(1)}L
-                      </div>
-                      <div className="bar-track">
-                        <div
-                          className="bar-fill"
-                          style={{
-                            height: `${(displayVal / maxMonthly) * 100}%`,
-                            background: isPrediction
-                              ? 'repeating-linear-gradient(45deg, var(--color-primary-light), var(--color-primary-light) 4px, var(--color-primary) 4px, var(--color-primary) 8px)'
-                              : (i === forecastData.length - 1 && !isPrediction ? 'linear-gradient(to top, var(--color-primary), var(--color-secondary))' : 'linear-gradient(to top, #c7d2fe, #a5b4fc)'),
-                            opacity: isPrediction ? 0.7 : 1
-                          }}
-                        />
-                      </div>
-                      <div className="bar-label" style={{ fontStyle: isPrediction ? 'italic' : 'normal', color: isPrediction ? 'var(--color-primary)' : 'inherit' }}>{label}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Recent Transactions */}
-        <div className="card chart-card">
-          <div className="card-header flex justify-between items-center">
-            <h3 className="card-title">Recent Transactions</h3>
-            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-              onClick={() => toast('Navigate to Fundraising to see full transaction history.')}>
-              View All
-            </button>
-          </div>
-          <div className="card-body">
-            <div className="flex flex-col gap-4">
-              {recentTx.length > 0 ? recentTx.map(tx => (
-                <div key={tx.id} className="flex justify-between items-center pb-3" style={{ borderBottom: '1px solid var(--color-border-light)' }}>
-                  <div className="flex items-center gap-3">
-                    <div className="avatar" style={{ width: 32, height: 32 }}>{tx.donorName.charAt(0)}</div>
-                    <div>
-                      <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>{tx.donorName}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{tx.method} • {tx.date}</div>
-                    </div>
-                  </div>
-                  <div style={{ fontWeight: 600, color: 'var(--color-success)' }}>+₹{tx.amount.toLocaleString()}</div>
-                </div>
-              )) : (
-                <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '2rem 0' }}>No recent transactions</div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Agent Activity Feed + Compliance Summary */}
-      <div className="charts-row" style={{ marginTop: 0 }}>
-        {/* Agent Activity */}
-        <div className="card">
-          <div className="card-header flex justify-between items-center">
-            <h3 className="card-title flex items-center gap-2"><Bot size={18} color="#8b5cf6" /> Agent Activity Feed</h3>
-            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-              onClick={() => { window.location.hash = '/agent-hq'; }}>
-              View All
-            </button>
-          </div>
-          <div className="card-body flex flex-col gap-4">
-            {activityFeed.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '1.5rem 0' }}>No recent activity.</div>
-            ) : activityFeed.map(act => (
-              <div key={act.id} className="flex items-start gap-3" style={{ paddingBottom: '0.75rem', borderBottom: '1px solid var(--color-border-light)' }}>
-                <div style={{ fontSize: '1.25rem', minWidth: 28, marginTop: '0.1rem' }}>{act.icon}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>{act.text}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: '0.25rem' }}>{act.time}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Compliance Status */}
-        <div className="card">
-          <div className="card-header flex justify-between items-center">
-            <h3 className="card-title flex items-center gap-2"><ShieldCheck size={18} color="var(--color-primary)" /> Compliance Status</h3>
-            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-              onClick={() => { window.location.hash = '/compliance'; }}>
-              View HQ
-            </button>
-          </div>
-          <div className="card-body flex flex-col gap-4">
-            {(inboxItems.filter(i => i.kind === 'compliance_doc').slice(0, 4)).map((doc: any) => (
-              <div key={(doc.ref?.id || doc.title)} className="flex justify-between items-center" style={{ paddingBottom: '0.75rem', borderBottom: '1px solid var(--color-border-light)' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{doc.meta?.doc_type ? `Type: ${doc.meta.doc_type}` : ''}</div>
-                </div>
-                <span className="badge badge-warning" style={{ fontSize: '0.65rem' }}>{doc.priority}</span>
-              </div>
-            ))}
-            {inboxItems.filter(i => i.kind === 'compliance_doc').length === 0 && (
-              <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '1.5rem 0' }}>No expiring documents.</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Activity Log Modal */}
-      {showWhatsApp && (
-        <ModalOverlay onBackdropClick={() => setShowWhatsApp(false)}>
-          <div
-            className="modal-card modal-card--wide"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="dash-activity-title"
-            style={{ maxHeight: '70vh', padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+      <ul className="priority-list">
+        {items.map((item, idx) => (
+          <motion.li
+            key={item.id}
+            className="priority-item"
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: idx * 0.04 }}
           >
-            <div className="card-header flex justify-between items-center" style={{ flexShrink: 0 }}>
-              <h3 id="dash-activity-title" className="card-title flex items-center gap-2"><MessageCircle size={18} color="#16a34a" /> Activity Log</h3>
-              <button type="button" className="action-btn" aria-label="Close activity log" onClick={() => setShowWhatsApp(false)}><X size={20} /></button>
-            </div>
-            <div ref={activityLogScrollRef} style={{ overflowY: 'auto', padding: '1rem 1.5rem 1.5rem', flex: 1, minHeight: 0 }}>
-              {activityLoading ? (
-                <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
-                  <Loader2 className="animate-spin mx-auto mb-2" />
-                  Loading…
-                </div>
-              ) : activityLogs.length === 0 ? (
-                <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)' }}>No activity yet.</div>
-              ) : (
-                <div style={{ height: activityLogVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
-                  {activityLogVirtualizer.getVirtualItems().map(vr => {
-                    const ev = activityLogs[vr.index];
-                    return (
-                      <div
-                        key={String(ev.id ?? vr.index)}
-                        data-index={vr.index}
-                        ref={activityLogVirtualizer.measureElement}
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          width: '100%',
-                          transform: `translateY(${vr.start}px)`,
-                          paddingBottom: '0.75rem',
-                        }}
-                      >
-                        <div
-                          style={{
-                            background: 'var(--color-bg-main)',
-                            borderRadius: 'var(--radius-md)',
-                            padding: '1rem',
-                            border: '1px solid var(--color-border-light)',
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: '0.75rem',
-                              fontWeight: 600,
-                              color: 'var(--color-text-secondary)',
-                              marginBottom: '0.25rem',
-                            }}
-                          >
-                            {(ev.type || 'event').toString()} • {(ev.created_at || '').toString().slice(0, 16).replace('T', ' ')}
-                          </div>
-                          <div style={{ fontSize: '0.875rem' }}>
-                            {ev.shift_title || ev.message || ev.audience || '—'}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <span className="priority-item-dot" style={{ background: meta.color }} />
+            <span className="priority-item-text">{item.text}</span>
+            {item.action && item.path && (
+              <button
+                className="priority-item-action"
+                onClick={() => onAction(item.path!)}
+                style={{ color: meta.color }}
+              >
+                {item.action} <ArrowRight size={12} />
+              </button>
+            )}
+          </motion.li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+// ── Main Component ────────────────────────────────────────────────────────────
+const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { donors, transactions, campaigns, beneficiaries, complianceDocs } = useStore();
+  const [briefItems, setBriefItems] = useState<PriorityItem[]>([]);
+  const [briefLoading, setBriefLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+
+  const role = user?.role ?? 'ed';
+  const greeting = getGreeting();
+  const quickActions = ROLE_QUICK_ACTIONS[role] ?? ROLE_QUICK_ACTIONS.ed;
+
+  // Load morning brief from API
+  useEffect(() => {
+    let cancelled = false;
+    const uid = user?.id ?? '';
+
+    const loadBrief = async () => {
+      setBriefLoading(true);
+      try {
+        const cached = localStorage.getItem(BRIEF_CACHE_KEY);
+        if (cached) {
+          const c = JSON.parse(cached);
+          if (c.uid === uid && Date.now() - (c.at ?? 0) < 30 * 60 * 1000) {
+            if (!cancelled && Array.isArray(c.priorities)) {
+              const mapped: PriorityItem[] = c.priorities.map((p: any, i: number) => ({
+                id: `brief-${i}`,
+                text: p.text ?? p.message ?? String(p),
+                action: p.action,
+                path: p.path,
+                level: (p.level ?? p.priority ?? 'attention') as PriorityLevel,
+              }));
+              setBriefItems(mapped);
+              setBriefLoading(false);
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
+      try {
+        const res = await apiFetch('/morning-brief');
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const priorities = Array.isArray(data.priorities) ? data.priorities : [];
+        const mapped: PriorityItem[] = priorities.map((p: any, i: number) => ({
+          id: `brief-${i}`,
+          text: p.text ?? p.message ?? String(p),
+          action: p.action,
+          path: p.path,
+          level: (p.level ?? p.priority ?? 'attention') as PriorityLevel,
+        }));
+        if (!cancelled) {
+          setBriefItems(mapped);
+          try {
+            localStorage.setItem(BRIEF_CACHE_KEY, JSON.stringify({ uid, at: Date.now(), priorities }));
+          } catch { /* ignore */ }
+        }
+      } catch { /* ignore */ } finally {
+        if (!cancelled) setBriefLoading(false);
+      }
+    };
+
+    loadBrief();
+    return () => { cancelled = true; };
+  }, [user?.id, lastRefresh]);
+
+  // Compute items from store + API
+  const allItems = useMemo(() => {
+    const storeItems = deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs);
+    const combined = [...briefItems, ...storeItems];
+    if (combined.length === 0) return getStaticFallback(role);
+    // Deduplicate by level distribution
+    return combined;
+  }, [briefItems, role, donors, transactions, campaigns, beneficiaries, complianceDocs]);
+
+  const urgentItems = allItems.filter(i => i.level === 'urgent');
+  const attentionItems = allItems.filter(i => i.level === 'attention');
+  const wellItems = allItems.filter(i => i.level === 'well');
+
+  const today = new Date().toLocaleDateString('en-IN', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+
+  return (
+    <div className="today-page">
+      {/* ── Greeting Header ─────────────────────────────────────────── */}
+      <motion.div
+        className="today-header"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        <div className="today-greeting">
+          <h1 className="today-greeting-text">
+            {greeting}, {user?.name?.split(' ')[0] ?? 'there'} 👋
+          </h1>
+          <p className="today-org-name">{user?.ngoName ?? 'Your Organisation'}</p>
+        </div>
+        <div className="today-header-right">
+          <span className="today-date">{today}</span>
+          <button
+            className="today-refresh-btn"
+            onClick={() => setLastRefresh(new Date())}
+            title="Refresh"
+            disabled={briefLoading}
+          >
+            <RefreshCw size={15} className={briefLoading ? 'spin' : ''} />
+          </button>
+        </div>
+      </motion.div>
+
+      {/* ── Priority Sections ────────────────────────────────────────── */}
+      <motion.div
+        className="today-priorities"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.1 }}
+      >
+        {briefLoading && allItems.length === 0 ? (
+          <div className="today-loading">
+            <RefreshCw size={18} className="spin" />
+            <span>Loading your daily brief…</span>
           </div>
-        </ModalOverlay>
-      )}
+        ) : (
+          <>
+            <PrioritySection level="urgent"    items={urgentItems}    onAction={navigate} />
+            <PrioritySection level="attention" items={attentionItems} onAction={navigate} />
+            <PrioritySection level="well"      items={wellItems}      onAction={navigate} />
+          </>
+        )}
+      </motion.div>
+
+      {/* ── Quick Actions ────────────────────────────────────────────── */}
+      <motion.div
+        className="today-quick-actions"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        <h2 className="today-section-title">Quick Actions</h2>
+        <div className="today-actions-grid">
+          {quickActions.map((qa, i) => {
+            const Icon = qa.icon;
+            return (
+              <button
+                key={i}
+                className="today-action-card"
+                onClick={() => navigate(qa.path)}
+                style={{ '--action-color': qa.color } as React.CSSProperties}
+              >
+                <div className="today-action-icon" style={{ background: `${qa.color}18` }}>
+                  <Icon size={20} style={{ color: qa.color }} />
+                </div>
+                <span className="today-action-label">{qa.label}</span>
+                <ArrowRight size={14} className="today-action-arrow" />
+              </button>
+            );
+          })}
+        </div>
+      </motion.div>
+
+      {/* ── Stats Row ────────────────────────────────────────────────── */}
+      <motion.div
+        className="today-stats"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+      >
+        <div className="today-stat-card" onClick={() => navigate('/programs')}>
+          <Users size={18} className="today-stat-icon" />
+          <div>
+            <div className="today-stat-value">{beneficiaries.length || '—'}</div>
+            <div className="today-stat-label">Beneficiaries</div>
+          </div>
+        </div>
+        <div className="today-stat-card" onClick={() => navigate('/funding')}>
+          <HeartHandshake size={18} className="today-stat-icon" />
+          <div>
+            <div className="today-stat-value">{donors.length || '—'}</div>
+            <div className="today-stat-label">Donors</div>
+          </div>
+        </div>
+        <div className="today-stat-card" onClick={() => navigate('/funding')}>
+          <TrendingUp size={18} className="today-stat-icon" />
+          <div>
+            <div className="today-stat-value">{campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active').length || campaigns.length || '—'}</div>
+            <div className="today-stat-label">Campaigns</div>
+          </div>
+        </div>
+        <div className="today-stat-card" onClick={() => navigate('/compliance')}>
+          <ShieldCheck size={18} className="today-stat-icon" />
+          <div>
+            <div className="today-stat-value">{complianceDocs.filter(d => d.status === 'Valid').length || '—'}</div>
+            <div className="today-stat-label">Docs Current</div>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 };

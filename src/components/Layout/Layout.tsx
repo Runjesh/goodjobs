@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
-  LayoutDashboard, HeartHandshake, Users, Wallet, ClipboardList,
-  Building2, CalendarCheck, ShieldCheck, Search, Bell, Settings,
-  Cpu, Lock, Menu, X, Wallet as Finance,
-  Wallet as WalletIcon, Moon, Sun, Sparkles, CheckSquare
+  Sun, ClipboardList, Wallet, BarChart2,
+  FileText, Cpu, Settings, Bell, Menu, X,
+  Moon, Lock, Users, HeartHandshake, Building2,
+  CalendarCheck, ShieldCheck
 } from 'lucide-react';
 import CommandPalette from '../CommandPalette/CommandPalette';
 import IntentBar from './IntentBar';
@@ -22,17 +22,13 @@ import './Layout.css';
 
 // ── Navigation Config ────────────────────────────────────────────────────────
 const NAV_ITEMS = [
-  { path: '/',            icon: LayoutDashboard, label: 'Dashboard',         module: 'dashboard',   section: 'main'    },
-  { path: '/tasks',       icon: CheckSquare,     label: 'Tasks',             module: 'tasks',       section: 'main'    },
-  { path: '/agent-hq',   icon: Cpu,             label: 'GoodJobs Copilot', module: 'agent-hq',   section: 'main', accent: '#8b5cf6' },
-  { path: '/fundraising', icon: HeartHandshake,  label: 'Fundraising Cloud', module: 'fundraising', section: 'main'    },
-  { path: '/crm',         icon: Users,           label: 'Donor CRM',         module: 'crm',         section: 'main'    },
-  { path: '/finance',     icon: Wallet,          label: 'Finance & FCRA',    module: 'finance',     section: 'ops'     },
-  { path: '/programs',    icon: ClipboardList,   label: 'Programs MIS',      module: 'programs',    section: 'ops'     },
-  { path: '/csr',         icon: Building2,       label: 'CSR Pipeline',      module: 'csr',         section: 'ops'     },
-  { path: '/volunteers',  icon: CalendarCheck,   label: 'Volunteers',        module: 'volunteers',  section: 'ops'     },
-  { path: '/compliance',  icon: ShieldCheck,     label: 'Compliance HQ',     module: 'compliance',  section: 'ops'     },
-  { path: '/settings',    icon: Settings,        label: 'Settings',          module: 'settings',    section: 'system'  },
+  { path: '/',          icon: Sun,          label: 'Today',            module: 'dashboard',  section: 'workspace' },
+  { path: '/programs',  icon: ClipboardList,label: 'Programs',         module: 'programs',   section: 'workspace' },
+  { path: '/funding',   icon: Wallet,       label: 'Funding',          module: 'funding',    section: 'workspace' },
+  { path: '/insights',  icon: BarChart2,    label: 'Insights',         module: 'insights',   section: 'workspace' },
+  { path: '/reports',   icon: FileText,     label: 'Reports',          module: 'reports',    section: 'workspace' },
+  { path: '/agent-hq',  icon: Cpu,          label: 'GoodJobs Copilot', module: 'agent-hq',   section: 'tools', accent: '#6366f1' },
+  { path: '/settings',  icon: Settings,     label: 'Settings',         module: 'settings',   section: 'system'  },
 ];
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -319,9 +315,9 @@ const Layout: React.FC = () => {
 
         <nav className="nav-menu" aria-label="Sidebar navigation">
           <div className="nav-section-label">{t('main')}</div>
-          {renderNavItems(NAV_ITEMS.filter(i => i.section === 'main'))}
-          <div className="nav-section-label">{t('operations')}</div>
-          {renderNavItems(NAV_ITEMS.filter(i => i.section === 'ops'))}
+          {renderNavItems(NAV_ITEMS.filter(i => i.section === 'workspace'))}
+          <div className="nav-section-label">Tools</div>
+          {renderNavItems(NAV_ITEMS.filter(i => i.section === 'tools'))}
           <div className="nav-section-label">{t('system')}</div>
           {renderNavItems(NAV_ITEMS.filter(i => i.section === 'system'))}
         </nav>

@@ -13,7 +13,6 @@ export interface Permission {
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ed: [
-    // Executive Director — full access to everything
     { module: 'dashboard',   canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'tasks',       canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'fundraising', canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
@@ -23,8 +22,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     { module: 'csr',         canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'volunteers',  canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'compliance',  canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
-    { module: 'agent-hq',   canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
+    { module: 'agent-hq',    canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'settings',    canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
+    { module: 'funding',     canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
+    { module: 'insights',    canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
+    { module: 'reports',     canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
   ],
   finance: [
     { module: 'dashboard',   canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
@@ -36,8 +38,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     { module: 'csr',         canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
     { module: 'volunteers',  canView: false, canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'compliance',  canView: true,  canEdit: true,  canExport: true,  canApproveAgents: false },
-    { module: 'agent-hq',   canView: true,  canEdit: false, canExport: false, canApproveAgents: true },
+    { module: 'agent-hq',    canView: true,  canEdit: false, canExport: false, canApproveAgents: true },
     { module: 'settings',    canView: false, canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'funding',     canView: true,  canEdit: true,  canExport: true,  canApproveAgents: false },
+    { module: 'insights',    canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
+    { module: 'reports',     canView: true,  canEdit: true,  canExport: true,  canApproveAgents: false },
   ],
   programs: [
     { module: 'dashboard',   canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
@@ -49,8 +54,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     { module: 'csr',         canView: true,  canEdit: true,  canExport: false, canApproveAgents: false },
     { module: 'volunteers',  canView: true,  canEdit: true,  canExport: true,  canApproveAgents: false },
     { module: 'compliance',  canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
-    { module: 'agent-hq',   canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'agent-hq',    canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'settings',    canView: false, canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'funding',     canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'insights',    canView: true,  canEdit: true,  canExport: true,  canApproveAgents: false },
+    { module: 'reports',     canView: true,  canEdit: true,  canExport: true,  canApproveAgents: false },
   ],
   field: [
     { module: 'dashboard',   canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
@@ -62,8 +70,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     { module: 'csr',         canView: false, canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'volunteers',  canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'compliance',  canView: false, canEdit: false, canExport: false, canApproveAgents: false },
-    { module: 'agent-hq',   canView: false, canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'agent-hq',    canView: false, canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'settings',    canView: false, canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'funding',     canView: false, canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'insights',    canView: false, canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'reports',     canView: false, canEdit: false, canExport: false, canApproveAgents: false },
   ],
   board: [
     { module: 'dashboard',   canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
@@ -75,13 +86,16 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     { module: 'csr',         canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'volunteers',  canView: false, canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'compliance',  canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
-    { module: 'agent-hq',   canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'agent-hq',    canView: true,  canEdit: false, canExport: false, canApproveAgents: false },
     { module: 'settings',    canView: false, canEdit: false, canExport: false, canApproveAgents: false },
+    { module: 'funding',     canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
+    { module: 'insights',    canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
+    { module: 'reports',     canView: true,  canEdit: false, canExport: true,  canApproveAgents: false },
   ],
 };
 
 export const ROLE_META: Record<UserRole, { label: string; icon: string; color: string; bg: string }> = {
-  ed:       { label: 'Executive Director', icon: '👤', color: '#4f46e5', bg: '#ede9fe' },
+  ed:       { label: 'Executive Director', icon: '👤', color: '#0F766E', bg: '#ccfbf1' },
   finance:  { label: 'Finance Officer',    icon: '💼', color: '#0891b2', bg: '#e0f2fe' },
   programs: { label: 'Program Manager',   icon: '📋', color: '#059669', bg: '#d1fae5' },
   field:    { label: 'Field Staff',        icon: '🗺️', color: '#d97706', bg: '#fef3c7' },

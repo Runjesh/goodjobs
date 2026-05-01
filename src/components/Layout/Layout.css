@@ -29,7 +29,7 @@
 /* ── Sidebar ────────────────────────────────────────── */
 .sidebar {
   width: var(--sidebar-width);
-  background: linear-gradient(180deg, #1e1b4b 0%, #312e81 100%);
+  background: linear-gradient(180deg, #0d3d39 0%, #134e4a 100%);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -52,7 +52,7 @@
   width: 36px;
   height: 36px;
   border-radius: var(--radius-lg);
-  background: linear-gradient(135deg, #818cf8, #c084fc);
+  background: linear-gradient(135deg, #2dd4bf, #0F766E);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -61,7 +61,7 @@
   font-size: 0.875rem;
   letter-spacing: -0.05em;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(129,140,248,.4);
+  box-shadow: 0 4px 12px rgba(15,118,110,.4);
 }
 
 .brand-name {
@@ -149,7 +149,7 @@
   transform: translateY(-50%);
   width: 3px;
   height: 60%;
-  background: #818cf8;
+  background: #2dd4bf;
   border-radius: 0 2px 2px 0;
 }
 
