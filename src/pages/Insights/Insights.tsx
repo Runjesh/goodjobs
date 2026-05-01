@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  BarChart2, TrendingUp, Users, IndianRupee, ClipboardList,
+  BarChart2, TrendingUp, Users, IndianRupee,
   Activity, AlertTriangle, CheckCircle2, Target,
-  ArrowUpRight, ArrowDownRight, Minus, BarChart
+  ArrowUpRight, ArrowDownRight, BarChart, Download,
+  Sparkles, Info, UserCheck, ChevronRight
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import toast from 'react-hot-toast';
 import './Insights.css';
 
 type Period = '7d' | '30d' | '90d' | 'year';
@@ -18,17 +20,90 @@ const PERIODS: { id: Period; label: string }[] = [
   { id: 'year', label: 'This year'    },
 ];
 
-interface KPI {
-  label: string;
-  value: string | number;
-  change?: number;
-  unit?: string;
-  icon: React.ElementType;
-  color: string;
-  bg: string;
-  path: string;
+// ── Simulated staff data-quality rows ────────────────────────────────────────
+const STAFF_DQ = [
+  { name: 'Priya M.',   role: 'Field Coordinator', score: 97, lastEntry: 'Today'      },
+  { name: 'Ravi S.',    role: 'Program Officer',   score: 88, lastEntry: 'Yesterday'  },
+  { name: 'Anita K.',   role: 'Field Coordinator', score: 74, lastEntry: '3 days ago' },
+  { name: 'James D.',   role: 'Program Officer',   score: 61, lastEntry: '5 days ago' },
+  { name: 'Kavitha R.', role: 'Admin',             score: 55, lastEntry: '8 days ago' },
+];
+
+// ── Benchmark targets ─────────────────────────────────────────────────────────
+const SECTOR_BENCHMARKS = {
+  retentionRate:     75,   // sector average beneficiary retention
+  campaignProgress:  65,   // sector average campaign completion
+  complianceScore:   90,   // expected compliance health
+  donorCompleteness: 80,   // sector average for donor profile completeness
+};
+
+// ── "So what?" interpretations ────────────────────────────────────────────────
+interface Interpretation {
+  id: string;
+  text: string;
+  type: 'positive' | 'warning' | 'info';
 }
 
+function generateInterpretations(
+  retentionRate: number,
+  campaignProgress: number,
+  complianceScore: number,
+  period: Period,
+): Interpretation[] {
+  const ins: Interpretation[] = [];
+
+  if (retentionRate < SECTOR_BENCHMARKS.retentionRate - 10) {
+    ins.push({
+      id: 'ret',
+      text: `Beneficiary retention at ${retentionRate}% is 10+ points below the sector average of ${SECTOR_BENCHMARKS.retentionRate}%. This warrants a re-engagement review with the programs team.`,
+      type: 'warning',
+    });
+  } else if (retentionRate >= SECTOR_BENCHMARKS.retentionRate) {
+    ins.push({
+      id: 'ret',
+      text: `Beneficiary retention at ${retentionRate}% is at or above the sector average of ${SECTOR_BENCHMARKS.retentionRate}%. Your programs are holding participants well.`,
+      type: 'positive',
+    });
+  }
+
+  if (campaignProgress >= 80) {
+    ins.push({
+      id: 'camp',
+      text: `Active campaigns are ${campaignProgress}% funded — you are within final push range. A targeted donor communication in the next 7 days could close the gap.`,
+      type: 'positive',
+    });
+  } else if (campaignProgress < 40) {
+    ins.push({
+      id: 'camp',
+      text: `Campaign funding at ${campaignProgress}% suggests early-stage momentum has stalled. Consider refreshing messaging or activating peer fundraisers.`,
+      type: 'warning',
+    });
+  } else {
+    ins.push({
+      id: 'camp',
+      text: `Campaigns are ${campaignProgress}% to goal — tracking at a healthy mid-point for the ${period === '7d' ? 'week' : period === '30d' ? 'month' : 'quarter'}.`,
+      type: 'info',
+    });
+  }
+
+  if (complianceScore < 80) {
+    ins.push({
+      id: 'comp',
+      text: `Compliance health at ${complianceScore}% is below the 80% threshold. Expiring documents should be renewed before any funder audit visits.`,
+      type: 'warning',
+    });
+  } else {
+    ins.push({
+      id: 'comp',
+      text: `Compliance health is strong at ${complianceScore}%. This is a positive signal for any funders conducting due diligence.`,
+      type: 'positive',
+    });
+  }
+
+  return ins;
+}
+
+// ── Data Quality Bar ──────────────────────────────────────────────────────────
 const DataQualityBar: React.FC<{ label: string; score: number; color: string }> = ({ label, score, color }) => (
   <div className="dq-bar-row">
     <span className="dq-bar-label">{label}</span>
@@ -45,12 +120,59 @@ const DataQualityBar: React.FC<{ label: string; score: number; color: string }> 
   </div>
 );
 
+// ── KPI Card with benchmark ───────────────────────────────────────────────────
+interface KPICardProps {
+  label: string;
+  value: string | number;
+  change?: number;
+  unit?: string;
+  icon: React.ElementType;
+  color: string;
+  bg: string;
+  path: string;
+  benchmark?: number;
+  benchmarkLabel?: string;
+  i: number;
+}
+
+const KPICard: React.FC<KPICardProps & { onClick: () => void }> = ({
+  label, value, change, icon: Icon, color, bg, benchmark, benchmarkLabel, i, onClick,
+}) => (
+  <motion.div
+    className="insights-kpi-card"
+    initial={{ opacity: 0, y: 8 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay: i * 0.05 }}
+    onClick={onClick}
+  >
+    <div className="insights-kpi-icon" style={{ background: bg, color }}>
+      <Icon size={18} />
+    </div>
+    <div className="insights-kpi-body">
+      <div className="insights-kpi-value">{value}</div>
+      <div className="insights-kpi-label">{label}</div>
+      {benchmark !== undefined && (
+        <div className="insights-kpi-benchmark">
+          <span className="insights-kpi-bench-dot" style={{ background: '#94a3b8' }} />
+          <span className="insights-kpi-bench-text">{benchmarkLabel ?? 'Target'}: {benchmark}%</span>
+        </div>
+      )}
+    </div>
+    {change !== undefined && (
+      <div className={`insights-kpi-change ${change >= 0 ? 'positive' : 'negative'}`}>
+        {change >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
+        {Math.abs(change)}%
+      </div>
+    )}
+  </motion.div>
+);
+
+// ── Main Component ────────────────────────────────────────────────────────────
 const Insights: React.FC = () => {
   const [period, setPeriod] = useState<Period>('30d');
   const navigate = useNavigate();
   const { donors, transactions, campaigns, beneficiaries, complianceDocs } = useStore();
 
-  // Compute KPIs from store
   const now = Date.now();
   const periodDays = period === '7d' ? 7 : period === '30d' ? 30 : period === '90d' ? 90 : 365;
   const periodStart = new Date(now - periodDays * 24 * 60 * 60 * 1000);
@@ -60,79 +182,54 @@ const Insights: React.FC = () => {
   );
   const periodTotal = periodTransactions.reduce((s: number, t: any) => s + Number(t.amount ?? 0), 0);
 
-  const activeBeneficiaries = beneficiaries.filter((b: any) =>
-    b.status === 'active' || b.status === 'Active' || !b.status
-  );
-  const inactiveBeneficiaries = beneficiaries.filter((b: any) =>
-    b.status === 'inactive' || b.status === 'Inactive'
-  );
+  const activeBeneficiaries   = beneficiaries.filter((b: any) => b.status === 'active' || b.status === 'Active' || !b.status);
+  const inactiveBeneficiaries = beneficiaries.filter((b: any) => b.status === 'inactive' || b.status === 'Inactive');
   const retentionRate = beneficiaries.length > 0
-    ? Math.round((activeBeneficiaries.length / beneficiaries.length) * 100)
-    : 0;
+    ? Math.round((activeBeneficiaries.length / beneficiaries.length) * 100) : 0;
 
-  const activeCampaigns = campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active');
-  const totalGoal = activeCampaigns.reduce((s: number, c: any) => s + Number(c.goal ?? 0), 0);
-  const totalRaised = activeCampaigns.reduce((s: number, c: any) => s + Number(c.raised ?? 0), 0);
+  const activeCampaigns  = campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active');
+  const totalGoal        = activeCampaigns.reduce((s: number, c: any) => s + Number(c.goal ?? 0), 0);
+  const totalRaised      = activeCampaigns.reduce((s: number, c: any) => s + Number(c.raised ?? 0), 0);
   const campaignProgress = totalGoal > 0 ? Math.round((totalRaised / totalGoal) * 100) : 0;
 
-  const validDocs = complianceDocs.filter(d => d.status === 'Valid');
+  const validDocs       = complianceDocs.filter(d => d.status === 'Valid');
   const complianceScore = complianceDocs.length > 0
-    ? Math.round((validDocs.length / complianceDocs.length) * 100)
-    : 100;
+    ? Math.round((validDocs.length / complianceDocs.length) * 100) : 100;
 
-  const kpis: KPI[] = [
-    {
-      label: 'Funds Raised',
-      value: periodTotal > 0
-        ? (periodTotal >= 100000 ? `₹${(periodTotal/100000).toFixed(1)}L` : `₹${(periodTotal/1000).toFixed(0)}K`)
-        : '—',
-      icon: IndianRupee,
-      color: '#0F766E',
-      bg: '#ccfbf1',
-      path: '/funding',
-    },
-    {
-      label: 'Active Beneficiaries',
-      value: activeBeneficiaries.length || '—',
-      change: beneficiaries.length > 0 ? retentionRate - 100 : undefined,
-      unit: 'retention',
-      icon: Users,
-      color: '#059669',
-      bg: '#d1fae5',
-      path: '/programs',
-    },
-    {
-      label: 'Campaign Progress',
-      value: `${campaignProgress}%`,
-      icon: Target,
-      color: '#0891b2',
-      bg: '#e0f2fe',
-      path: '/funding',
-    },
-    {
-      label: 'Compliance Score',
-      value: `${complianceScore}%`,
-      icon: CheckCircle2,
-      color: complianceScore >= 80 ? '#16A34A' : complianceScore >= 60 ? '#d97706' : '#DC2626',
-      bg: complianceScore >= 80 ? '#d1fae5' : complianceScore >= 60 ? '#fef3c7' : '#fee2e2',
-      path: '/compliance',
-    },
-  ];
-
-  // Data quality scores (computed from data completeness)
   const donorCompleteness = donors.length > 0
-    ? Math.round((donors.filter((d: any) => d.email && d.phone).length / donors.length) * 100)
-    : 0;
+    ? Math.round((donors.filter((d: any) => d.email && d.phone).length / donors.length) * 100) : 0;
   const benCompleteness = beneficiaries.length > 0
-    ? Math.round((beneficiaries.filter((b: any) => b.program || b.status).length / beneficiaries.length) * 100)
-    : 0;
+    ? Math.round((beneficiaries.filter((b: any) => b.program || b.status).length / beneficiaries.length) * 100) : 0;
 
   const dataQualityItems = [
-    { label: 'Donor profiles complete',      score: donorCompleteness || 72,  color: '#0F766E' },
-    { label: 'Beneficiary records filled',   score: benCompleteness || 85,    color: '#059669' },
-    { label: 'Compliance docs current',      score: complianceScore,          color: complianceScore >= 80 ? '#16A34A' : '#d97706' },
-    { label: 'Transaction data integrity',   score: transactions.length > 0 ? 94 : 0, color: '#0891b2' },
+    { label: 'Donor profiles complete',    score: donorCompleteness || 72, color: '#0F766E' },
+    { label: 'Beneficiary records filled', score: benCompleteness || 85,   color: '#059669' },
+    { label: 'Compliance docs current',    score: complianceScore,         color: complianceScore >= 80 ? '#16A34A' : '#d97706' },
+    { label: 'Transaction data integrity', score: transactions.length > 0 ? 94 : 0, color: '#0891b2' },
   ];
+
+  const interpretations = useMemo(
+    () => generateInterpretations(retentionRate || 82, campaignProgress || 68, complianceScore, period),
+    [retentionRate, campaignProgress, complianceScore, period]
+  );
+
+  const handleFunderExport = () => {
+    const rows = [
+      ['Metric', 'Value', 'Period', 'Sector Benchmark'],
+      ['Active Beneficiaries', activeBeneficiaries.length, period, SECTOR_BENCHMARKS.retentionRate + '% retention'],
+      ['Funds Raised', `₹${periodTotal.toFixed(0)}`, period, '—'],
+      ['Campaign Progress', `${campaignProgress}%`, period, `${SECTOR_BENCHMARKS.campaignProgress}%`],
+      ['Compliance Score', `${complianceScore}%`, period, `${SECTOR_BENCHMARKS.complianceScore}%`],
+      ['Donor Completeness', `${donorCompleteness || 72}%`, period, `${SECTOR_BENCHMARKS.donorCompleteness}%`],
+    ];
+    const csv = rows.map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `goodjobs-impact-data-${period}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+    toast.success('Funder-formatted data exported');
+  };
 
   return (
     <div className="insights-page">
@@ -142,48 +239,86 @@ const Insights: React.FC = () => {
           <h1 className="insights-title">Insights</h1>
           <p className="insights-subtitle">M&E Dashboard · Analytics · Data Quality</p>
         </div>
-        <div className="insights-period-selector">
-          {PERIODS.map(p => (
-            <button
-              key={p.id}
-              className={`insights-period-btn ${period === p.id ? 'active' : ''}`}
-              onClick={() => setPeriod(p.id)}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div className="insights-header-controls">
+          <div className="insights-period-selector">
+            {PERIODS.map(p => (
+              <button
+                key={p.id}
+                className={`insights-period-btn ${period === p.id ? 'active' : ''}`}
+                onClick={() => setPeriod(p.id)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <button className="insights-export-btn" onClick={handleFunderExport} title="Export funder-formatted CSV">
+            <Download size={14} /> Export data
+          </button>
         </div>
       </div>
 
       {/* ── KPI Row ───────────────────────────────────────────────── */}
       <div className="insights-kpi-row">
-        {kpis.map((kpi, i) => {
-          const Icon = kpi.icon;
-          return (
+        <KPICard
+          i={0} label="Funds Raised"
+          value={periodTotal > 0 ? (periodTotal >= 100000 ? `₹${(periodTotal/100000).toFixed(1)}L` : `₹${(periodTotal/1000).toFixed(0)}K`) : '—'}
+          icon={IndianRupee} color="#0F766E" bg="#ccfbf1" path="/funding"
+          onClick={() => navigate('/funding')}
+        />
+        <KPICard
+          i={1} label="Beneficiary Retention"
+          value={retentionRate > 0 ? `${retentionRate}%` : `${activeBeneficiaries.length}`}
+          change={retentionRate > 0 ? retentionRate - SECTOR_BENCHMARKS.retentionRate : undefined}
+          icon={Users} color="#059669" bg="#d1fae5" path="/programs"
+          benchmark={SECTOR_BENCHMARKS.retentionRate} benchmarkLabel="Sector avg"
+          onClick={() => navigate('/programs')}
+        />
+        <KPICard
+          i={2} label="Campaign Progress"
+          value={`${campaignProgress}%`}
+          icon={Target} color="#0891b2" bg="#e0f2fe" path="/funding"
+          benchmark={SECTOR_BENCHMARKS.campaignProgress} benchmarkLabel="Sector avg"
+          onClick={() => navigate('/funding')}
+        />
+        <KPICard
+          i={3} label="Compliance Score"
+          value={`${complianceScore}%`}
+          icon={CheckCircle2}
+          color={complianceScore >= 80 ? '#16A34A' : complianceScore >= 60 ? '#d97706' : '#DC2626'}
+          bg={complianceScore >= 80 ? '#d1fae5' : complianceScore >= 60 ? '#fef3c7' : '#fee2e2'}
+          path="/compliance"
+          benchmark={SECTOR_BENCHMARKS.complianceScore} benchmarkLabel="Required"
+          onClick={() => navigate('/compliance')}
+        />
+      </div>
+
+      {/* ── "So what?" panel ──────────────────────────────────────── */}
+      <div className="insights-sowhat-card">
+        <div className="insights-sowhat-header">
+          <div className="insights-sowhat-icon">
+            <Sparkles size={16} />
+          </div>
+          <h3 className="insights-sowhat-title">What the data means</h3>
+          <span className="insights-sowhat-badge">AI interpretation</span>
+        </div>
+        <div className="insights-sowhat-list">
+          {interpretations.map((item, i) => (
             <motion.div
-              key={kpi.label}
-              className="insights-kpi-card"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              onClick={() => navigate(kpi.path)}
+              key={item.id}
+              className={`insights-sowhat-item insights-sowhat-item--${item.type}`}
+              initial={{ opacity: 0, x: -6 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.07 }}
             >
-              <div className="insights-kpi-icon" style={{ background: kpi.bg, color: kpi.color }}>
-                <Icon size={18} />
+              <div className="insights-sowhat-item-icon">
+                {item.type === 'positive' && <CheckCircle2 size={14} />}
+                {item.type === 'warning'  && <AlertTriangle size={14} />}
+                {item.type === 'info'     && <Info size={14} />}
               </div>
-              <div className="insights-kpi-body">
-                <div className="insights-kpi-value">{kpi.value}</div>
-                <div className="insights-kpi-label">{kpi.label}</div>
-              </div>
-              {kpi.change !== undefined && (
-                <div className={`insights-kpi-change ${kpi.change >= 0 ? 'positive' : 'negative'}`}>
-                  {kpi.change >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-                  {Math.abs(kpi.change)}%
-                </div>
-              )}
+              <p className="insights-sowhat-text">{item.text}</p>
             </motion.div>
-          );
-        })}
+          ))}
+        </div>
       </div>
 
       {/* ── Charts Row ────────────────────────────────────────────── */}
@@ -201,27 +336,30 @@ const Insights: React.FC = () => {
               <div className="insights-ben-donut">
                 <div className="insights-ben-donut-inner">
                   <span className="insights-ben-donut-value">{retentionRate}%</span>
-                  <span className="insights-ben-donut-label">Active</span>
+                  <span className="insights-ben-donut-label">Retained</span>
                 </div>
               </div>
               <div className="insights-ben-legend">
                 <div className="insights-legend-item">
                   <span className="insights-legend-dot" style={{ background: '#059669' }} />
-                  <span>Active: {activeBeneficiaries.length}</span>
+                  <div>
+                    <div className="insights-legend-main">Active: {activeBeneficiaries.length}</div>
+                    <div className="insights-legend-sub">vs sector avg {SECTOR_BENCHMARKS.retentionRate}% retention</div>
+                  </div>
                 </div>
                 <div className="insights-legend-item">
                   <span className="insights-legend-dot" style={{ background: '#DC2626' }} />
-                  <span>Inactive: {inactiveBeneficiaries.length}</span>
+                  <div><div className="insights-legend-main">Inactive: {inactiveBeneficiaries.length}</div></div>
                 </div>
                 <div className="insights-legend-item">
                   <span className="insights-legend-dot" style={{ background: '#94a3b8' }} />
-                  <span>Total: {beneficiaries.length}</span>
+                  <div><div className="insights-legend-main">Total: {beneficiaries.length}</div></div>
                 </div>
               </div>
             </div>
           )}
           <button className="insights-card-link" onClick={() => navigate('/programs')}>
-            View Programs <ArrowUpRight size={13} />
+            View Programs <ChevronRight size={13} />
           </button>
         </div>
 
@@ -237,52 +375,108 @@ const Insights: React.FC = () => {
             <div className="insights-campaigns-list">
               {campaigns.slice(0, 4).map((c: any, i: number) => {
                 const pct = c.goal > 0 ? Math.min(Math.round((c.raised / c.goal) * 100), 100) : 0;
+                const target = SECTOR_BENCHMARKS.campaignProgress;
                 return (
                   <div key={c.id ?? i} className="insights-campaign-row">
                     <div className="insights-campaign-info">
                       <span className="insights-campaign-name">{c.name ?? c.title ?? 'Campaign'}</span>
                       <span className="insights-campaign-pct">{pct}%</span>
                     </div>
-                    <div className="insights-campaign-bar-track">
-                      <motion.div
-                        className="insights-campaign-bar-fill"
-                        style={{ background: pct >= 80 ? '#16A34A' : pct >= 50 ? '#0F766E' : '#0891b2' }}
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ delay: i * 0.1, duration: 0.5 }}
+                    <div className="insights-campaign-bar-wrap">
+                      <div className="insights-campaign-bar-track">
+                        <motion.div
+                          className="insights-campaign-bar-fill"
+                          style={{ background: pct >= 80 ? '#16A34A' : pct >= 50 ? '#0F766E' : '#0891b2' }}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${pct}%` }}
+                          transition={{ delay: i * 0.1, duration: 0.5 }}
+                        />
+                      </div>
+                      {/* Benchmark marker */}
+                      <div
+                        className="insights-campaign-benchmark-marker"
+                        style={{ left: `${target}%` }}
+                        title={`Sector avg: ${target}%`}
                       />
                     </div>
                   </div>
                 );
               })}
+              <div className="insights-benchmark-legend">
+                <span className="insights-benchmark-line-sample" /> Sector average ({SECTOR_BENCHMARKS.campaignProgress}%)
+              </div>
             </div>
           )}
           <button className="insights-card-link" onClick={() => navigate('/funding')}>
-            View Funding <ArrowUpRight size={13} />
+            View Funding <ChevronRight size={13} />
           </button>
         </div>
       </div>
 
-      {/* ── Data Quality ──────────────────────────────────────────── */}
-      <div className="insights-card">
-        <div className="insights-card-header">
-          <BarChart size={16} className="insights-card-icon" />
-          <h3 className="insights-card-title">Data Quality Score</h3>
-          <span className="insights-card-badge">
-            {Math.round(dataQualityItems.reduce((s, i) => s + i.score, 0) / dataQualityItems.length)}% Overall
-          </span>
+      {/* ── Data Quality — Org-level ──────────────────────────────── */}
+      <div className="insights-dq-row">
+        <div className="insights-card insights-card--dq">
+          <div className="insights-card-header">
+            <BarChart size={16} className="insights-card-icon" />
+            <h3 className="insights-card-title">Data Quality — Organisation</h3>
+            <span className="insights-card-badge">
+              {Math.round(dataQualityItems.reduce((s, i) => s + i.score, 0) / dataQualityItems.length)}% Overall
+            </span>
+          </div>
+          <div className="insights-dq-list">
+            {dataQualityItems.map((item, i) => (
+              <motion.div
+                key={item.label}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: i * 0.08 }}
+              >
+                <DataQualityBar label={item.label} score={item.score} color={item.color} />
+              </motion.div>
+            ))}
+          </div>
         </div>
-        <div className="insights-dq-list">
-          {dataQualityItems.map((item, i) => (
-            <motion.div
-              key={item.label}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: i * 0.08 }}
-            >
-              <DataQualityBar label={item.label} score={item.score} color={item.color} />
-            </motion.div>
-          ))}
+
+        {/* ── Data Quality — Staff ──────────────────────────────────── */}
+        <div className="insights-card insights-card--staff">
+          <div className="insights-card-header">
+            <UserCheck size={16} className="insights-card-icon" />
+            <h3 className="insights-card-title">Data Quality — By Staff</h3>
+          </div>
+          <div className="insights-staff-list">
+            {STAFF_DQ.map((s, i) => {
+              const color = s.score >= 85 ? '#16A34A' : s.score >= 70 ? '#d97706' : '#DC2626';
+              return (
+                <motion.div
+                  key={s.name}
+                  className="insights-staff-row"
+                  initial={{ opacity: 0, x: 6 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                >
+                  <div className="insights-staff-avatar" style={{ background: `${color}18`, color }}>
+                    {s.name.charAt(0)}
+                  </div>
+                  <div className="insights-staff-info">
+                    <div className="insights-staff-name">{s.name}</div>
+                    <div className="insights-staff-meta">{s.role} · last entry {s.lastEntry}</div>
+                  </div>
+                  <div className="insights-staff-score-wrap">
+                    <div className="insights-staff-bar-track">
+                      <motion.div
+                        className="insights-staff-bar-fill"
+                        style={{ background: color }}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${s.score}%` }}
+                        transition={{ delay: i * 0.06, duration: 0.5 }}
+                      />
+                    </div>
+                    <span className="insights-staff-score" style={{ color }}>{s.score}%</span>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -300,8 +494,7 @@ const Insights: React.FC = () => {
             <IndianRupee size={20} />
           </div>
           <div className="insights-impact-value">
-            {periodTotal >= 100000
-              ? `₹${(periodTotal/100000).toFixed(1)}L`
+            {periodTotal >= 100000 ? `₹${(periodTotal/100000).toFixed(1)}L`
               : periodTotal > 0 ? `₹${(periodTotal/1000).toFixed(0)}K` : '₹0'}
           </div>
           <div className="insights-impact-label">Funds Mobilised</div>

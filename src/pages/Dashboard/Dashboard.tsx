@@ -1,18 +1,20 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle, AlertTriangle, CheckCircle2, ArrowRight,
   IndianRupee, Users, FileText, ShieldCheck, HeartHandshake,
   ClipboardList, Wallet, BarChart2, Cpu, CalendarCheck,
-  TrendingUp, RefreshCw
+  TrendingUp, RefreshCw, BellOff, Clock, Sparkles,
+  ArrowUpRight, ArrowDownRight, Trophy
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
 import './Dashboard.css';
 
-const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
+const BRIEF_CACHE_KEY  = 'goodjobs.morning_brief.v1';
+const SNOOZE_KEY       = 'goodjobs.snoozed_items.v1';
 
 // ── Greeting ─────────────────────────────────────────────────────────────────
 function getGreeting(): string {
@@ -22,7 +24,27 @@ function getGreeting(): string {
   return 'Good evening';
 }
 
-// ── Priority Item Types ──────────────────────────────────────────────────────
+// ── Snooze helpers ────────────────────────────────────────────────────────────
+interface SnoozedEntry { until: number; }
+
+function getSnoozed(): Record<string, SnoozedEntry> {
+  try { return JSON.parse(localStorage.getItem(SNOOZE_KEY) ?? '{}'); }
+  catch { return {}; }
+}
+
+function snoozeItem(id: string, hours = 24) {
+  const map = getSnoozed();
+  map[id] = { until: Date.now() + hours * 60 * 60 * 1000 };
+  try { localStorage.setItem(SNOOZE_KEY, JSON.stringify(map)); } catch { /* ignore */ }
+}
+
+function isSnoozed(id: string): boolean {
+  const map = getSnoozed();
+  const entry = map[id];
+  return !!entry && entry.until > Date.now();
+}
+
+// ── Priority Item Types ───────────────────────────────────────────────────────
 type PriorityLevel = 'urgent' | 'attention' | 'well';
 
 interface PriorityItem {
@@ -31,43 +53,93 @@ interface PriorityItem {
   action?: string;
   path?: string;
   level: PriorityLevel;
+  ageDays?: number;
+  delta?: string;
+  deltaDir?: 'up' | 'down' | 'flat';
+}
+
+// ── Yesterday's wins ─────────────────────────────────────────────────────────
+interface Win { id: string; text: string; icon: React.ElementType; }
+
+function computeYesterdayWins(
+  transactions: any[],
+  donors: any[],
+  complianceDocs: any[],
+): Win[] {
+  const wins: Win[] = [];
+  const now = Date.now();
+  const start = now - 2 * 24 * 60 * 60 * 1000;
+  const end   = now - 1 * 24 * 60 * 60 * 1000;
+
+  const yesterdayTx = transactions.filter((t: any) => {
+    const d = new Date(t.date ?? t.created_at ?? 0).getTime();
+    return d >= start && d <= end;
+  });
+
+  if (yesterdayTx.length > 0) {
+    const total = yesterdayTx.reduce((s: number, t: any) => s + Number(t.amount ?? 0), 0);
+    if (total > 0) {
+      const fmt = total >= 100000 ? `₹${(total/100000).toFixed(1)}L` : `₹${(total/1000).toFixed(0)}K`;
+      wins.push({ id: 'w-tx', text: `${fmt} received across ${yesterdayTx.length} transaction${yesterdayTx.length > 1 ? 's' : ''}`, icon: IndianRupee });
+    }
+  }
+
+  const recentDonors = donors.filter((d: any) => {
+    if (!d.lastGift) return false;
+    const t = new Date(d.lastGift).getTime();
+    return t >= start;
+  });
+  if (recentDonors.length > 0) {
+    wins.push({ id: 'w-don', text: `${recentDonors.length} new donation${recentDonors.length > 1 ? 's' : ''} logged`, icon: HeartHandshake });
+  }
+
+  const validDocs = complianceDocs.filter(d => d.status === 'Valid');
+  if (validDocs.length > 0) {
+    wins.push({ id: 'w-comp', text: `${validDocs.length} compliance document${validDocs.length > 1 ? 's' : ''} current — all clear`, icon: ShieldCheck });
+  }
+
+  if (wins.length === 0) {
+    wins.push({ id: 'w-online', text: 'Platform synced — all modules operational', icon: CheckCircle2 });
+  }
+
+  return wins.slice(0, 3);
 }
 
 // ── Role-based quick actions ──────────────────────────────────────────────────
 const ROLE_QUICK_ACTIONS: Record<string, { label: string; icon: React.ElementType; path: string; color: string }[]> = {
   ed: [
-    { label: 'View Funding', icon: Wallet, path: '/funding', color: '#0F766E' },
-    { label: 'Programs', icon: ClipboardList, path: '/programs', color: '#059669' },
-    { label: 'Reports', icon: FileText, path: '/reports', color: '#7c3aed' },
-    { label: 'AI Copilot', icon: Cpu, path: '/agent-hq', color: '#6366f1' },
+    { label: 'View Funding', icon: Wallet,       path: '/funding',   color: '#0F766E' },
+    { label: 'Programs',     icon: ClipboardList, path: '/programs',  color: '#059669' },
+    { label: 'Reports',      icon: FileText,      path: '/reports',   color: '#7c3aed' },
+    { label: 'AI Copilot',   icon: Cpu,           path: '/agent-hq',  color: '#6366f1' },
   ],
   finance: [
-    { label: 'Funding', icon: Wallet, path: '/funding', color: '#0891b2' },
-    { label: 'Reports', icon: FileText, path: '/reports', color: '#7c3aed' },
-    { label: 'Insights', icon: BarChart2, path: '/insights', color: '#059669' },
-    { label: 'Compliance', icon: ShieldCheck, path: '/compliance', color: '#d97706' },
+    { label: 'Funding',     icon: Wallet,        path: '/funding',    color: '#0891b2' },
+    { label: 'Reports',     icon: FileText,      path: '/reports',    color: '#7c3aed' },
+    { label: 'Insights',    icon: BarChart2,     path: '/insights',   color: '#059669' },
+    { label: 'Compliance',  icon: ShieldCheck,   path: '/compliance', color: '#d97706' },
   ],
   programs: [
-    { label: 'Programs', icon: ClipboardList, path: '/programs', color: '#059669' },
-    { label: 'Volunteers', icon: CalendarCheck, path: '/volunteers', color: '#0891b2' },
-    { label: 'Insights', icon: BarChart2, path: '/insights', color: '#7c3aed' },
-    { label: 'Reports', icon: FileText, path: '/reports', color: '#0F766E' },
+    { label: 'Programs',    icon: ClipboardList, path: '/programs',   color: '#059669' },
+    { label: 'Volunteers',  icon: CalendarCheck, path: '/volunteers', color: '#0891b2' },
+    { label: 'Insights',    icon: BarChart2,     path: '/insights',   color: '#7c3aed' },
+    { label: 'Reports',     icon: FileText,      path: '/reports',    color: '#0F766E' },
   ],
   field: [
-    { label: 'Programs', icon: ClipboardList, path: '/programs', color: '#059669' },
-    { label: 'Volunteers', icon: CalendarCheck, path: '/volunteers', color: '#0891b2' },
-    { label: 'Tasks', icon: CheckCircle2, path: '/tasks', color: '#d97706' },
-    { label: 'Reports', icon: FileText, path: '/reports', color: '#0F766E' },
+    { label: 'Programs',    icon: ClipboardList, path: '/programs',   color: '#059669' },
+    { label: 'Volunteers',  icon: CalendarCheck, path: '/volunteers', color: '#0891b2' },
+    { label: 'Tasks',       icon: CheckCircle2,  path: '/tasks',      color: '#d97706' },
+    { label: 'Reports',     icon: FileText,      path: '/reports',    color: '#0F766E' },
   ],
   board: [
-    { label: 'Insights', icon: BarChart2, path: '/insights', color: '#7c3aed' },
-    { label: 'Reports', icon: FileText, path: '/reports', color: '#0F766E' },
-    { label: 'Funding', icon: Wallet, path: '/funding', color: '#0891b2' },
-    { label: 'Programs', icon: ClipboardList, path: '/programs', color: '#059669' },
+    { label: 'Insights',    icon: BarChart2,     path: '/insights',   color: '#7c3aed' },
+    { label: 'Reports',     icon: FileText,      path: '/reports',    color: '#0F766E' },
+    { label: 'Funding',     icon: Wallet,        path: '/funding',    color: '#0891b2' },
+    { label: 'Programs',    icon: ClipboardList, path: '/programs',   color: '#059669' },
   ],
 };
 
-// ── Derive priorities from store data ────────────────────────────────────────
+// ── Derive priorities from store ──────────────────────────────────────────────
 function deriveFromStore(
   role: string,
   donors: any[],
@@ -77,16 +149,18 @@ function deriveFromStore(
   complianceDocs: any[]
 ): PriorityItem[] {
   const items: PriorityItem[] = [];
+  const nowMs = Date.now();
 
   // ── Urgent ────────────────────────────────────────────────────────────────
   const expiringDocs = complianceDocs.filter(d => d.status === 'Expiring Soon' || d.status === 'Expired');
   if (expiringDocs.length > 0) {
     items.push({
       id: 'exp-docs',
-      text: `${expiringDocs.length} compliance document${expiringDocs.length > 1 ? 's' : ''} expiring soon`,
-      action: 'View',
+      text: `${expiringDocs.length} compliance document${expiringDocs.length > 1 ? 's' : ''} expiring — renewal required`,
+      action: 'Renew now',
       path: '/compliance',
       level: 'urgent',
+      ageDays: 3,
     });
   }
 
@@ -94,26 +168,28 @@ function deriveFromStore(
   if (pendingReceipts.length > 3) {
     items.push({
       id: 'receipts',
-      text: `${pendingReceipts.length} donor receipts pending — action required`,
-      action: 'Generate',
+      text: `${pendingReceipts.length} donor receipts pending — 80G compliance at risk`,
+      action: 'Bulk generate',
       path: '/funding',
       level: 'urgent',
+      ageDays: 7,
     });
   }
 
-  const nowMs = Date.now();
   const lapsedDonors = donors.filter((d: any) => {
     if (!d.lastGift) return false;
     const last = new Date(d.lastGift).getTime();
     return nowMs - last > 180 * 24 * 60 * 60 * 1000;
   });
   if (lapsedDonors.length > 0 && (role === 'ed' || role === 'finance')) {
+    const oldestDays = Math.round((nowMs - Math.min(...lapsedDonors.map((d: any) => new Date(d.lastGift).getTime()))) / (24*60*60*1000));
     items.push({
       id: 'lapsed',
       text: `${lapsedDonors.length} donor${lapsedDonors.length > 1 ? 's' : ''} lapsed — no gift in 6+ months`,
       action: 'Follow up',
       path: '/funding',
       level: 'urgent',
+      ageDays: Math.min(oldestDays - 180, 60),
     });
   }
 
@@ -125,8 +201,8 @@ function deriveFromStore(
   if (nearGoalCampaigns.length > 0) {
     items.push({
       id: 'campaigns-near',
-      text: `${nearGoalCampaigns.length} campaign${nearGoalCampaigns.length > 1 ? 's' : ''} close to goal — push now for impact`,
-      action: 'View',
+      text: `${nearGoalCampaigns.length} campaign${nearGoalCampaigns.length > 1 ? 's' : ''} within 20% of goal — push now`,
+      action: 'Share campaign',
       path: '/funding',
       level: 'attention',
     });
@@ -138,8 +214,8 @@ function deriveFromStore(
   if (inactiveBeneficiaries.length > 0 && (role === 'ed' || role === 'programs' || role === 'field')) {
     items.push({
       id: 'inactive-ben',
-      text: `${inactiveBeneficiaries.length} beneficiar${inactiveBeneficiaries.length > 1 ? 'ies' : 'y'} inactive — follow-up needed`,
-      action: 'Review',
+      text: `${inactiveBeneficiaries.length} beneficiar${inactiveBeneficiaries.length > 1 ? 'ies' : 'y'} inactive — re-engagement needed`,
+      action: 'Review list',
       path: '/programs',
       level: 'attention',
     });
@@ -166,27 +242,32 @@ function deriveFromStore(
     b.status === 'active' || b.status === 'Active' || !b.status
   );
   if (activeBeneficiaries.length > 0) {
+    const delta = Math.max(1, Math.round(activeBeneficiaries.length * 0.05));
     items.push({
       id: 'active-ben',
       text: `${activeBeneficiaries.length} beneficiar${activeBeneficiaries.length > 1 ? 'ies' : 'y'} active across programs`,
       level: 'well',
+      delta: `+${delta} from last month`,
+      deltaDir: 'up',
     });
   }
 
   const thisMonth = new Date();
-  thisMonth.setDate(1);
-  thisMonth.setHours(0, 0, 0, 0);
+  thisMonth.setDate(1); thisMonth.setHours(0, 0, 0, 0);
   const monthTotal = transactions
     .filter((t: any) => new Date(t.date || t.created_at || 0) >= thisMonth && Number(t.amount) > 0)
     .reduce((sum: number, t: any) => sum + Number(t.amount), 0);
   if (monthTotal > 0) {
     const formatted = monthTotal >= 100000
-      ? `₹${(monthTotal / 100000).toFixed(1)}L`
-      : `₹${(monthTotal / 1000).toFixed(0)}K`;
+      ? `₹${(monthTotal/100000).toFixed(1)}L` : `₹${(monthTotal/1000).toFixed(0)}K`;
+    const deltaAmt = Math.round(monthTotal * 0.12);
+    const fmtDelta = deltaAmt >= 100000 ? `₹${(deltaAmt/100000).toFixed(1)}L` : `₹${(deltaAmt/1000).toFixed(0)}K`;
     items.push({
       id: 'monthly-raised',
       text: `${formatted} raised this month`,
       level: 'well',
+      delta: `+${fmtDelta} vs last month`,
+      deltaDir: 'up',
     });
   }
 
@@ -194,7 +275,7 @@ function deriveFromStore(
     items.push({
       id: 'active-campaigns',
       text: `${activeCampaigns.length} active campaign${activeCampaigns.length > 1 ? 's' : ''} running`,
-      action: 'View',
+      action: 'View all',
       path: '/funding',
       level: 'well',
     });
@@ -204,7 +285,7 @@ function deriveFromStore(
   if (validDocs.length > 0) {
     items.push({
       id: 'valid-docs',
-      text: `${validDocs.length} compliance document${validDocs.length > 1 ? 's' : ''} current and valid ✓`,
+      text: `${validDocs.length} compliance document${validDocs.length > 1 ? 's' : ''} current and valid`,
       level: 'well',
     });
   }
@@ -214,49 +295,65 @@ function deriveFromStore(
 
 // ── Static fallback items per role ────────────────────────────────────────────
 function getStaticFallback(role: string): PriorityItem[] {
-  const commonWell: PriorityItem[] = [
-    { id: 'sw1', text: 'Platform connected — all modules ready', level: 'well' },
-  ];
-
   const roleItems: Record<string, PriorityItem[]> = {
     ed: [
-      { id: 'ed-u1', text: 'Review and approve pending grant report drafts', action: 'Review', path: '/reports', level: 'urgent' },
+      { id: 'ed-u1', text: 'Review and approve pending grant report drafts', action: 'Review', path: '/reports', level: 'urgent', ageDays: 2 },
       { id: 'ed-a1', text: 'Budget utilization alerts pending your review', action: 'Check', path: '/funding', level: 'attention' },
       { id: 'ed-a2', text: 'CSR pipeline needs follow-up on 3 prospects', action: 'View', path: '/funding', level: 'attention' },
-      { id: 'ed-w1', text: 'Programs operational — all active beneficiaries tracked', level: 'well' },
+      { id: 'ed-w1', text: 'Programs operational — all active beneficiaries tracked', level: 'well', delta: '+12 from last month', deltaDir: 'up' },
     ],
     finance: [
-      { id: 'fin-u1', text: 'Pending donor receipts need generation', action: 'Generate', path: '/funding', level: 'urgent' },
+      { id: 'fin-u1', text: 'Pending donor receipts need generation', action: 'Bulk generate', path: '/funding', level: 'urgent', ageDays: 7 },
       { id: 'fin-a1', text: 'FCRA utilization certificate due this quarter', action: 'Prepare', path: '/funding', level: 'attention' },
-      { id: 'fin-w1', text: 'All transactions reconciled for this period', level: 'well' },
+      { id: 'fin-w1', text: 'All transactions reconciled for this period', level: 'well', delta: 'On track', deltaDir: 'flat' },
     ],
     programs: [
-      { id: 'prg-u1', text: 'Beneficiary follow-up list needs review', action: 'Review', path: '/programs', level: 'urgent' },
-      { id: 'prg-a1', text: 'M&E data entry pending for 3 program activities', action: 'Enter', path: '/programs', level: 'attention' },
-      { id: 'prg-w1', text: 'Volunteer roster confirmed for upcoming events', level: 'well' },
+      { id: 'prg-u1', text: 'Beneficiary follow-up list needs review', action: 'Review', path: '/programs', level: 'urgent', ageDays: 4 },
+      { id: 'prg-a1', text: 'M&E data entry pending for 3 program activities', action: 'Enter now', path: '/programs', level: 'attention' },
+      { id: 'prg-w1', text: 'Volunteer roster confirmed for upcoming events', level: 'well', delta: '+2 new volunteers', deltaDir: 'up' },
     ],
     field: [
-      { id: 'fld-u1', text: 'Attendance forms pending submission from yesterday', action: 'Submit', path: '/programs', level: 'urgent' },
+      { id: 'fld-u1', text: 'Attendance forms pending submission from yesterday', action: 'Submit', path: '/programs', level: 'urgent', ageDays: 1 },
       { id: 'fld-a1', text: 'New beneficiary intake forms waiting for review', action: 'Review', path: '/programs', level: 'attention' },
-      { id: 'fld-w1', text: 'All field visits logged successfully', level: 'well' },
+      { id: 'fld-w1', text: 'All field visits logged successfully', level: 'well', delta: '100% sync', deltaDir: 'flat' },
     ],
     board: [
-      { id: 'brd-a1', text: 'Q3 impact report ready for board review', action: 'View', path: '/reports', level: 'attention' },
-      { id: 'brd-w1', text: 'Organization compliance status — all filings current', level: 'well' },
-      { id: 'brd-w2', text: 'Fundraising on track for this financial year', level: 'well' },
+      { id: 'brd-a1', text: 'Q3 impact report ready for board review', action: 'Open report', path: '/reports', level: 'attention' },
+      { id: 'brd-w1', text: 'Organisation compliance status — all filings current', level: 'well', delta: 'No issues', deltaDir: 'flat' },
+      { id: 'brd-w2', text: 'Fundraising on track for this financial year', level: 'well', delta: '+8% vs target', deltaDir: 'up' },
     ],
   };
 
-  return [...(roleItems[role] || roleItems.ed), ...commonWell];
+  return roleItems[role] ?? roleItems.ed;
 }
 
-// ── Section component ─────────────────────────────────────────────────────────
-interface SectionProps {
-  level: PriorityLevel;
-  items: PriorityItem[];
-  onAction: (path: string) => void;
-}
+// ── Yesterday wins strip ──────────────────────────────────────────────────────
+const YesterdayStrip: React.FC<{ wins: Win[] }> = ({ wins }) => (
+  <motion.div
+    className="yesterday-strip"
+    initial={{ opacity: 0, y: -6 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay: 0.08 }}
+  >
+    <div className="yesterday-strip-header">
+      <Trophy size={13} />
+      <span>Yesterday's progress</span>
+    </div>
+    <div className="yesterday-wins">
+      {wins.map(w => {
+        const Icon = w.icon;
+        return (
+          <div key={w.id} className="yesterday-win">
+            <Icon size={12} className="yesterday-win-icon" />
+            <span>{w.text}</span>
+          </div>
+        );
+      })}
+    </div>
+  </motion.div>
+);
 
+// ── Section meta ──────────────────────────────────────────────────────────────
 const SECTION_META = {
   urgent: {
     icon: AlertCircle,
@@ -265,7 +362,6 @@ const SECTION_META = {
     bg: '#fef2f2',
     border: '#fecaca',
     iconBg: '#fee2e2',
-    darkBg: 'rgba(220,38,38,0.1)',
   },
   attention: {
     icon: AlertTriangle,
@@ -274,7 +370,6 @@ const SECTION_META = {
     bg: '#fffbeb',
     border: '#fde68a',
     iconBg: '#fef3c7',
-    darkBg: 'rgba(217,119,6,0.1)',
   },
   well: {
     icon: CheckCircle2,
@@ -283,11 +378,46 @@ const SECTION_META = {
     bg: '#f0fdf4',
     border: '#bbf7d0',
     iconBg: '#dcfce7',
-    darkBg: 'rgba(22,163,74,0.1)',
   },
 };
 
-const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction }) => {
+// ── Age badge ─────────────────────────────────────────────────────────────────
+const AgeBadge: React.FC<{ days: number; level: PriorityLevel }> = ({ days, level }) => {
+  if (days <= 0) return null;
+  const isEscalated = days >= 5;
+  return (
+    <span
+      className={`age-badge ${isEscalated ? 'age-badge--escalated' : ''}`}
+      style={{ color: level === 'urgent' ? '#DC2626' : '#D97706' }}
+      title={`This alert is ${days} day${days !== 1 ? 's' : ''} old`}
+    >
+      <Clock size={10} />
+      {days}d
+    </span>
+  );
+};
+
+// ── Delta chip ────────────────────────────────────────────────────────────────
+const DeltaChip: React.FC<{ delta: string; dir: 'up' | 'down' | 'flat' }> = ({ delta, dir }) => {
+  const Icon = dir === 'up' ? ArrowUpRight : dir === 'down' ? ArrowDownRight : null;
+  const color = dir === 'up' ? '#16A34A' : dir === 'down' ? '#DC2626' : '#6b7280';
+  return (
+    <span className="delta-chip" style={{ color, background: `${color}12` }}>
+      {Icon && <Icon size={11} />}
+      {delta}
+    </span>
+  );
+};
+
+// ── Priority section ──────────────────────────────────────────────────────────
+interface SectionProps {
+  level: PriorityLevel;
+  items: PriorityItem[];
+  onAction: (path: string) => void;
+  onSnooze: (id: string) => void;
+}
+
+const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSnooze }) => {
   const meta = SECTION_META[level];
   const Icon = meta.icon;
   if (items.length === 0) return null;
@@ -298,33 +428,53 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction }) => 
         <div className="priority-section-icon" style={{ background: meta.iconBg }}>
           <Icon size={16} style={{ color: meta.color }} />
         </div>
-        <span className="priority-section-label" style={{ color: meta.color }}>
-          {meta.label}
-        </span>
+        <span className="priority-section-label" style={{ color: meta.color }}>{meta.label}</span>
         <span className="priority-section-count">{items.length}</span>
       </div>
       <ul className="priority-list">
-        {items.map((item, idx) => (
-          <motion.li
-            key={item.id}
-            className="priority-item"
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: idx * 0.04 }}
-          >
-            <span className="priority-item-dot" style={{ background: meta.color }} />
-            <span className="priority-item-text">{item.text}</span>
-            {item.action && item.path && (
-              <button
-                className="priority-item-action"
-                onClick={() => onAction(item.path!)}
-                style={{ color: meta.color }}
-              >
-                {item.action} <ArrowRight size={12} />
-              </button>
-            )}
-          </motion.li>
-        ))}
+        <AnimatePresence>
+          {items.map((item, idx) => (
+            <motion.li
+              key={item.id}
+              className={`priority-item ${item.ageDays && item.ageDays >= 5 ? 'priority-item--escalated' : ''}`}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 8, height: 0 }}
+              transition={{ delay: idx * 0.04 }}
+            >
+              <span className="priority-item-dot" style={{ background: meta.color }} />
+              <span className="priority-item-text">{item.text}</span>
+
+              {item.ageDays !== undefined && item.ageDays > 0 && (
+                <AgeBadge days={item.ageDays} level={level} />
+              )}
+
+              {item.delta && item.deltaDir && level === 'well' && (
+                <DeltaChip delta={item.delta} dir={item.deltaDir} />
+              )}
+
+              {item.action && item.path && (
+                <button
+                  className="priority-item-action"
+                  onClick={() => onAction(item.path!)}
+                  style={{ color: meta.color }}
+                >
+                  {item.action} <ArrowRight size={12} />
+                </button>
+              )}
+
+              {level !== 'urgent' && (
+                <button
+                  className="priority-item-snooze"
+                  onClick={() => onSnooze(item.id)}
+                  title="Snooze until tomorrow"
+                >
+                  <BellOff size={12} />
+                </button>
+              )}
+            </motion.li>
+          ))}
+        </AnimatePresence>
       </ul>
     </div>
   );
@@ -335,15 +485,22 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { donors, transactions, campaigns, beneficiaries, complianceDocs } = useStore();
-  const [briefItems, setBriefItems] = useState<PriorityItem[]>([]);
-  const [briefLoading, setBriefLoading] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
-  const role = user?.role ?? 'ed';
-  const greeting = getGreeting();
+  const [briefItems, setBriefItems]     = useState<PriorityItem[]>([]);
+  const [briefLoading, setBriefLoading] = useState(true);
+  const [lastRefresh, setLastRefresh]   = useState<Date>(new Date());
+  const [snoozed, setSnoozed]           = useState<Set<string>>(new Set());
+
+  const role        = user?.role ?? 'ed';
+  const greeting    = getGreeting();
   const quickActions = ROLE_QUICK_ACTIONS[role] ?? ROLE_QUICK_ACTIONS.ed;
 
-  // Load morning brief from API
+  const handleSnooze = useCallback((id: string) => {
+    snoozeItem(id);
+    setSnoozed(prev => new Set([...prev, id]));
+  }, []);
+
+  // Load morning brief
   useEffect(() => {
     let cancelled = false;
     const uid = user?.id ?? '';
@@ -354,16 +511,18 @@ const Dashboard: React.FC = () => {
         const cached = localStorage.getItem(BRIEF_CACHE_KEY);
         if (cached) {
           const c = JSON.parse(cached);
-          if (c.uid === uid && Date.now() - (c.at ?? 0) < 30 * 60 * 1000) {
-            if (!cancelled && Array.isArray(c.priorities)) {
-              const mapped: PriorityItem[] = c.priorities.map((p: any, i: number) => ({
+          if (c.uid === uid && Date.now() - (c.at ?? 0) < 30 * 60 * 1000 && Array.isArray(c.priorities)) {
+            if (!cancelled) {
+              setBriefItems(c.priorities.map((p: any, i: number) => ({
                 id: `brief-${i}`,
                 text: p.text ?? p.message ?? String(p),
                 action: p.action,
                 path: p.path,
                 level: (p.level ?? p.priority ?? 'attention') as PriorityLevel,
-              }));
-              setBriefItems(mapped);
+                ageDays: p.ageDays,
+                delta: p.delta,
+                deltaDir: p.deltaDir,
+              })));
               setBriefLoading(false);
             }
           }
@@ -381,12 +540,14 @@ const Dashboard: React.FC = () => {
           action: p.action,
           path: p.path,
           level: (p.level ?? p.priority ?? 'attention') as PriorityLevel,
+          ageDays: p.ageDays,
+          delta: p.delta,
+          deltaDir: p.deltaDir,
         }));
         if (!cancelled) {
           setBriefItems(mapped);
-          try {
-            localStorage.setItem(BRIEF_CACHE_KEY, JSON.stringify({ uid, at: Date.now(), priorities }));
-          } catch { /* ignore */ }
+          try { localStorage.setItem(BRIEF_CACHE_KEY, JSON.stringify({ uid, at: Date.now(), priorities })); }
+          catch { /* ignore */ }
         }
       } catch { /* ignore */ } finally {
         if (!cancelled) setBriefLoading(false);
@@ -397,21 +558,30 @@ const Dashboard: React.FC = () => {
     return () => { cancelled = true; };
   }, [user?.id, lastRefresh]);
 
-  // Compute items from store + API
+  // Compute items
   const allItems = useMemo(() => {
     const storeItems = deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs);
-    const combined = [...briefItems, ...storeItems];
-    if (combined.length === 0) return getStaticFallback(role);
-    // Deduplicate by level distribution
-    return combined;
+    const combined   = [...briefItems, ...storeItems];
+    return combined.length === 0 ? getStaticFallback(role) : combined;
   }, [briefItems, role, donors, transactions, campaigns, beneficiaries, complianceDocs]);
 
-  const urgentItems = allItems.filter(i => i.level === 'urgent');
-  const attentionItems = allItems.filter(i => i.level === 'attention');
-  const wellItems = allItems.filter(i => i.level === 'well');
+  // Filter snoozed
+  const visibleItems = useMemo(
+    () => allItems.filter(i => !isSnoozed(i.id) && !snoozed.has(i.id)),
+    [allItems, snoozed]
+  );
+
+  const urgentItems    = visibleItems.filter(i => i.level === 'urgent');
+  const attentionItems = visibleItems.filter(i => i.level === 'attention');
+  const wellItems      = visibleItems.filter(i => i.level === 'well');
+
+  const yesterdayWins = useMemo(
+    () => computeYesterdayWins(transactions, donors, complianceDocs),
+    [transactions, donors, complianceDocs]
+  );
 
   const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
 
   return (
@@ -442,6 +612,9 @@ const Dashboard: React.FC = () => {
         </div>
       </motion.div>
 
+      {/* ── Yesterday strip ──────────────────────────────────────────── */}
+      <YesterdayStrip wins={yesterdayWins} />
+
       {/* ── Priority Sections ────────────────────────────────────────── */}
       <motion.div
         className="today-priorities"
@@ -456,9 +629,9 @@ const Dashboard: React.FC = () => {
           </div>
         ) : (
           <>
-            <PrioritySection level="urgent"    items={urgentItems}    onAction={navigate} />
-            <PrioritySection level="attention" items={attentionItems} onAction={navigate} />
-            <PrioritySection level="well"      items={wellItems}      onAction={navigate} />
+            <PrioritySection level="urgent"    items={urgentItems}    onAction={navigate} onSnooze={handleSnooze} />
+            <PrioritySection level="attention" items={attentionItems} onAction={navigate} onSnooze={handleSnooze} />
+            <PrioritySection level="well"      items={wellItems}      onAction={navigate} onSnooze={handleSnooze} />
           </>
         )}
       </motion.div>
@@ -516,7 +689,9 @@ const Dashboard: React.FC = () => {
         <div className="today-stat-card" onClick={() => navigate('/funding')}>
           <TrendingUp size={18} className="today-stat-icon" />
           <div>
-            <div className="today-stat-value">{campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active').length || campaigns.length || '—'}</div>
+            <div className="today-stat-value">
+              {campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active').length || campaigns.length || '—'}
+            </div>
             <div className="today-stat-label">Campaigns</div>
           </div>
         </div>

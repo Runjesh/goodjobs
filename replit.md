@@ -44,6 +44,19 @@ India-first nonprofit operating system with an agentic FastAPI backend and React
 - Build: `npm run build`
 - Public dir: `dist`
 
+## Navigation Structure
+
+Seven primary routes inside the main Layout:
+`/` (Today) · `/programs` · `/funding` · `/insights` · `/reports` · `/agent-hq` · `/settings`
+
+Legacy module pages still accessible: `/crm` `/fundraising` `/finance` `/compliance` `/csr` `/volunteers`
+
+## Design Language
+
+- Primary color: `#0F766E` (deep teal)
+- Active accent: `#2dd4bf`
+- Sidebar/auth gradient: `#0d3d39 → #134e4a → #0F766E`
+
 ## Key Features
 
 - FCRA-compliant fund accounting
@@ -52,6 +65,23 @@ India-first nonprofit operating system with an agentic FastAPI backend and React
 - 80G receipts auto-generated
 - DPDP Act 2023 compliant
 - Donor CRM, CSR prospecting, fundraising, compliance, volunteer management
+
+## Today Screen (Dashboard)
+
+- Yesterday's wins strip (computed from store data)
+- Three priority sections: Urgent / Needs Attention / Going Well
+- Alert age badges that pulse when ≥5 days old (urgency escalation)
+- Snooze button on non-urgent items (24h, stored in localStorage)
+- Trend delta chips on Going Well items (↑ / ↓ / flat)
+- Role-based quick actions grid (4 tiles per role)
+
+## Insights (M&E)
+
+- KPI cards with sector-average benchmark lines
+- "What the data means" AI interpretation panel (3 plain-language sentences)
+- Campaign bar charts with sector-average marker lines
+- Staff-wise data quality breakdown (score + last entry date)
+- One-click funder-formatted CSV export
 
 ## Development Notes
 

@@ -1,0 +1,124 @@
+Perfect instinct. Adding features is easy. Making what exists actually work brilliantly is the hard, valuable thing.
+
+Here are the improvements — only to what's already built:
+
+1. Today Screen — Make It Truly Intelligent, Not Just a List
+Current state: Shows urgent items, needs attention, going well.
+
+The improvement: Right now it's a static list of alerts. Make it contextually aware of time, role, and history.
+
+Items should age and escalate — a grant report that was amber 7 days ago and is now 2 days away should visually feel more urgent, not just move up a list
+
+Each alert should have one-tap action inline — "Mark follow-up done", "Open draft report", "Send receipt" — without navigating away
+
+Add a "what happened yesterday" strip — 3 lines showing what was completed, so staff feel progress, not just pressure
+
+Snooze on non-urgent items — "Remind me tomorrow" so the list doesn't feel overwhelming
+
+The Going Well section should show trend arrows — not just "234 beneficiaries active" but "234 ↑ 12 from last month" so it feels like momentum, not just a number
+
+2. Beneficiary Profile — Make It a Case File, Not a Form
+Current state: Tabs with demographic data, service logs, attendance, documents.
+
+The improvement: A staff member should open a beneficiary record and immediately understand the full story of that person and what to do next.
+
+Replace the tab-heavy layout with a single scrolling timeline as the primary view — every service, attendance, note, and status change in chronological order, newest first
+
+The top of the profile should show a 3-line AI summary: "Meena has been enrolled for 8 months. She missed 3 sessions in April. Her next follow-up is overdue by 4 days."
+
+Next action should always be visible and sticky — not buried in a Tasks tab
+
+Service log entry should be a floating button that opens a bottom sheet — not a separate page. Log a service in 3 taps, not 6 screens
+
+If a beneficiary has been inactive, the profile should show a re-engagement prompt with suggested actions based on what worked previously for similar cases
+
+3. Grant Manager — Make Compliance Feel Proactive, Not Reactive
+Current state: Grant profile with deliverables, budget, reports, documents.
+
+The improvement: NGOs currently use the grant manager reactively — they open it when something is due. It should push toward compliance proactively.
+
+Each grant should have a Grant Health Score (0–100) calculated from: days to deadline, deliverables completed %, budget utilization %, report submission history — shown as a single number with color
+
+The budget tracker should show projected overspend/underspend based on current burn rate, not just current utilization — "At current spend rate, you will underspend by ₹45,000 by end date"
+
+Deliverables should have sub-tasks, not just a checkbox — a deliverable like "Conduct 12 training sessions" should break into trackable instances that auto-update from service logs
+
+The report draft should show exactly which data is missing before the agent generates it — a pre-flight checklist: "M&E data for March not entered ✗, Budget heads updated ✓, Beneficiary count current ✓"
+
+Add a Grant Closure Checklist — a structured flow that ensures nothing is missed when a grant ends
+
+4. Donor CRM — Make It Feel Like Relationship Management, Not Transaction Logging
+Current state: Donor profile, donation history, receipts, communication log.
+
+The improvement: The current CRM tells you what a donor gave. It should tell you who this donor is and what they need from you right now.
+
+Each donor profile should open with a relationship summary card: last gift, communication gap, renewal probability, preferred channel, outstanding receipts — all in 5 lines, not scattered across tabs
+
+The lapsed donors list should show the reason for lapse if detectable — "No program update sent since last gift", "Receipt delayed by 3 weeks", "No personal thank-you" — so the re-engagement is targeted, not generic
+
+Donor communication history should include WhatsApp messages, not just emails — every touchpoint in one timeline
+
+The impact trail on a donor record should be visual and narrative, not just numbers — "Your ₹50,000 in 2024 supported Meena (8yrs), Raju (12yrs) and 47 others in Betul district through the education program"
+
+Receipt generation should have a one-click bulk mode — select all pending receipts, generate all, send all — instead of one-by-one
+
+5. M&E Dashboard — Make It Decision-Ready, Not Just Data-Rich
+Current state: KPI cards, trend charts, program comparisons, data quality panel.
+
+The improvement: Dashboards fail when they show everything equally. The M&E screen should tell you what the data means, not just show it.
+
+Every KPI card should have a benchmark line — not just your number but "sector average is X" or "your own target is Y" — so the number has context
+
+Trend charts should have annotation markers — "Program paused here", "New staff joined here", "Flood affected data here" — so dips and spikes are explainable, not mysterious
+
+Add a "So what?" panel below the charts — 3 plain-language sentences the agent writes interpreting the data: "Beneficiary retention dropped 11% in March. This coincides with the school holiday period. Last year the same dip recovered by May."
+
+The data quality panel should show staff-wise completion rates — not just org-level stats — so program heads know exactly who is entering data and who isn't
+
+Replace generic chart exports with funder-formatted table exports — one click produces a table in the exact format most funder reporting templates require
+
+6. Impact Report Generator — Make It 10 Minutes, Not 2 Hours
+Current state: Section editor, AI-drafted narrative, data blocks, PDF export.
+
+The improvement: The report generator currently requires users to build the report. It should arrive 80% complete and only need human polish.
+
+When a new report is created, the agent should immediately pre-populate every section from live data — not wait for the user to click "generate". Open the report, it's already drafted
+
+Each AI-drafted section should show a confidence indicator — "High confidence — pulled from 3 months of verified data" vs "Low confidence — only 1 month of data available" — so the editor knows what to scrutinize
+
+Add inline data refresh — if data changes after the draft is made, affected sections should show a "data updated — refresh this section?" prompt
+
+The case study section should auto-suggest 3 beneficiary stories pulled from case notes that best illustrate the program's impact — the editor just picks one, not writes one from scratch
+
+Add a version comparison — "This report vs last quarter's report" showing what changed, so writing the executive summary is just describing the delta
+
+7. Volunteer + Event Manager — Make the Post-Event Flow Instant
+Current state: Event creation, registrations, QR attendance, certificates, post-event summary.
+
+The improvement: Everything before the event is well-designed. Everything after the event is where NGOs still scramble.
+
+The moment an event is marked complete, a post-event checklist should automatically appear — certificates, beneficiary records updated, program KPIs logged, coordinator thank-you, photo upload — so nothing gets forgotten
+
+Certificate generation should have a 30-minute auto-trigger after event close, not require manual initiation — with ED able to pause it if needed
+
+Beneficiary attendance at events should automatically create a service log entry — right now these are disconnected
+
+The volunteer profile should show a reliability score with context — not just "attended 8 of 10 events" but "3 no-shows in Q1 were weather-related based on location data" — making the score fair and useful
+
+Add a post-event feedback loop — a 3-question WhatsApp form sent to attendees 24 hours after event, results visible on event record
+
+8. Field Forms — Make Offline Actually Reliable
+Current state: Form builder, offline sync, GPS capture, beneficiary lookup.
+
+The improvement: Offline is the hardest engineering problem and the most critical for field teams in rural India.
+
+Add a sync status indicator that's always visible — "12 submissions pending sync · Last synced 2h ago" — so field workers know their data is safe even without internet
+
+Forms should auto-save every field as it's filled, not just on final submit — so a phone battery dying mid-form doesn't lose data
+
+The beneficiary lookup in forms should work fully offline — the last-synced beneficiary list should be searchable without internet
+
+Add a duplicate submission warning — if the same beneficiary is being logged for the same service type twice in one day, show a confirmation before allowing it
+
+Forms should support voice-to-text input for notes fields — especially useful for field workers who type slowly in English
+
