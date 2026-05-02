@@ -17,7 +17,7 @@ import { useAuth, ROLE_META } from '../../context/AuthContext';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
-import { useStore, type ComplianceDocument } from '../../store/useStore';
+import { useStore, type ComplianceDocument, type Donor } from '../../store/useStore';
 import { getPageVariants } from '../../motion/variants';
 import { setLifecycleScope } from '../../utils/donorLifecycle';
 import './Layout.css';
@@ -92,14 +92,15 @@ const Layout: React.FC = () => {
         const d = new Date(today); d.setDate(d.getDate() - n);
         return d.toISOString().split('T')[0];
       };
-      setDonors([
-        { id: '1', name: 'Anjali Desai',       type: 'Major Donor',  totalGiven: 450000,  lastGift: daysAgo(345), initial: 'A', pan: 'ABCP****4D', location: 'Mumbai, Maharashtra',  tags: ['Education Cause'] },
-        { id: '2', name: 'Rohan Gupta',        type: 'Recurring',    totalGiven:  24000,  lastGift: daysAgo(15),  initial: 'R', pan: 'BVCX****9H', location: 'Delhi, NCR',           tags: ['Monthly Giver'] },
-        { id: '3', name: 'Infosys Foundation', type: 'CSR Partner',  totalGiven: 5000000, lastGift: daysAgo(400), initial: 'I', pan: 'INFS****1C', location: 'Bangalore, Karnataka', tags: ['CSR'] },
-        { id: '4', name: 'Priya Sharma',       type: 'Lapsing',      totalGiven:  15000,  lastGift: daysAgo(180), initial: 'P', pan: 'PRYS****3J', location: 'Pune, Maharashtra',    tags: ['Health'] },
-        { id: '5', name: 'Vikram Singh',       type: 'Event Attendee', totalGiven: 5000,  lastGift: daysAgo(60),  initial: 'V', pan: 'VKRS****2K', location: 'Jaipur, Rajasthan',    tags: ['Events'] },
-        { id: '6', name: 'Sneha Iyer',         type: 'Recurring',    totalGiven:  72000,  lastGift: daysAgo(95),  initial: 'S', pan: 'SNHI****6M', location: 'Chennai, Tamil Nadu',  tags: ['Renewal'] },
-      ] as any);
+      const seed: Donor[] = [
+        { id: '1', name: 'Anjali Desai',       type: 'Major Donor',    totalGiven: 450000,  lastGift: daysAgo(345), initial: 'A', pan: 'ABCP****4D', location: 'Mumbai, Maharashtra',  tags: ['Education Cause'] },
+        { id: '2', name: 'Rohan Gupta',        type: 'Recurring',      totalGiven:  24000,  lastGift: daysAgo(15),  initial: 'R', pan: 'BVCX****9H', location: 'Delhi, NCR',           tags: ['Monthly Giver'] },
+        { id: '3', name: 'Infosys Foundation', type: 'CSR Partner',    totalGiven: 5000000, lastGift: daysAgo(400), initial: 'I', pan: 'INFS****1C', location: 'Bangalore, Karnataka', tags: ['CSR'] },
+        { id: '4', name: 'Priya Sharma',       type: 'Lapsing',        totalGiven:  15000,  lastGift: daysAgo(180), initial: 'P', pan: 'PRYS****3J', location: 'Pune, Maharashtra',    tags: ['Health'] },
+        { id: '5', name: 'Vikram Singh',       type: 'Event Attendee', totalGiven:   5000,  lastGift: daysAgo(60),  initial: 'V', pan: 'VKRS****2K', location: 'Jaipur, Rajasthan',    tags: ['Events'] },
+        { id: '6', name: 'Sneha Iyer',         type: 'Recurring',      totalGiven:  72000,  lastGift: daysAgo(95),  initial: 'S', pan: 'SNHI****6M', location: 'Chennai, Tamil Nadu',  tags: ['Renewal'] },
+      ];
+      setDonors(seed);
     };
     const run = async () => {
       try {
