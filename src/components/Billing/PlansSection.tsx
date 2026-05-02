@@ -126,9 +126,10 @@ const PlansSection: React.FC = () => {
           toast('Checkout closed — no charge made.', { icon: '👋' });
         },
       });
-    } catch {
+    } catch (err) {
       toast.dismiss(tid);
-      toast.error('Could not open checkout. Please try again.');
+      const msg = err instanceof Error && err.message ? err.message : 'Could not open checkout. Please try again.';
+      toast.error(msg);
     }
   };
 

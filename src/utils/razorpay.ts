@@ -106,18 +106,24 @@ export async function openRazorpayCheckout(args: OpenCheckoutArgs): Promise<void
     return;
   }
 
-  // No real key configured (demo build / sandbox without secret) → mock path
-  // immediately so the upgrade flow always completes and isn't blocked by
-  // Razorpay rejecting an obviously-fake key with "Payment Failed". This is
-  // intentional for demo + CI environments. In a real deployment, set
-  // VITE_RAZORPAY_KEY_ID to a sandbox key (rzp_test_…) so the actual Razorpay
-  // checkout modal opens and tests can run against Razorpay's sandbox.
+  // No real key configured. Behaviour depends on build mode:
+  //   • DEV / preview / CI  → silently mock success after a tiny delay so
+  //     the upgrade flow can be exercised end-to-end without internet or
+  //     a Razorpay account.
+  //   • PROD                → refuse the charge. Granting paid tiers for
+  //     free in production would be a billing-leak, so we throw a
+  //     clearly-labelled error that the caller surfaces as "Payment
+  //     unavailable — contact support" instead of silently upgrading.
   if (isUsingMockKey()) {
     if (import.meta.env.PROD) {
       // eslint-disable-next-line no-console
-      console.warn(
-        '[razorpay] VITE_RAZORPAY_KEY_ID is not set — running in demo/mock mode. ' +
-        'Set a sandbox key (rzp_test_…) to enable the real Razorpay Checkout modal.'
+      console.error(
+        '[razorpay] VITE_RAZORPAY_KEY_ID is not configured in this production build. ' +
+        'Refusing to grant a paid upgrade without a real payment. ' +
+        'Set a sandbox or live key and redeploy.'
+      );
+      throw new Error(
+        'Payments are not configured for this deployment. Please contact support to upgrade.'
       );
     }
     setTimeout(() => onSuccess(`mock_pay_${Date.now()}`), 250);
