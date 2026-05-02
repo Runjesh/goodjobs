@@ -273,7 +273,17 @@ const AgentHQ: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Tier gate: any actionable agent operation (approve / reject / batch / save
+  // config) is blocked for Starter. We surface the upgrade prompt instead so
+  // the user can't accidentally drive the queue without a paid tier.
+  const requireAgents = (): boolean => {
+    if (agentsEnabled) return true;
+    setAiUpgradeOpen(true);
+    return false;
+  };
+
   const handleApprove = async (id: string) => {
+    if (!requireAgents()) return;
     try {
       const res = await apiFetch(`/intent/queue/${encodeURIComponent(id)}/decision`, {
         method: 'POST',
@@ -297,6 +307,7 @@ const AgentHQ: React.FC = () => {
   };
 
   const handleBatchApprove = async () => {
+    if (!requireAgents()) return;
     if (approvals.length === 0) return;
     setBatchRunning(true);
     let ok = 0;
@@ -327,6 +338,7 @@ const AgentHQ: React.FC = () => {
   };
 
   const saveThreshold = async () => {
+    if (!requireAgents()) return;
     const n = parseInt(thresholdInr.replace(/,/g, ''), 10);
     if (Number.isNaN(n) || n < 0) {
       toast.error('Enter a valid rupee amount.');
@@ -346,6 +358,7 @@ const AgentHQ: React.FC = () => {
   };
 
   const handleReject = async (id: string) => {
+    if (!requireAgents()) return;
     try {
       const res = await apiFetch(`/intent/queue/${encodeURIComponent(id)}/decision`, {
         method: 'POST',

@@ -23,6 +23,7 @@ import {
 } from '../../utils/trial';
 import type { SubscriptionTier } from '../../utils/trial';
 import PastDueBanner from '../Billing/PastDueBanner';
+import WelcomeBanner from '../Billing/WelcomeBanner';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
@@ -553,6 +554,7 @@ const Layout: React.FC = () => {
               <div className="page-content-inner">
                 <TrialExpiredBanner />
                 <PastDueBanner />
+                <WelcomeBanner />
                 <Outlet />
               </div>
             </motion.div>

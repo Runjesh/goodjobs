@@ -140,7 +140,7 @@ const Reports: React.FC = () => {
       // for the demo build only (so the counter still ticks). In production
       // this branch should leave succeeded=false so failed drafts don't
       // consume quota.
-      if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) {
+      if (import.meta.env.DEV) {
         succeeded = true;
         toast.success('AI report drafting initiated — check back in a moment.');
       } else {

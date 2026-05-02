@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRight, CreditCard } from 'lucide-react';
+import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRight, CreditCard, Users, Mail, X as XIcon, Lock } from 'lucide-react';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import './Settings.css';
 import { apiFetch } from '../../api/client';
 import PlansSection from '../../components/Billing/PlansSection';
-import { useUpgradeListener } from '../../hooks/useTier';
+import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
+import { useTier, useUpgradeListener } from '../../hooks/useTier';
+import { canAddTeamMember, normalizeTier, tierLimits } from '../../utils/trial';
 
 const TABS = [
   { id: 'profile',  label: 'Profile',      icon: <User size={16} /> },
+  { id: 'team',     label: 'Team',         icon: <Users size={16} /> },
   { id: 'ngo',      label: 'NGO Details',  icon: <Building2 size={16} /> },
   { id: 'plans',    label: 'Plans & Billing', icon: <CreditCard size={16} /> },
   { id: 'security', label: 'Security',     icon: <Key size={16} /> },
@@ -17,7 +20,7 @@ const TABS = [
 ];
 
 const Settings: React.FC = () => {
-  const { user, login } = useAuth();
+  const { user, login, updateUser } = useAuth();
   // Honor ?tab=plans (or any other tab) so contextual upgrade prompts can deep-link.
   const initialTab = (() => {
     if (typeof window === 'undefined') return 'profile';
@@ -36,6 +39,44 @@ const Settings: React.FC = () => {
   //   (2) Switch the active tab to 'plans' so PlansSection actually mounts.
   // This guarantees "open from anywhere" works even when the user is already
   // on /settings but on a different tab.
+  // Team-tab state — local invite UX backed by AuthUser.pendingInvites so the
+  // wizard's invites and the Settings invites share one list. Real backend
+  // wiring (POST /team/invite) is a follow-up.
+  const { tier, usage } = useTier();
+  const teamLims = tierLimits(tier);
+  const teamCap = teamLims.teamMembers; // null = unlimited
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('PROGRAM_HEAD');
+  const [teamUpgradeOpen, setTeamUpgradeOpen] = useState(false);
+
+  const sendInvite = () => {
+    const email = inviteEmail.trim();
+    if (!email || !email.includes('@')) {
+      toast.error('Enter a valid email address.');
+      return;
+    }
+    // Block at the cap. canAddTeamMember treats null cap as unlimited.
+    if (!canAddTeamMember(tier, usage.team)) {
+      setTeamUpgradeOpen(true);
+      return;
+    }
+    if (!user) return;
+    const next = [
+      ...(user.pendingInvites ?? []),
+      { email, role: inviteRole, invitedAt: new Date().toISOString() },
+    ];
+    updateUser({ pendingInvites: next });
+    setInviteEmail('');
+    toast.success(`Invite sent to ${email}.`);
+  };
+
+  const revokeInvite = (email: string) => {
+    if (!user) return;
+    const next = (user.pendingInvites ?? []).filter(p => p.email !== email);
+    updateUser({ pendingInvites: next });
+    toast(`Invite to ${email} revoked.`, { icon: '✕' });
+  };
+
   useUpgradeListener((detail) => {
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -253,6 +294,146 @@ const Settings: React.FC = () => {
 
           {/* Plans & Billing */}
           {activeTab === 'plans' && <PlansSection />}
+
+          {/* Team & Invites */}
+          {activeTab === 'team' && (
+            <div>
+              <h3 className="settings-section-title">Team & Invites</h3>
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem', marginTop: '-0.25rem', marginBottom: '1rem' }}>
+                Invite colleagues so they can log into the same NGO workspace. Roles control which modules each person can access.
+              </p>
+
+              {/* Tier-cap meter */}
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  padding: '0.75rem 1rem',
+                  background: 'var(--color-bg-main)',
+                  border: '1px solid var(--color-border-light)',
+                  borderRadius: 'var(--radius-md)',
+                  marginBottom: '1.25rem',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                    {usage.team} of {teamCap === null ? 'unlimited' : teamCap} team members on your {normalizeTier(tier)} plan
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
+                    Counts you + outstanding invites. Invites you revoke don't count.
+                  </div>
+                </div>
+                {teamCap !== null && usage.team >= teamCap && (
+                  <span style={{
+                    background: '#fef3c7', color: '#b45309',
+                    padding: '4px 10px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700,
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                  }}>
+                    <Lock size={12} /> Limit reached
+                  </span>
+                )}
+              </div>
+
+              {/* Invite form */}
+              <div className="settings-form" style={{ marginBottom: '1.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '0.75rem', alignItems: 'end' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Colleague's email</label>
+                    <input
+                      className="input-field"
+                      type="email"
+                      placeholder="name@yourngo.org"
+                      value={inviteEmail}
+                      onChange={e => setInviteEmail(e.target.value)}
+                    />
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Role</label>
+                    <select
+                      className="input-field"
+                      value={inviteRole}
+                      onChange={e => setInviteRole(e.target.value)}
+                    >
+                      <option value="ED">Executive Director</option>
+                      <option value="PROGRAM_HEAD">Program Head</option>
+                      <option value="FUNDRAISER">Fundraiser</option>
+                      <option value="FINANCE">Finance Officer</option>
+                      <option value="FIELD_OPS">Field Officer</option>
+                    </select>
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={sendInvite}
+                    style={{ height: 38 }}
+                  >
+                    <Mail size={14} /> Send invite
+                  </button>
+                </div>
+              </div>
+
+              {/* Invite list */}
+              <div style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                <div style={{
+                  padding: '0.55rem 0.85rem', background: 'var(--color-bg-main)',
+                  fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
+                  color: 'var(--color-text-tertiary)', borderBottom: '1px solid var(--color-border-light)',
+                }}>
+                  Pending invites
+                </div>
+                {(user?.pendingInvites ?? []).length === 0 ? (
+                  <div style={{ padding: '1rem', fontSize: '0.85rem', color: 'var(--color-text-tertiary)' }}>
+                    No pending invites yet.
+                  </div>
+                ) : (
+                  (user!.pendingInvites!).map(inv => (
+                    <div
+                      key={inv.email}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '0.65rem 0.85rem',
+                        borderBottom: '1px solid var(--color-border-light)',
+                        fontSize: '0.85rem',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{inv.email}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
+                          {ROLE_META[inv.role as keyof typeof ROLE_META]?.label ?? inv.role} · invited {new Date(inv.invitedAt).toLocaleDateString('en-IN')}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => revokeInvite(inv.email)}
+                        title="Revoke invite"
+                        aria-label={`Revoke invite to ${inv.email}`}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: 'var(--color-text-tertiary)' }}
+                      >
+                        <XIcon size={16} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <ContextualUpgradePrompt
+                open={teamUpgradeOpen}
+                onClose={() => setTeamUpgradeOpen(false)}
+                blockedAction="More team members"
+                reason={`Your ${normalizeTier(tier)} plan caps your workspace at ${teamCap ?? 'unlimited'} members.`}
+                nextBenefits={[
+                  'Up to 50 team members on Growth (or unlimited on Scale)',
+                  'AI Copilot, WhatsApp data entry, AI report drafting',
+                  'Unlimited beneficiaries · unlimited programs',
+                  'Priority support + onboarding call',
+                ]}
+                targetTier={tier === 'scale' ? 'scale' : 'growth'}
+                onUpgrade={() => {
+                  setTeamUpgradeOpen(false);
+                  setActiveTab('plans');
+                }}
+              />
+            </div>
+          )}
 
           {/* NGO Details */}
           {activeTab === 'ngo' && (

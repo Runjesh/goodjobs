@@ -134,7 +134,7 @@ const PlansSection: React.FC = () => {
 
   // ── DEV-only mock helpers so QA can exercise past-due / downgrade ───────────
   const isDev = useMemo(() => {
-    try { return !!(import.meta as any).env?.DEV; } catch { return false; }
+    try { return !!import.meta.env.DEV; } catch { return false; }
   }, []);
 
   const mockPastDue = () => {

@@ -182,13 +182,18 @@ export interface TierPlan {
 }
 
 // ── Concrete tier limits (enforced in product) ────────────────────────────────
-export const STARTER_BENEFICIARY_CAP = 50;
+// These come straight from the product spec for Task #5: Starter is the free
+// floor that small NGOs sit on after trial — generous enough to be usable, but
+// it caps out at 200 beneficiaries and 10 collaborators. Growth removes the
+// beneficiary ceiling and gives a much larger team allowance; Scale is fully
+// unlimited.
+export const STARTER_BENEFICIARY_CAP = 200;
 export const STARTER_PROGRAM_CAP = 1;
-export const STARTER_TEAM_CAP = 3;
+export const STARTER_TEAM_CAP = 10;
 export const STARTER_REPORTS_PER_MONTH = 2;
 
 export const GROWTH_BENEFICIARY_CAP: number | null = null; // unlimited
-export const GROWTH_TEAM_CAP = 10;
+export const GROWTH_TEAM_CAP = 50;
 export const GROWTH_REPORTS_PER_MONTH = 20;
 
 export interface TierLimits {
