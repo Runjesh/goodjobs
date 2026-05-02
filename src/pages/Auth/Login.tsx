@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Eye, EyeOff, Cpu, Sparkles } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { ShieldCheck, Eye, EyeOff, Cpu, Sparkles, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth, ROLE_META, type UserRole } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
-import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import './Auth.css';
 
 // ── Social proof lines ────────────────────────────────────────────────────────
@@ -45,9 +44,6 @@ const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading,      setLoading]      = useState(false);
   const [serverToken,  setServerToken]  = useState<string | null>(null);
-  const [showRegister, setShowRegister] = useState(false);
-  const [reg,          setReg]          = useState({ ngoName: '', ngoSlug: '', fullName: '', email: '', password: '' });
-  const [regLoading,   setRegLoading]   = useState(false);
   const [proofIdx,     setProofIdx]     = useState(0);
   const [proofFade,    setProofFade]    = useState(true);
 
@@ -277,9 +273,13 @@ const Login: React.FC = () => {
                 </form>
 
                 <div className="auth-divider"><span>New NGO?</span></div>
-                <button className="btn btn-secondary" style={{ width: '100%' }} onClick={() => setShowRegister(true)}>
-                  Register your NGO for free
-                </button>
+                <Link
+                  to="/signup"
+                  className="btn btn-secondary"
+                  style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', textDecoration: 'none' }}
+                >
+                  Start your free 30-day trial <ArrowRight size={14} />
+                </Link>
                 <p className="auth-legal">
                   By signing in, you agree to our Terms of Service and Privacy Policy.<br />
                   <strong>Data hosted in India (AWS ap-south-1) · DPDP Act 2023 compliant</strong>
@@ -319,76 +319,6 @@ const Login: React.FC = () => {
           </div>
         )}
 
-        {/* ── Registration modal ──────────────────────────────────── */}
-        {showRegister && (
-          <ModalOverlay elevated onBackdropClick={() => setShowRegister(false)}>
-            <div className="modal-card modal-card--wide" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="reg-title">
-              <button type="button" className="action-btn" style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} aria-label="Close" onClick={() => setShowRegister(false)}>
-                <EyeOff size={18} />
-              </button>
-              <h2 id="reg-title" style={{ marginBottom: '0.5rem', paddingRight: '2.5rem' }}>Register your NGO</h2>
-              <p style={{ marginBottom: '1.25rem', color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-                Creates an NGO + first Executive Director user.
-              </p>
-              <form className="flex-col gap-4 flex" onSubmit={async e => {
-                e.preventDefault();
-                setRegLoading(true);
-                try {
-                  const res = await apiFetch('/auth/register', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      ngo_name: reg.ngoName,
-                      ngo_slug: reg.ngoSlug || reg.ngoName.toLowerCase().replace(/\s+/g, '-'),
-                      email: reg.email,
-                      password: reg.password,
-                      full_name: reg.fullName,
-                      role: 'ed',
-                    }),
-                  });
-                  if (!res.ok) throw new Error();
-                  const data = await res.json();
-                  const roleId = data.role as UserRole;
-                  const meta = ROLE_META[roleId];
-                  login({ id: data.user_id, email: data.email, name: data.name, role: roleId, ngoId: data.ngo_id, ngoName: data.ngo_name, token: data.access_token, avatar: meta.icon });
-                  toast.success('NGO registered — welcome!', { duration: 3000 });
-                  setShowRegister(false);
-                  setTimeout(() => navigate('/'), 300);
-                } catch {
-                  toast.error('Registration failed. Ensure the backend DATABASE_URL is set.');
-                } finally {
-                  setRegLoading(false);
-                }
-              }}>
-                <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label className="input-label">NGO Name</label>
-                  <input className="input-field" value={reg.ngoName} onChange={e => setReg({ ...reg, ngoName: e.target.value })} required />
-                </div>
-                <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label className="input-label">NGO Slug (optional)</label>
-                  <input className="input-field" value={reg.ngoSlug} onChange={e => setReg({ ...reg, ngoSlug: e.target.value })} placeholder="e.g. india-ngo-trust" />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label className="input-label">Your Name</label>
-                    <input className="input-field" value={reg.fullName} onChange={e => setReg({ ...reg, fullName: e.target.value })} required />
-                  </div>
-                  <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label className="input-label">Work Email</label>
-                    <input type="email" className="input-field" value={reg.email} onChange={e => setReg({ ...reg, email: e.target.value })} required />
-                  </div>
-                </div>
-                <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label className="input-label">Password</label>
-                  <input type="password" className="input-field" value={reg.password} onChange={e => setReg({ ...reg, password: e.target.value })} required />
-                </div>
-                <button type="submit" className="btn btn-primary" disabled={regLoading}>
-                  {regLoading ? <span className="auth-spinner" /> : 'Create NGO & Sign In'}
-                </button>
-              </form>
-            </div>
-          </ModalOverlay>
-        )}
       </div>
     </div>
   );

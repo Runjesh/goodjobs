@@ -1,0 +1,73 @@
+.trial-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.trial-pill--ok {
+  background: #ccfbf1;
+  color: #0F766E;
+  border-color: rgba(15, 118, 110, 0.25);
+}
+.trial-pill--ok:hover { background: #99f6e4; }
+
+.trial-pill--warn {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fbbf24;
+}
+.trial-pill--warn:hover { background: #fde68a; }
+
+.trial-pill--urgent {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+  animation: trial-pulse 2.4s ease-in-out infinite;
+}
+.trial-pill--urgent:hover { background: #fecaca; animation: none; }
+
+.trial-pill--expired {
+  background: #1f2937;
+  color: #fef3c7;
+  border-color: #374151;
+}
+.trial-pill--expired:hover { background: #111827; }
+
+.trial-pill-cta {
+  margin-left: 0.2rem;
+  opacity: 0.8;
+  font-weight: 700;
+}
+
+@keyframes trial-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+}
+
+[data-theme="dark"] .trial-pill--ok {
+  background: rgba(15, 118, 110, 0.2);
+  color: #5eead4;
+}
+[data-theme="dark"] .trial-pill--warn {
+  background: rgba(217, 119, 6, 0.18);
+  color: #fbbf24;
+}
+[data-theme="dark"] .trial-pill--urgent {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+}
+
+/* Hide CTA text on mobile — keep just the day count to save space. */
+@media (max-width: 720px) {
+  .trial-pill-cta { display: none; }
+  .trial-pill { font-size: 0.7rem; padding: 0.25rem 0.55rem; }
+}

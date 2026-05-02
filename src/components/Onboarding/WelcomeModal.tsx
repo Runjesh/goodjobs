@@ -226,6 +226,8 @@ const WelcomeModal: React.FC<Props> = ({ onClose }) => {
 
   useEffect(() => {
     if (!user) return;
+    // Don't compete with the signup wizard — it owns first-run UX for new users.
+    if (user.needsWizard) return;
     if (!hasSeenWelcome(user.id)) {
       const t = setTimeout(() => setOpen(true), 600);
       return () => clearTimeout(t);

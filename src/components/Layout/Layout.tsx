@@ -13,7 +13,14 @@ import UserChip from '../Auth/UserChip';
 import BottomNav from '../ui/BottomNav';
 import NotificationCenter from '../Notifications/NotificationCenter';
 import WelcomeModal from '../Onboarding/WelcomeModal';
+import TrialPill from './TrialPill';
+import TrialExpiredBanner from '../Onboarding/TrialExpiredBanner';
+import TrialUpgradeModal from '../Onboarding/TrialUpgradeModal';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
+import {
+  daysSinceStart, isTrialExpired, nudgeFired, withNudgeFired,
+  NUDGE_DAY_21, NUDGE_DAY_28,
+} from '../../utils/trial';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
@@ -39,7 +46,8 @@ const Layout: React.FC = () => {
   const [isSidebarOpen,  setIsSidebarOpen]  = useState(false);
   const [isNotifOpen,    setIsNotifOpen]    = useState(false);
   const [isDarkMode,     setIsDarkMode]     = useState(false);
-  const { user, can } = useAuth();
+  const [trialModal,     setTrialModal]     = useState<null | 'day28' | 'expired'>(null);
+  const { user, can, updateUser } = useAuth();
   const { t, lang, setLanguage } = useTranslation();
   const { setDonors, setTransactions, setCampaigns, setCsrCards, setComplianceDocs } = useStore();
   const { setVolunteers, setBeneficiaries } = useStore();
@@ -53,6 +61,53 @@ const Layout: React.FC = () => {
   useEffect(() => {
     setIsSidebarOpen(false);
   }, [location.pathname]);
+
+  // ── Wizard gate: a brand-new user (just came through /signup) hasn't yet
+  // completed onboarding. Push them to /onboarding from anywhere inside the app.
+  useEffect(() => {
+    if (user?.needsWizard && location.pathname !== '/onboarding') {
+      navigate('/onboarding', { replace: true });
+    }
+  }, [user?.needsWizard, location.pathname, navigate]);
+
+  // ── Trial nudge cadence: day-21 warning toast + day-28 upgrade modal,
+  // each fires at most once thanks to the persistent nudge marker on AuthUser.
+  // We re-evaluate on every route change (frequent in an SPA) AND on a 5-minute
+  // interval, so a long-lived session that spans day thresholds still fires
+  // nudges even without a logout/reload. nudgeFired() prevents duplicates.
+  const [nudgeTick, setNudgeTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setNudgeTick(t => t + 1), 5 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (!user?.trial) return;
+    const days = daysSinceStart(user.trial);
+    const expired = isTrialExpired(user.trial);
+
+    if (expired && !nudgeFired(user.trial, 'day28')) {
+      // Auto-show the modal in its expired variant the first time we land in
+      // an expired session, even if the day-28 nudge was missed entirely.
+      setTrialModal('expired');
+      updateUser({ trial: withNudgeFired(user.trial, 'day28') });
+      return;
+    }
+
+    if (!expired && days >= NUDGE_DAY_28 && !nudgeFired(user.trial, 'day28')) {
+      setTrialModal('day28');
+      updateUser({ trial: withNudgeFired(user.trial, 'day28') });
+      return;
+    }
+
+    if (!expired && days >= NUDGE_DAY_21 && days < NUDGE_DAY_28 && !nudgeFired(user.trial, 'day21')) {
+      const left = Math.max(0, 30 - days);
+      toast(`⚠️ Your trial ends in ${left} day${left === 1 ? '' : 's'} — pick a plan to keep AI features on.`, {
+        duration: 6000,
+        style: { background: '#fef3c7', color: '#b45309', border: '1px solid #fbbf24' },
+      });
+      updateUser({ trial: withNudgeFired(user.trial, 'day21') });
+    }
+  }, [user?.id, user?.trial?.startedAt, user?.trial?.nudges?.day21, user?.trial?.nudges?.day28, location.pathname, nudgeTick, updateUser]);
 
   // Scope donor-lifecycle localStorage keys to the active tenant so different
   // orgs sharing this browser can't cross-read milestone state.
@@ -403,6 +458,7 @@ const Layout: React.FC = () => {
 
           {/* Actions */}
           <div className="header-actions">
+            <TrialPill />
             <select
               className="header-lang-select"
               value={lang}
@@ -465,6 +521,7 @@ const Layout: React.FC = () => {
               style={{ minHeight: '100%' }}
             >
               <div className="page-content-inner">
+                <TrialExpiredBanner />
                 <Outlet />
               </div>
             </motion.div>
@@ -487,8 +544,17 @@ const Layout: React.FC = () => {
         onClose={() => setIsNotifOpen(false)}
       />
 
-      {/* First-time welcome modal — auto-shows once per user */}
+      {/* First-time welcome modal — auto-shows once per user (suppressed during wizard) */}
       <WelcomeModal />
+
+      {/* Day-28 trial upgrade modal (also reused in day-30 expired variant) */}
+      {trialModal && user?.trial && (
+        <TrialUpgradeModal
+          trial={user.trial}
+          variant={trialModal}
+          onDismiss={() => setTrialModal(null)}
+        />
+      )}
     </div>
   );
 };

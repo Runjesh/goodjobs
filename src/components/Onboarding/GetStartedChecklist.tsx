@@ -4,10 +4,23 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2, Circle, ChevronRight, X, Sparkles,
   Users, HeartHandshake, ShieldCheck, Megaphone, UserPlus,
+  Building2, MessageCircle, FileText,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
+import {
+  loadWizardState, checklistFollowupSteps, type WizardStepId,
+} from '../../utils/wizard';
 import './Onboarding.css';
+
+// Map wizard-step ids to checklist row appearance.
+const WIZARD_STEP_VISUALS: Record<WizardStepId, { icon: React.ElementType; color: string; label: string; cta: string }> = {
+  'org-profile':           { icon: Building2,     color: '#0F766E', label: 'Finish your org profile',    cta: 'Open Settings' },
+  'first-program':         { icon: FileText,      color: '#0F766E', label: 'Add your first program',     cta: 'Open Programs' },
+  'invite-team':           { icon: UserPlus,      color: '#d97706', label: 'Invite your team',           cta: 'Open Settings' },
+  'import-beneficiaries':  { icon: Users,         color: '#0F766E', label: 'Import beneficiaries',       cta: 'Open Programs' },
+  'connect-whatsapp':      { icon: MessageCircle, color: '#16A34A', label: 'Connect WhatsApp',           cta: 'Open Settings' },
+};
 
 const DISMISS_KEY = 'gj_setup_dismissed_v1';
 const STEP_DONE_KEY = 'gj_setup_steps_done_v1';
@@ -82,8 +95,16 @@ const GetStartedChecklist: React.FC = () => {
     navigate(path);
   };
 
+  // Surface wizard steps the user explicitly skipped (or that remained when
+  // they finished early via "Skip setup"). Treated as additional checklist rows
+  // so nothing the wizard asked for falls through the cracks.
+  const wizardFollowups = useMemo(() => {
+    if (!user) return [];
+    return checklistFollowupSteps(loadWizardState(user.id));
+  }, [user]);
+
   const steps: Step[] = useMemo(() => {
-    return [
+    const baseSteps: Step[] = [
       {
         id: 'beneficiary',
         label: 'Add your first beneficiary',
@@ -135,7 +156,39 @@ const GetStartedChecklist: React.FC = () => {
         cta: 'Open Settings',
       },
     ];
-  }, [beneficiaries.length, donors.length, campaigns.length, complianceDocs.length, manualDone]);
+
+    // Wizard steps surface as their own rows (deduped against base ids if a
+    // matching base step already covers the same ground, e.g. team/import).
+    const baseCovers: Partial<Record<WizardStepId, string>> = {
+      'invite-team': 'team',
+      'import-beneficiaries': 'beneficiary',
+    };
+
+    const wizardRows: Step[] = wizardFollowups
+      .filter((meta) => {
+        const baseId = baseCovers[meta.id];
+        if (!baseId) return true;
+        const baseStep = baseSteps.find((s) => s.id === baseId);
+        // If the user actually did the equivalent base action, hide the wizard row.
+        return !baseStep?.done;
+      })
+      .map((meta) => {
+        const v = WIZARD_STEP_VISUALS[meta.id];
+        const stepId = `wizard:${meta.id}`;
+        return {
+          id: stepId,
+          label: v.label,
+          hint: meta.short,
+          icon: v.icon,
+          color: v.color,
+          done: !!manualDone[stepId],
+          path: meta.resumePath,
+          cta: v.cta,
+        };
+      });
+
+    return [...baseSteps, ...wizardRows];
+  }, [beneficiaries.length, donors.length, campaigns.length, complianceDocs.length, manualDone, wizardFollowups]);
 
   const completed = steps.filter((s) => s.done).length;
   const total = steps.length;

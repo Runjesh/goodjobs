@@ -68,10 +68,13 @@ Legacy module pages still accessible: `/crm` `/fundraising` `/finance` `/complia
 
 ## Onboarding (NGO-friendly)
 
-- **Welcome modal** (`src/components/Onboarding/WelcomeModal.tsx`) — auto-shown once per user on first login. Three role-specific slides (ED / Finance / Programs / Field / Board) explaining the platform, the AI Copilot, and what setup involves. Plain language, big buttons, fully skippable. Persisted in `localStorage.gj_welcomed_v1` keyed by user id.
-- **Get Started checklist** (`src/components/Onboarding/GetStartedChecklist.tsx`) — appears at the top of the Today screen. 5 steps with progress bar: add beneficiary, add donor, create campaign, upload compliance docs, invite team. Steps auto-complete by reading the store; team step marks done when the CTA is clicked. Auto-hides when all 5 done OR user dismisses (`localStorage.gj_setup_dismissed_v1`).
-- **Per-user isolation** — Login.tsx generates unique user IDs from email (`user_<sanitized_email>`) so each role/account has its own onboarding state.
-- **Demo-mode resilience** — Programs.tsx beneficiary enroll falls back to local store when backend is unreachable, so first-time users can complete the checklist even without a backend. Programs dropdown has a default list of common programs when no beneficiaries exist yet.
+- **Public signup** (`src/pages/Auth/Signup.tsx`, route `/signup`) — branded form (NGO name, full name, work email, password, primary cause, team size) with mock Google OAuth and a simulated email-verification step. On success, the user is logged in with `needsWizard: true` and a fresh 30-day trial, then routed to `/onboarding`. Login page links to `/signup` instead of opening the legacy register modal.
+- **5-step Signup Wizard** (`src/pages/Onboarding/SignupWizard.tsx`, route `/onboarding`, no main Layout chrome) — Org Profile → First Program → Invite Team → Import Beneficiaries → Connect WhatsApp. Each step supports "Skip for now" and the wizard supports "Skip setup". State persists per user in `localStorage.gj_wizard_state_v1`. WhatsApp mock OTP = `424242`. FirstProgramStep auto-creates a draft campaign; ImportBeneficiariesStep commits manual rows via the store.
+- **Wizard gate** — `Layout.tsx` redirects any in-app navigation to `/onboarding` while `user.needsWizard` is true. Returning users (after `finishWizard`) bypass the wizard entirely.
+- **30-day trial** (`src/utils/trial.ts`) — `TrialState` carries `startedAt` + `nudges{day7,day21,day28}`. `TrialPill` (header) shows "Trial: N days left", hides for paid tiers. Nudge cadence in Layout fires once each (re-evaluated on route changes + 5-min interval, deduped via persistent flags): day-21 toast, day-28 modal, day-30 expired banner + auto modal. Day-7 nurture card surfaces on Today via `TrialDay7Card`. Day-30 swaps the user to the Starter tier and shows a persistent expired banner (`TrialExpiredBanner`).
+- **Welcome modal** (`src/components/Onboarding/WelcomeModal.tsx`) — auto-shown once per user on first login, suppressed while the signup wizard is in flight. Persisted in `localStorage.gj_welcomed_v1`.
+- **Get Started checklist** (`src/components/Onboarding/GetStartedChecklist.tsx`) — Today screen. 5 base steps + auto-surfaced rows for any wizard step the user skipped (deduped against overlapping base ids). Auto-hides when all done or dismissed.
+- **Per-user isolation** — unique IDs from email (`user_<sanitized_email>`) so each role/account keeps its own onboarding + trial state.
 
 ## Today Screen (Dashboard)
 

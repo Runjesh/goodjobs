@@ -1,0 +1,152 @@
+/* ── Trial expired banner ──────────────────────────────────────────────── */
+
+.trial-expired-banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  background: linear-gradient(90deg, #1f2937 0%, #111827 100%);
+  color: #fef3c7;
+  border-radius: 12px;
+  border: 1px solid #374151;
+  flex-wrap: wrap;
+}
+
+.trial-expired-banner-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.trial-expired-banner-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 220px;
+}
+
+.trial-expired-banner-body strong {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #fef3c7;
+}
+
+.trial-expired-banner-body span {
+  font-size: 0.8rem;
+  color: rgba(254, 243, 199, 0.78);
+  line-height: 1.5;
+}
+
+.trial-expired-banner-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #fbbf24;
+  color: #1f2937;
+  padding: 0.5rem 0.95rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+.trial-expired-banner-cta:hover { background: #f59e0b; }
+
+/* ── Day-7 info card ───────────────────────────────────────────────────── */
+
+.trial-day7-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  background: linear-gradient(135deg, #ede9fe 0%, #f0fdfa 100%);
+  border: 1px solid rgba(139, 92, 246, 0.22);
+  border-radius: 14px;
+  flex-wrap: wrap;
+}
+
+[data-theme="dark"] .trial-day7-card {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.14) 0%, rgba(15, 118, 110, 0.12) 100%);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.trial-day7-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(139, 92, 246, 0.18);
+  color: #6366f1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.trial-day7-card-body {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.trial-day7-card-body strong {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #0f172a);
+}
+
+.trial-day7-card-body p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary, #475569);
+  line-height: 1.5;
+}
+
+.trial-day7-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.trial-day7-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.trial-day7-card-cta:hover { background: #4f46e5; }
+
+.trial-day7-card-dismiss {
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary, #94a3b8);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.trial-day7-card-dismiss:hover { background: rgba(0, 0, 0, 0.05); color: var(--color-text-primary, #0f172a); }

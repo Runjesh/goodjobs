@@ -14,6 +14,8 @@ import { apiFetch } from '../../api/client';
 import { computeStage, nextDueMilestone } from '../../utils/donorLifecycle';
 import toast from 'react-hot-toast';
 import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
+import MorningBriefBanner from '../../components/Onboarding/MorningBriefBanner';
+import TrialDay7Card from '../../components/Onboarding/TrialDay7Card';
 import './Dashboard.css';
 
 const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
@@ -622,6 +624,12 @@ const Dashboard: React.FC = () => {
           </button>
         </div>
       </motion.div>
+
+      {/* ── Wizard handoff banner (one-shot after finishing onboarding) ─── */}
+      <MorningBriefBanner />
+
+      {/* ── Day-7 trial nurture card (auto-hides outside ~day 7-14 window) ─ */}
+      <TrialDay7Card />
 
       {/* ── Get Started Checklist (auto-hides when complete or dismissed) ── */}
       <GetStartedChecklist />

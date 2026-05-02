@@ -21,6 +21,8 @@ const GrantDetail  = lazy(() => import('./pages/Grants/GrantDetail'));
 const Volunteers   = lazy(() => import('./pages/Volunteers/Volunteers'));
 const AgentHQ      = lazy(() => import('./pages/AgentHQ/AgentHQ'));
 const Login        = lazy(() => import('./pages/Auth/Login'));
+const Signup       = lazy(() => import('./pages/Auth/Signup'));
+const SignupWizard = lazy(() => import('./pages/Onboarding/SignupWizard'));
 const DonationPage = lazy(() => import('./pages/DonationPage/DonationPage'));
 const Settings     = lazy(() => import('./pages/Settings/Settings'));
 
@@ -54,7 +56,18 @@ function App() {
       <Suspense fallback={<PageLoading />}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
           <Route path="/give/:campaignSlug" element={<DonationPage />} />
+
+          {/* Onboarding wizard — protected, but renders without the main Layout chrome. */}
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <SignupWizard />
+              </ProtectedRoute>
+            }
+          />
 
           <Route
             path="/"
