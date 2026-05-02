@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck } from 'lucide-react';
-import { useStore } from '../../store/useStore';
+import { useStore, initialBeneficiaries } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import FormBuilder from '../../components/FormBuilder/FormBuilder';
 import TheoryOfChangeBuilder from '../../components/Programs/TheoryOfChangeBuilder';
@@ -723,7 +723,8 @@ const Programs: React.FC = () => {
             </div>
             <input ref={benFileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleBenCsvFile} />
             {benCsvRows.length > 0 && (() => {
-              const existing = useStore.getState().beneficiaries;
+              const storeBens = useStore.getState().beneficiaries;
+              const existing = storeBens.length > 0 ? storeBens : initialBeneficiaries;
               const previewRows = benCsvRows.slice(0, 8);
               const dupFlags = previewRows.map(row => {
                 const nameLo  = (row.name  || '').toLowerCase().trim();
