@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Bot, CheckCircle, ShieldAlert, Activity, Cpu, XCircle, Check, Eye,
-  Search, Settings, Sliders, Pause, Play, BarChart2
+  Search, Settings, Sliders, Pause, Play, BarChart2,
+  AlertOctagon, Clock, RotateCcw, LockKeyhole, TriangleAlert, Pencil, Info, Zap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './AgentHQ.css';
@@ -18,6 +19,190 @@ type QueueItem = {
   created_at?: string;
   agent_confidence?: number;
   auto_resolve_hours?: number | null;
+};
+
+// ── Rich Intent Types ──────────────────────────────────────────────────────────
+interface RichIntent {
+  id: string;
+  agent_name: string;
+  action_type: string;
+  directive: string;
+  risk_level: 'critical' | 'high' | 'medium' | 'low';
+  evidence_summary: string;
+  impact_preview: Record<string, string>;
+  reversibility: 'reversible' | 'partially_reversible' | 'irreversible';
+  expires_at: string;
+  created_at: string;
+  is_demo?: boolean;
+}
+
+const RISK_META = {
+  critical: { label: 'CRITICAL', color: '#DC2626', bg: '#fef2f2', border: '#fca5a5', Icon: AlertOctagon   },
+  high:     { label: 'HIGH',     color: '#D97706', bg: '#fffbeb', border: '#fde68a', Icon: TriangleAlert  },
+  medium:   { label: 'MEDIUM',   color: '#2563EB', bg: '#eff6ff', border: '#93c5fd', Icon: Info           },
+  low:      { label: 'LOW',      color: '#16A34A', bg: '#f0fdf4', border: '#86efac', Icon: CheckCircle    },
+} as const;
+
+const REVERSIBILITY_META = {
+  irreversible:         { label: 'IRREVERSIBLE — cannot be undone', color: '#DC2626', Icon: LockKeyhole },
+  partially_reversible: { label: 'Partial rollback possible',       color: '#D97706', Icon: RotateCcw   },
+  reversible:           { label: 'Fully reversible',                color: '#16A34A', Icon: RotateCcw   },
+} as const;
+
+function getMockIntents(): RichIntent[] {
+  return [
+    {
+      id: 'mock-001',
+      agent_name: 'Grant Report Agent',
+      action_type: 'submit_grant_report',
+      directive: 'Submit Q3 Utilisation Report for Child Nutrition Program to Tata Trusts',
+      risk_level: 'high',
+      evidence_summary: 'Auto-submit the Q3 utilisation report for "Child Nutrition Program" (Grant #GR-2024-07) to Tata Trusts. Report was drafted from live program data and has passed the 85% data readiness check. Funder deadline is in 6 days.',
+      impact_preview: { '📄 Document': '1 UC report', '📬 Recipient': 'Tata Trusts grants@', '💰 Grant value': '₹12.5L', '📅 Period': 'Jul–Sep 2024' },
+      reversibility: 'irreversible',
+      expires_at: new Date(Date.now() + 3.5 * 3600000).toISOString(),
+      created_at: new Date(Date.now() - 45 * 60000).toISOString(),
+      is_demo: true,
+    },
+    {
+      id: 'mock-002',
+      agent_name: 'Donor Nurture Agent',
+      action_type: 'send_impact_update',
+      directive: 'Send personalised impact updates to 14 lapsed donors via WhatsApp',
+      risk_level: 'medium',
+      evidence_summary: 'Send a personalised impact update via WhatsApp to 14 donors who gave in Oct–Dec 2024 and have not received an update in 90+ days. Each message is tailored with the donor\'s specific program outcomes.',
+      impact_preview: { '👥 Donors': '14 recipients', '📱 Channel': 'WhatsApp', '⏱ Send time': 'Immediately', '🔄 Action': 'Donor nurture' },
+      reversibility: 'reversible',
+      expires_at: new Date(Date.now() + 22 * 3600000).toISOString(),
+      created_at: new Date(Date.now() - 2 * 3600000).toISOString(),
+      is_demo: true,
+    },
+    {
+      id: 'mock-003',
+      agent_name: 'Compliance Guardian',
+      action_type: 'send_deadline_reminder',
+      directive: 'Remind ED, Program Head & Finance Officer about FCRA Return due in 7 days',
+      risk_level: 'medium',
+      evidence_summary: 'Send a WhatsApp reminder to 3 key staff about the FCRA Annual Return filing due in 7 days. All recipients are in the contact directory and the last reminder was sent 14 days ago.',
+      impact_preview: { '👥 Recipients': '3 staff', '📱 Channel': 'WhatsApp', '⚡ Urgency': '7 days to deadline', '↩ Recall': 'Possible within 2 min' },
+      reversibility: 'partially_reversible',
+      expires_at: new Date(Date.now() + 20 * 3600000).toISOString(),
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      is_demo: true,
+    },
+  ];
+}
+
+function normalizeApproval(q: QueueItem): RichIntent {
+  const rk = (q.risk_level?.toLowerCase() ?? 'medium') as RichIntent['risk_level'];
+  return {
+    id: q.id,
+    agent_name: q.action_card?.agent || q.intent_type || 'Agent',
+    action_type: q.intent_type || q.action_card?.intent_type || 'action',
+    directive: q.action_card?.summary || q.directive,
+    risk_level: ['critical', 'high', 'medium', 'low'].includes(rk) ? rk : 'medium',
+    evidence_summary: q.directive,
+    impact_preview: q.agent_confidence != null
+      ? { '🤖 Confidence': `${(q.agent_confidence * 100).toFixed(0)}%`, '⏱ Auto-resolve': q.auto_resolve_hours ? `${q.auto_resolve_hours}h` : 'Manual only' }
+      : {},
+    reversibility: 'partially_reversible',
+    expires_at: q.auto_resolve_hours
+      ? new Date(Date.now() + q.auto_resolve_hours * 3600000).toISOString()
+      : new Date(Date.now() + 24 * 3600000).toISOString(),
+    created_at: q.created_at || new Date().toISOString(),
+  };
+}
+
+// ── Countdown Timer ────────────────────────────────────────────────────────────
+const CountdownTimer: React.FC<{ expiresAt: string }> = ({ expiresAt }) => {
+  const [remaining, setRemaining] = useState('');
+  const [isUrgent, setIsUrgent] = useState(false);
+
+  useEffect(() => {
+    const update = () => {
+      const ms = new Date(expiresAt).getTime() - Date.now();
+      if (ms <= 0) { setRemaining('Expired'); setIsUrgent(true); return; }
+      setIsUrgent(ms < 4 * 3600000);
+      const h = Math.floor(ms / 3600000);
+      const m = Math.floor((ms % 3600000) / 60000);
+      if (h > 0) setRemaining(`${h}h ${m}m left`);
+      else setRemaining(`${m}m left`);
+    };
+    update();
+    const id = setInterval(update, 30000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+
+  return (
+    <span className={`intent-countdown ${isUrgent ? 'intent-countdown--urgent' : ''}`}>
+      <Clock size={11} /> {remaining}
+    </span>
+  );
+};
+
+// ── Intent Card ────────────────────────────────────────────────────────────────
+const IntentCard: React.FC<{
+  intent: RichIntent;
+  onApprove: (id: string) => void;
+  onReject:  (id: string) => void;
+  onModify:  (id: string) => void;
+}> = ({ intent, onApprove, onReject, onModify }) => {
+  const risk = RISK_META[intent.risk_level] ?? RISK_META.medium;
+  const rev  = REVERSIBILITY_META[intent.reversibility] ?? REVERSIBILITY_META.reversible;
+  const RiskIcon = risk.Icon;
+  const RevIcon  = rev.Icon;
+
+  return (
+    <div className="intent-card" style={{ borderColor: risk.border }}>
+      {intent.is_demo && (
+        <div className="intent-demo-banner">
+          <Zap size={11} /> Demo — this is what agent intents look like when active
+        </div>
+      )}
+      <div className="intent-card-header">
+        <div className="intent-card-header-left">
+          <span className="intent-risk-badge" style={{ background: risk.color }}>
+            <RiskIcon size={11} /> {risk.label}
+          </span>
+          <span className="intent-agent-name">{intent.agent_name}</span>
+        </div>
+        <CountdownTimer expiresAt={intent.expires_at} />
+      </div>
+
+      <h4 className="intent-directive">{intent.directive}</h4>
+
+      <div className="intent-evidence-pack" style={{ background: `${risk.bg}` }}>
+        <div className="intent-evidence-label">What will happen</div>
+        <p className="intent-evidence-text">{intent.evidence_summary}</p>
+        {Object.keys(intent.impact_preview).length > 0 && (
+          <div className="intent-impact-grid">
+            {Object.entries(intent.impact_preview).map(([k, v]) => (
+              <div key={k} className="intent-impact-cell">
+                <div className="intent-impact-cell-key">{k}</div>
+                <div className="intent-impact-cell-val">{v}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="intent-reversibility">
+          <RevIcon size={12} style={{ color: rev.color }} />
+          <span style={{ color: rev.color, fontWeight: 600, fontSize: '0.72rem' }}>{rev.label}</span>
+        </div>
+      </div>
+
+      <div className="intent-actions">
+        <button className="intent-btn intent-btn--approve" onClick={() => onApprove(intent.id)}>
+          <Check size={14} /> Approve
+        </button>
+        <button className="intent-btn intent-btn--modify" onClick={() => onModify(intent.id)}>
+          <Pencil size={13} /> Modify
+        </button>
+        <button className="intent-btn intent-btn--reject" onClick={() => onReject(intent.id)}>
+          <XCircle size={14} /> Reject
+        </button>
+      </div>
+    </div>
+  );
 };
 
 const AgentHQ: React.FC = () => {
@@ -288,56 +473,34 @@ const AgentHQ: React.FC = () => {
               <div className="card-body">
                 <div className="approval-list">
                   {approvals.map(approval => (
-                    <div key={approval.id} className={`approval-card ${approval.risk_level === 'High' ? 'high-stakes' : 'standard'}`}>
-                      <div className="approval-header">
-                        <div className="approval-title">{approval.action_card?.summary || approval.directive}</div>
-                        <div className="approval-meta">{approval.created_at ? new Date(approval.created_at).toLocaleString() : ''} • {approval.id}</div>
-                      </div>
-                      <div className="flex items-center gap-2" style={{ fontSize: '0.75rem', color: 'var(--color-primary)', fontWeight: 600 }}>
-                        <Bot size={12} /> {approval.intent_type || approval.action_card?.intent_type || 'intent'} • Risk:{' '}
-                        {approval.risk_level || approval.action_card?.risk_level || '—'}
-                        {typeof approval.agent_confidence === 'number' && (
-                          <span style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>
-                            · {(approval.agent_confidence * 100).toFixed(0)}% confident
-                            {approval.agent_confidence >= 0.9
-                              ? ' — low risk; safe to batch-approve with peers above'
-                              : ''}
-                            {approval.auto_resolve_hours != null
-                              ? ` · auto-resolves in ~${approval.auto_resolve_hours}h if no one touches it`
-                              : ''}
-                          </span>
-                        )}
-                      </div>
-                      <div className="approval-body" style={{ whiteSpace: 'pre-wrap' }}>
-                        {approval.directive}
-                      </div>
-                      <div className="approval-actions">
-                        <button
-                          className="btn btn-secondary"
-                          style={{ padding: '0.375rem 0.75rem' }}
-                          onClick={() => {
-                            try {
-                              navigator.clipboard?.writeText(JSON.stringify(approval.action_card || {}, null, 2));
-                              toast.success('Action card copied to clipboard.');
-                            } catch {
-                              toast('Unable to copy.', { icon: '📄' });
-                            }
-                          }}
-                        >
-                          <Eye size={14} /> View
-                        </button>
-                        <button className="btn btn-secondary" style={{ padding: '0.375rem 0.75rem', color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }} onClick={() => handleReject(approval.id)}>
-                          <XCircle size={14} /> Reject
-                        </button>
-                        <button className="btn btn-success" style={{ padding: '0.375rem 0.75rem' }} onClick={() => handleApprove(approval.id)}>
-                          <Check size={14} /> Approve & Execute
-                        </button>
-                      </div>
-                    </div>
+                    <IntentCard
+                      key={approval.id}
+                      intent={normalizeApproval(approval)}
+                      onApprove={handleApprove}
+                      onReject={handleReject}
+                      onModify={() => toast('Open the Action Card to edit parameters, then re-approve.', { icon: '✏️' })}
+                    />
                   ))}
                   {!approvalsLoading && approvals.length === 0 && (
-                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-tertiary)' }}>
-                      ✅ No pending actions requiring human approval.
+                    <div>
+                      <div className="intent-all-clear">
+                        <CheckCircle size={18} style={{ color: '#16A34A' }} />
+                        <span>All clear — no actions pending human review</span>
+                      </div>
+                      <div className="intent-demo-section">
+                        <div className="intent-demo-section-label">
+                          <Zap size={13} /> Sample intents — this is what the queue looks like when agents are active
+                        </div>
+                        {getMockIntents().map(intent => (
+                          <IntentCard
+                            key={intent.id}
+                            intent={intent}
+                            onApprove={() => toast.success('Demo: agents would execute this action', { icon: '✓' })}
+                            onReject={() => toast('Demo: intent removed from queue', { icon: '✕' })}
+                            onModify={() => toast('Demo: edit parameters before approving', { icon: '✏️' })}
+                          />
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

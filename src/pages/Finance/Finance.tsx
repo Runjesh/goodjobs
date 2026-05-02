@@ -134,7 +134,14 @@ const Finance: React.FC = () => {
   const fcraAdminSpent = fcraGrants.reduce((s: number, g: any) => s + (Number(g.spent) || 0), 0);
   const fcraAdminLimit = fcraTotal * 0.2;
   const fcraAdminPercent = fcraAdminLimit > 0 ? (fcraAdminSpent / fcraAdminLimit) * 100 : 0;
-  const isFcraWarning = fcraAdminPercent > 85;
+  const fcraRealPct = fcraTotal > 0 ? (fcraAdminSpent / fcraTotal) * 100 : 0;
+  const fcraStatus = (() => {
+    if (fcraRealPct >= 20) return { key: 'critical', label: 'CRITICAL — Cap Breached', color: '#DC2626', bg: '#fee2e2' };
+    if (fcraRealPct >= 16) return { key: 'warning',  label: 'WARNING — Near Cap',      color: '#EA580C', bg: '#fff7ed' };
+    if (fcraRealPct >= 12) return { key: 'caution',  label: 'CAUTION',                 color: '#D97706', bg: '#fef3c7' };
+    return                        { key: 'safe',     label: 'SAFE',                    color: '#16A34A', bg: '#f0fdf4' };
+  })();
+  const isFcraWarning = fcraStatus.key === 'warning' || fcraStatus.key === 'critical';
 
   const handleJournalEntry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -617,29 +624,63 @@ const Finance: React.FC = () => {
             <span style={{ color: 'var(--color-text-tertiary)' }}>Connect bank feeds (AA) to show real-time balances.</span>
           </div>
         </div>
-        <div className="finance-card fcra-card" style={{ gridColumn: 'span 3' }}>
+        <div className="finance-card fcra-card fcra-gauge-card" style={{ gridColumn: 'span 3', borderColor: fcraStatus.color + '55', background: fcraStatus.bg }}>
           <div className="fcra-card-header">
-            <div className="fund-label" style={{ color: '#4f46e5' }}><span>FCRA Admin Overhead (20% cap)</span></div>
-            <span className="fcra-badge">{fcraTotal > 0 ? 'Derived from FCRA grants' : 'Not configured'}</span>
+            <div className="fund-label" style={{ color: '#4f46e5' }}><span>FCRA Admin Overhead Monitor</span></div>
+            <span className="fcra-status-pill" style={{ background: fcraStatus.color }}>
+              {fcraStatus.label}
+            </span>
           </div>
-          <div className="fcra-card-body">
-            <div className="fcra-limit-box" style={{ width: '100%' }}>
-              <div className="flex justify-between items-center" style={{ fontSize: '0.75rem', marginBottom: '0.25rem', color: '#475569' }}>
-                <span className="flex items-center gap-1">
-                  {isFcraWarning && <AlertCircle size={12} color="var(--color-danger)" />}
-                  Admin overhead
-                </span>
-                <span style={{ fontWeight: 600, color: isFcraWarning ? 'var(--color-danger)' : 'inherit' }}>
-                  {fcraTotal > 0 ? `${Math.round(fcraAdminPercent)}%` : '—'}
-                </span>
+          <div className="fcra-gauge-body">
+            <div className="fcra-gauge-row">
+              <div className="fcra-gauge-big-pct" style={{ color: fcraStatus.color }}>
+                {fcraTotal > 0 ? `${fcraRealPct.toFixed(1)}%` : '—'}
               </div>
-              <div className="fcra-limit-bar">
-                <div className={`fcra-limit-fill ${isFcraWarning ? 'danger' : ''}`} style={{ width: `${fcraTotal > 0 ? Math.min(fcraAdminPercent, 100) : 0}%` }}></div>
-              </div>
-              <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.25rem', textAlign: 'right' }}>
-                {fcraTotal > 0 ? `₹${fcraAdminSpent.toLocaleString()} / ₹${fcraAdminLimit.toLocaleString()}` : 'Add at least one FCRA-tagged grant to compute.'}
+              <div className="fcra-gauge-meta">
+                <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 500 }}>of total FCRA funds used as admin overhead</div>
+                <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: 2 }}>Statutory cap under FCRA 2010: 20%</div>
               </div>
             </div>
+            <div className="fcra-gauge-bar-wrap">
+              <div className="fcra-gauge-track">
+                <div
+                  className="fcra-gauge-fill"
+                  style={{
+                    width: `${fcraTotal > 0 ? Math.min((fcraRealPct / 20) * 100, 100) : 0}%`,
+                    background: fcraStatus.color,
+                    transition: 'width 0.6s ease, background 0.4s ease',
+                  }}
+                />
+                <div className="fcra-gauge-marker" style={{ left: '60%' }} title="Caution threshold: 12%" />
+                <div className="fcra-gauge-marker" style={{ left: '80%' }} title="Warning threshold: 16%" />
+              </div>
+              <div className="fcra-gauge-legend">
+                <span style={{ color: '#16A34A' }}>Safe &lt;12%</span>
+                <span style={{ color: '#D97706' }}>Caution 12–16%</span>
+                <span style={{ color: '#EA580C' }}>Warning 16–20%</span>
+                <span style={{ color: '#DC2626' }}>Critical ≥20%</span>
+              </div>
+            </div>
+            {fcraTotal > 0 ? (
+              <div className="fcra-gauge-detail">
+                <div className="fcra-detail-row">
+                  <span>Admin spent</span>
+                  <strong>₹{fcraAdminSpent.toLocaleString('en-IN')}</strong>
+                </div>
+                <div className="fcra-detail-row">
+                  <span>Remaining headroom</span>
+                  <strong style={{ color: fcraStatus.color }}>
+                    ₹{Math.max(0, fcraAdminLimit - fcraAdminSpent).toLocaleString('en-IN')}
+                  </strong>
+                </div>
+                <div className="fcra-detail-row">
+                  <span>20% cap (of ₹{fcraTotal.toLocaleString('en-IN')} total FCRA)</span>
+                  <strong>₹{fcraAdminLimit.toLocaleString('en-IN')}</strong>
+                </div>
+              </div>
+            ) : (
+              <div className="fcra-gauge-empty">Add FCRA-tagged grants above to compute admin overhead in real time.</div>
+            )}
           </div>
         </div>
       </div>

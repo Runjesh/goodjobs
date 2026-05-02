@@ -722,38 +722,77 @@ const Programs: React.FC = () => {
               </button>
             </div>
             <input ref={benFileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleBenCsvFile} />
-            {benCsvRows.length > 0 && (
-              <>
-                <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                  {benCsvRows.length} row(s) — preview first {Math.min(8, benCsvRows.length)}
-                </div>
-                <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', fontSize: '0.78rem', marginBottom: '1rem' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: 'var(--color-bg-main)' }}>
-                        {['name', 'program', 'location', 'phone', 'referral_source'].map(h => (
-                          <th key={h} style={{ textAlign: 'left', padding: '0.35rem 0.5rem' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {benCsvRows.slice(0, 8).map((row, i) => (
-                        <tr key={i} style={{ borderTop: '1px solid var(--color-border-light)' }}>
-                          <td style={{ padding: '0.35rem 0.5rem' }}>{row.name}</td>
-                          <td style={{ padding: '0.35rem 0.5rem' }}>{row.program}</td>
-                          <td style={{ padding: '0.35rem 0.5rem' }}>{row.location}</td>
-                          <td style={{ padding: '0.35rem 0.5rem' }}>{row.phone}</td>
-                          <td style={{ padding: '0.35rem 0.5rem' }}>{row.referral_source}</td>
+            {benCsvRows.length > 0 && (() => {
+              const existing = useStore.getState().beneficiaries;
+              const previewRows = benCsvRows.slice(0, 8);
+              const dupFlags = previewRows.map(row => {
+                const nameLo  = (row.name  || '').toLowerCase().trim();
+                const phoneDig = (row.phone || '').replace(/\D/g, '');
+                return existing.some((b: any) => {
+                  const bName  = (b.name || '').toLowerCase().trim();
+                  const bPhone = (b.phone || b.contact || '').replace(/\D/g, '');
+                  if (nameLo  && bName  && nameLo  === bName)  return true;
+                  if (phoneDig.length >= 7 && bPhone.length >= 7 && phoneDig.slice(-7) === bPhone.slice(-7)) return true;
+                  return false;
+                });
+              });
+              const dupCount = dupFlags.filter(Boolean).length;
+              return (
+                <>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {benCsvRows.length} row(s) — preview first {Math.min(8, benCsvRows.length)}
+                    {dupCount > 0 && (
+                      <span style={{ fontSize: '0.7rem', background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', borderRadius: '99px', padding: '1px 8px', fontWeight: 600 }}>
+                        ⚠ {dupCount} possible duplicate{dupCount > 1 ? 's' : ''} detected
+                      </span>
+                    )}
+                    {dupCount === 0 && existing.length > 0 && (
+                      <span style={{ fontSize: '0.7rem', background: '#f0fdf4', color: '#16A34A', border: '1px solid #86efac', borderRadius: '99px', padding: '1px 8px', fontWeight: 600 }}>
+                        ✓ No duplicates found
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ maxHeight: 220, overflow: 'auto', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', fontSize: '0.78rem', marginBottom: '0.75rem' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--color-bg-main)', position: 'sticky', top: 0, zIndex: 1 }}>
+                          {['name', 'program', 'location', 'phone', 'status'].map(h => (
+                            <th key={h} style={{ textAlign: 'left', padding: '0.35rem 0.5rem', whiteSpace: 'nowrap', fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-secondary)' }}>{h}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <button type="button" className="btn btn-primary" style={{ width: '100%' }} disabled={benImporting} onClick={runBenBulkImport}>
-                  {benImporting ? 'Importing…' : `Import all ${benCsvRows.length}`}
-                </button>
-              </>
-            )}
+                      </thead>
+                      <tbody>
+                        {previewRows.map((row, i) => (
+                          <tr key={i} style={{ borderTop: '1px solid var(--color-border-light)', background: dupFlags[i] ? '#fffbeb' : undefined }}>
+                            <td style={{ padding: '0.35rem 0.5rem' }}>{row.name}</td>
+                            <td style={{ padding: '0.35rem 0.5rem' }}>{row.program}</td>
+                            <td style={{ padding: '0.35rem 0.5rem' }}>{row.location}</td>
+                            <td style={{ padding: '0.35rem 0.5rem' }}>{row.phone}</td>
+                            <td style={{ padding: '0.35rem 0.5rem', whiteSpace: 'nowrap' }}>
+                              {dupFlags[i] ? (
+                                <span style={{ fontSize: '0.7rem', background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 6px', fontWeight: 600 }}>
+                                  ⚠ Duplicate?
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '0.7rem', color: '#16A34A', fontWeight: 600 }}>✓ New</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {dupCount > 0 && (
+                    <div style={{ fontSize: '0.75rem', color: '#92400e', marginBottom: '0.75rem', padding: '0.5rem 0.75rem', background: '#fffbeb', borderRadius: 'var(--radius-sm)', border: '1px solid #fde68a' }}>
+                      ⚠ {dupCount} row{dupCount > 1 ? 's' : ''} may already exist (matched by name or phone). The import will still proceed — review highlighted rows after import.
+                    </div>
+                  )}
+                  <button type="button" className="btn btn-primary" style={{ width: '100%' }} disabled={benImporting} onClick={runBenBulkImport}>
+                    {benImporting ? 'Importing…' : `Import all ${benCsvRows.length}${dupCount > 0 ? ` (${dupCount} flagged)` : ''}`}
+                  </button>
+                </>
+              );
+            })()}
           </div>
         </ModalOverlay>
       )}

@@ -448,3 +448,39 @@ html.dark .today-stat-card,
 html.dark .yesterday-strip,
 html.dark .snoozed-drawer { background: var(--color-bg-card); border-color: var(--color-border); }
 html.dark .snooze-menu { background: var(--color-bg-elevated); }
+
+/* ── Overdue age badge (pulsing for >3 days) ───────────────────────────────── */
+.age-badge--overdue {
+  animation: age-pulse 2s ease-in-out infinite;
+  font-weight: 700;
+}
+
+@keyframes age-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Inline action busy / done states ──────────────────────────────────────── */
+.priority-item-action--busy {
+  opacity: 0.7;
+  cursor: not-allowed;
+  gap: 0.35rem;
+}
+
+.priority-item-action--busy .spin {
+  animation: spin 0.8s linear infinite;
+}
+
+.priority-item-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #16A34A;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 99px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}

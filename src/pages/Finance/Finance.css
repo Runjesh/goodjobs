@@ -201,3 +201,120 @@
   .fcra-card-body { flex-direction: column; align-items: flex-start; gap: 1rem; }
   .fcra-limit-box { width: 100%; }
 }
+
+/* ── FCRA Real-time Gauge ──────────────────────────────────────────────────── */
+.fcra-gauge-card {
+  border-left-width: 3px !important;
+  border-left-style: solid !important;
+}
+
+.fcra-status-pill {
+  display: inline-flex;
+  align-items: center;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fcra-gauge-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding-top: 0.25rem;
+}
+
+.fcra-gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.fcra-gauge-big-pct {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  min-width: 80px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fcra-gauge-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fcra-gauge-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.fcra-gauge-track {
+  position: relative;
+  height: 12px;
+  background: rgba(0,0,0,0.07);
+  border-radius: 99px;
+  overflow: visible;
+}
+
+.fcra-gauge-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 99px;
+  min-width: 2px;
+}
+
+.fcra-gauge-marker {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 18px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+
+.fcra-gauge-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 0 2px;
+}
+
+.fcra-gauge-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  background: rgba(255,255,255,0.5);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+.fcra-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.fcra-detail-row strong {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.fcra-gauge-empty {
+  font-size: 0.8rem;
+  color: var(--color-text-tertiary);
+  padding: 0.5rem 0;
+  font-style: italic;
+}

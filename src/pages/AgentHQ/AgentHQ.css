@@ -189,3 +189,227 @@
   .agent-stats-grid { grid-template-columns: repeat(2, 1fr); }
   .main-agent-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Intent Card System ────────────────────────────────────────────────────── */
+.intent-card {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+  border-left: 4px solid;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding: 1.125rem 1.25rem;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+}
+
+.intent-demo-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #7c3aed;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 99px;
+  padding: 2px 8px;
+  align-self: flex-start;
+}
+
+.intent-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.intent-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.intent-risk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.intent-agent-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.intent-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.intent-countdown--urgent {
+  color: #DC2626;
+  animation: intent-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes intent-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.intent-directive {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.intent-evidence-pack {
+  border-radius: var(--radius-sm);
+  padding: 0.875rem;
+  border: 1px solid rgba(0,0,0,0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.intent-evidence-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.intent-evidence-text {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.intent-impact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.intent-impact-cell {
+  background: rgba(255,255,255,0.7);
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: var(--radius-sm);
+  padding: 0.375rem 0.5rem;
+}
+
+.intent-impact-cell-key {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.intent-impact-cell-val {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.intent-reversibility {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+
+.intent-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.intent-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.875rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.intent-btn--approve {
+  background: #16A34A;
+  color: white;
+  border-color: #16A34A;
+}
+.intent-btn--approve:hover { background: #15803d; }
+
+.intent-btn--modify {
+  background: var(--color-bg-main);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+.intent-btn--modify:hover { background: var(--color-border-light); }
+
+.intent-btn--reject {
+  background: transparent;
+  color: #DC2626;
+  border-color: #fca5a5;
+}
+.intent-btn--reject:hover { background: #fef2f2; }
+
+.intent-all-clear {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #16A34A;
+  margin-bottom: 1.25rem;
+}
+
+.intent-demo-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.intent-demo-section-label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #7c3aed;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+}

@@ -54,6 +54,7 @@ interface PriorityItem {
   ageDays?: number;
   delta?: string;
   deltaDir?: 'up' | 'down' | 'flat';
+  actionType?: 'receipts' | 'whatsapp';
 }
 
 interface Win { id: string; text: string; icon: React.ElementType; }
@@ -180,11 +181,11 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
 
   const pendingReceipts = transactions.filter((t: any) => t.receipt_status === 'pending' || !t.receipt_number);
   if (pendingReceipts.length > 3)
-    items.push({ id: 'receipts', text: `${pendingReceipts.length} donor receipts pending — 80G compliance at risk`, action: 'Bulk generate', path: '/funding', level: 'urgent', ageDays: 7 });
+    items.push({ id: 'receipts', text: `${pendingReceipts.length} donor receipts pending — 80G compliance at risk`, action: 'Bulk generate', path: '/funding', level: 'urgent', ageDays: 7, actionType: 'receipts' });
 
   const lapsedDonors = donors.filter((d: any) => d.lastGift && nowMs - new Date(d.lastGift).getTime() > 180 * 864e5);
   if (lapsedDonors.length > 0 && (role === 'ed' || role === 'finance'))
-    items.push({ id: 'lapsed', text: `${lapsedDonors.length} donor${lapsedDonors.length > 1 ? 's' : ''} lapsed — no gift in 6+ months`, action: 'Follow up', path: '/funding', level: 'urgent', ageDays: 14 });
+    items.push({ id: 'lapsed', text: `${lapsedDonors.length} donor${lapsedDonors.length > 1 ? 's' : ''} lapsed — no gift in 6+ months`, action: 'Follow up via WhatsApp', path: '/funding', level: 'urgent', ageDays: 14, actionType: 'whatsapp' });
 
   const activeCampaigns = campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active');
   const nearGoal = activeCampaigns.filter((c: any) => c.goal > 0 && c.raised / c.goal > 0.8 && c.raised / c.goal < 1);
@@ -265,6 +266,33 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
   const Icon = meta.icon;
   const [snoozeMenuId, setSnoozeMenuId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [actionBusy, setActionBusy] = useState<Set<string>>(new Set());
+  const [actionDone, setActionDone] = useState<Set<string>>(new Set());
+
+  const handleItemAction = async (item: PriorityItem) => {
+    if (item.actionType === 'receipts') {
+      setActionBusy(prev => new Set([...prev, item.id]));
+      try {
+        const res = await apiFetch('/receipts/bulk', { method: 'POST' });
+        if (res.ok) {
+          toast.success('Bulk receipts generated!');
+          setActionDone(prev => new Set([...prev, item.id]));
+        } else {
+          onAction(item.path ?? '/funding');
+        }
+      } catch {
+        onAction(item.path ?? '/funding');
+      } finally {
+        setActionBusy(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+      }
+    } else if (item.actionType === 'whatsapp') {
+      const msg = encodeURIComponent('Hi, following up on behalf of our organisation. How can we support you?');
+      window.open(`https://wa.me/?text=${msg}`, '_blank');
+      setActionDone(prev => new Set([...prev, item.id]));
+    } else if (item.path) {
+      onAction(item.path);
+    }
+  };
 
   useEffect(() => {
     if (!snoozeMenuId) return;
@@ -302,8 +330,8 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
               <span className="priority-item-text">{item.text}</span>
 
               {item.ageDays !== undefined && item.ageDays > 0 && (
-                <span className={`age-badge ${item.ageDays >= 5 ? 'age-badge--escalated' : ''}`} style={{ color: meta.color }}>
-                  <Clock size={10} />{item.ageDays}d
+                <span className={`age-badge ${item.ageDays >= 3 ? 'age-badge--overdue' : ''} ${item.ageDays >= 7 ? 'age-badge--escalated' : ''}`} style={{ color: meta.color }}>
+                  <Clock size={10} />{item.ageDays}d overdue
                 </span>
               )}
 
@@ -317,10 +345,21 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
                 </span>
               )}
 
-              {item.action && item.path && (
-                <button className="priority-item-action" onClick={() => onAction(item.path!)} style={{ color: meta.color }}>
+              {item.action && !actionDone.has(item.id) && (
+                <button
+                  className={`priority-item-action ${actionBusy.has(item.id) ? 'priority-item-action--busy' : ''}`}
+                  onClick={() => void handleItemAction(item)}
+                  style={{ color: meta.color }}
+                  disabled={actionBusy.has(item.id)}
+                >
+                  {actionBusy.has(item.id) ? <RefreshCw size={11} className="spin" /> : null}
                   {item.action} <ArrowRight size={12} />
                 </button>
+              )}
+              {actionDone.has(item.id) && (
+                <span className="priority-item-done">
+                  <CheckCircle2 size={12} /> Done
+                </span>
               )}
 
               {level !== 'urgent' && (
