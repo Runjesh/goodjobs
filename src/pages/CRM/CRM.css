@@ -342,3 +342,149 @@
   background: rgba(255,255,255,0.25) !important;
 }
 
+
+/* ───── Nurture Queue (Lifecycle stages) ────────────────────────── */
+.nurture-panel {
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-main);
+  margin-bottom: 1rem;
+}
+
+.nurture-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.nurture-panel-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-primary);
+  flex: 1;
+}
+
+.nurture-panel-count {
+  background: #fff;
+  color: var(--color-text-secondary);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-light);
+}
+
+.nurture-stage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.65rem;
+}
+
+.nurture-stage-chip {
+  background: #fff;
+  border: 1px solid var(--color-border-light);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.nurture-stage-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.nurture-stage-chip--active {
+  background: var(--color-primary-light, #ccfbf1);
+  border-color: var(--color-primary, #0F766E);
+  color: var(--color-primary, #0F766E);
+}
+
+.nurture-card {
+  background: #fff;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.45rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.nurture-card:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-1px);
+}
+
+.nurture-card--risk {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.nurture-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.nurture-card-name {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nurture-card-reason {
+  font-size: 0.68rem;
+  color: var(--color-text-tertiary);
+  margin-bottom: 0.45rem;
+}
+
+.nurture-card-action {
+  width: 100%;
+  background: var(--color-primary, #0F766E);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.35rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  transition: background 0.12s;
+}
+
+.nurture-card-action:hover {
+  background: #0e6a64;
+}
+
+.nurture-empty {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  padding: 0.65rem 0.5rem;
+  text-align: center;
+  background: #fff;
+  border: 1px dashed var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.donor-meta--row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}

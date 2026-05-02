@@ -11,6 +11,7 @@ import {
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
+import { computeStage, nextDueMilestone } from '../../utils/donorLifecycle';
 import toast from 'react-hot-toast';
 import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
 import './Dashboard.css';
@@ -221,6 +222,35 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
   const lapsedDonors = donors.filter((d: any) => d.lastGift && nowMs - new Date(d.lastGift).getTime() > 180 * 864e5);
   if (lapsedDonors.length > 0 && (role === 'ed' || role === 'finance'))
     items.push({ id: 'lapsed', text: `${lapsedDonors.length} donor${lapsedDonors.length > 1 ? 's' : ''} lapsed — no gift in 6+ months`, action: 'Follow up via WhatsApp', path: '/funding', level: 'urgent', ageDays: 14, actionType: 'whatsapp' });
+
+  // ── Donor lifecycle: lapse-risk surface for fundraising-aligned roles ─────
+  if (role === 'ed' || role === 'finance') {
+    const lapseRisk = donors.filter((d: any) => computeStage(d) === 'lapse_risk');
+    if (lapseRisk.length > 0) {
+      items.push({
+        id: 'donors-lapse-risk',
+        text: `${lapseRisk.length} donor${lapseRisk.length > 1 ? 's' : ''} at lapse risk — no response in 14d after renewal touch`,
+        action: 'Open re-engagement queue',
+        path: '/crm',
+        level: 'attention',
+        ageDays: 14,
+      });
+    }
+    // Touchpoint due today/overdue across all donors → single rollup item.
+    const dueTouchpoints = donors.filter((d: any) => {
+      const m = nextDueMilestone(d);
+      return m && (m.state === 'due' || m.state === 'overdue');
+    });
+    if (dueTouchpoints.length > 0) {
+      items.push({
+        id: 'donors-touchpoints-due',
+        text: `${dueTouchpoints.length} donor touchpoint${dueTouchpoints.length > 1 ? 's' : ''} due — approve & send today`,
+        action: 'Open nurture queue',
+        path: '/crm',
+        level: 'attention',
+      });
+    }
+  }
 
   const activeCampaigns = campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active');
   const nearGoal = activeCampaigns.filter((c: any) => c.goal > 0 && c.raised / c.goal > 0.8 && c.raised / c.goal < 1);

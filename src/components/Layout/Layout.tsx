@@ -72,15 +72,40 @@ const Layout: React.FC = () => {
   useEffect(() => {
     if (!can('crm', 'canView')) return;
     let cancelled = false;
+    const seedDemoDonorsIfDev = () => {
+      if (!import.meta.env.DEV) return;
+      if (cancelled) return;
+      const existing = useStore.getState().donors;
+      if (existing.length > 0) return;
+      // Demo donors with varied lastGift dates so all lifecycle stages appear.
+      // Dates are picked relative to a near-current window so they survive a
+      // few months of clock drift without re-seeding.
+      const today = new Date();
+      const daysAgo = (n: number) => {
+        const d = new Date(today); d.setDate(d.getDate() - n);
+        return d.toISOString().split('T')[0];
+      };
+      setDonors([
+        { id: '1', name: 'Anjali Desai',       type: 'Major Donor',  totalGiven: 450000,  lastGift: daysAgo(345), initial: 'A', pan: 'ABCP****4D', location: 'Mumbai, Maharashtra',  tags: ['Education Cause'] },
+        { id: '2', name: 'Rohan Gupta',        type: 'Recurring',    totalGiven:  24000,  lastGift: daysAgo(15),  initial: 'R', pan: 'BVCX****9H', location: 'Delhi, NCR',           tags: ['Monthly Giver'] },
+        { id: '3', name: 'Infosys Foundation', type: 'CSR Partner',  totalGiven: 5000000, lastGift: daysAgo(400), initial: 'I', pan: 'INFS****1C', location: 'Bangalore, Karnataka', tags: ['CSR'] },
+        { id: '4', name: 'Priya Sharma',       type: 'Lapsing',      totalGiven:  15000,  lastGift: daysAgo(180), initial: 'P', pan: 'PRYS****3J', location: 'Pune, Maharashtra',    tags: ['Health'] },
+        { id: '5', name: 'Vikram Singh',       type: 'Event Attendee', totalGiven: 5000,  lastGift: daysAgo(60),  initial: 'V', pan: 'VKRS****2K', location: 'Jaipur, Rajasthan',    tags: ['Events'] },
+        { id: '6', name: 'Sneha Iyer',         type: 'Recurring',    totalGiven:  72000,  lastGift: daysAgo(95),  initial: 'S', pan: 'SNHI****6M', location: 'Chennai, Tamil Nadu',  tags: ['Renewal'] },
+      ] as any);
+    };
     const run = async () => {
       try {
         const dRes = await apiFetch('/crm/donors');
-        if (!dRes.ok) return;
+        if (!dRes.ok) { seedDemoDonorsIfDev(); return; }
         const dData = await dRes.json();
         if (cancelled) return;
-        if (Array.isArray(dData.donors)) setDonors(dData.donors);
+        if (Array.isArray(dData.donors)) {
+          setDonors(dData.donors);
+          if (dData.donors.length === 0) seedDemoDonorsIfDev();
+        }
       } catch {
-        /* keep store */
+        seedDemoDonorsIfDev();
       }
     };
     run();
