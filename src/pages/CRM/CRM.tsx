@@ -161,32 +161,57 @@ const CRM: React.FC = () => {
     return candidates;
   }, [donors, donorStages, stageFilter, activeFilter, lifecycleTick]);
 
-  const handleNurtureAction = async (donorId: string, milestoneId: 'thankyou' | 'impact' | 'fullimpact' | 'renewal') => {
+  // Tracks in-flight Approve & Send calls so we don't double-submit and so
+  // the UI can disable buttons while a request is pending.  Key = `${donorId}:${milestoneId}`.
+  const [pendingNurture, setPendingNurture] = useState<Set<string>>(new Set());
+
+  const handleNurtureAction = useCallback(async (
+    donorId: string,
+    milestoneId: 'thankyou' | 'impact' | 'fullimpact' | 'renewal',
+  ): Promise<boolean> => {
+    const key = `${donorId}:${milestoneId}`;
+    if (pendingNurture.has(key)) return false;
+    setPendingNurture(prev => { const n = new Set(prev); n.add(key); return n; });
     try {
-      // Optimistically mark milestone done so the queue updates immediately.
-      markMilestoneDone(donorId, milestoneId);
-      setLifecycleTick(t => t + 1);
-      const template = milestoneId === 'renewal' ? WA_TEMPLATES.find(t => t.id === 'reactivate')
-                      : milestoneId === 'thankyou' ? WA_TEMPLATES.find(t => t.id === 'thank')
-                      : WA_TEMPLATES.find(t => t.id === 'impact');
-      const res = await apiFetch('/crm/outreach', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode: 'draft',
-          channel: 'whatsapp',
-          donor_ids: [donorId],
-          template_id: template?.id,
-          message: (template?.body || '').toString(),
-        }),
-      });
-      // Backend errors are tolerated — we still mark the touchpoint as actioned locally.
-      if (res.ok) toast.success('Touchpoint approved & draft queued.');
-      else toast('Touchpoint marked as sent (draft skipped).', { icon: '✅' });
-    } catch {
-      toast('Touchpoint marked as sent.', { icon: '✅' });
+      const template = milestoneId === 'renewal'  ? WA_TEMPLATES.find(t => t.id === 'reactivate')
+                     : milestoneId === 'thankyou' ? WA_TEMPLATES.find(t => t.id === 'thank')
+                     :                              WA_TEMPLATES.find(t => t.id === 'impact');
+      let success = false;
+      try {
+        const res = await apiFetch('/crm/outreach', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'draft',
+            channel: 'whatsapp',
+            donor_ids: [donorId],
+            template_id: template?.id,
+            message: (template?.body || '').toString(),
+          }),
+        });
+        success = res.ok;
+      } catch {
+        success = false;
+      }
+      // DEV fallback: with no backend the API will fail; treat as success in
+      // dev so demo flows still work end-to-end.
+      if (!success && import.meta.env.DEV) success = true;
+
+      if (success) {
+        // Only mark the milestone as completed AFTER the outreach actually
+        // succeeded.  Failures leave the milestone in its overdue/due state
+        // so it stays in the queue until a real send happens.
+        markMilestoneDone(donorId, milestoneId);
+        setLifecycleTick(t => t + 1);
+        toast.success('Touchpoint approved & draft queued.');
+        return true;
+      }
+      toast.error('Send failed — touchpoint not marked. Please retry.');
+      return false;
+    } finally {
+      setPendingNurture(prev => { const n = new Set(prev); n.delete(key); return n; });
     }
-  };
+  }, [pendingNurture]);
 
   const activeDonor = useMemo(() => donors.find(d => String(d.id) === String(activeDonorId)) || donors[0], [donors, activeDonorId]);
   const donorTransactions = useMemo(() => transactions.filter(t => t.donorId === activeDonor?.id), [transactions, activeDonor]);
@@ -621,9 +646,11 @@ const CRM: React.FC = () => {
                     </div>
                     <button
                       className="nurture-card-action"
-                      onClick={(e) => { e.stopPropagation(); handleNurtureAction(String(d.id), milestoneId); }}
+                      disabled={pendingNurture.has(`${String(d.id)}:${milestoneId}`)}
+                      aria-busy={pendingNurture.has(`${String(d.id)}:${milestoneId}`)}
+                      onClick={(e) => { e.stopPropagation(); void handleNurtureAction(String(d.id), milestoneId); }}
                     >
-                      {ctaLabel} <ArrowRight size={11} />
+                      {pendingNurture.has(`${String(d.id)}:${milestoneId}`) ? 'Sending…' : ctaLabel} <ArrowRight size={11} />
                     </button>
                   </div>
                 );
@@ -815,7 +842,13 @@ const CRM: React.FC = () => {
             <div className="detail-body">
               <div className="timeline-section">
                 <div style={{ marginBottom: '1.25rem' }}>
-                  <TouchpointTimeline donor={activeDonor} onApprove={() => setLifecycleTick(t => t + 1)} />
+                  <TouchpointTimeline
+                    donor={activeDonor}
+                    onApprove={async (mid) => {
+                      const ok = await handleNurtureAction(String(activeDonor.id), mid);
+                      return ok;
+                    }}
+                  />
                 </div>
                 <h3 style={{ marginBottom: '1.5rem', fontSize: '1.125rem' }}>Activity Timeline</h3>
                 {donorTransactions.length === 0 ? null : (

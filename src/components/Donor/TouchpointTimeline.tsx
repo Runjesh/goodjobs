@@ -11,7 +11,20 @@ import './TouchpointTimeline.css';
 
 interface Props {
   donor: { id: string | number; name: string; lastGift?: unknown };
-  onApprove?: (mid: MilestoneId, milestone: Milestone) => void;
+  /**
+   * Called when the user clicks "Approve & Send" on a milestone.
+   *
+   * - If `onApprove` is **provided**, the parent owns the side-effect (e.g.
+   *   call the outreach API) AND is responsible for marking the milestone
+   *   done on success.  This component will NOT write to localStorage in
+   *   that case — it only forces a re-render once the parent resolves.
+   *   Return `true` from a successful send so the timeline re-renders;
+   *   return `false`/throw and the milestone stays in its previous state.
+   *
+   * - If `onApprove` is **omitted**, this component falls back to writing
+   *   the milestone done locally so it remains usable in standalone demos.
+   */
+  onApprove?: (mid: MilestoneId, milestone: Milestone) => boolean | void | Promise<boolean | void>;
 }
 
 const STATE_ICON: Record<Milestone['state'], React.ElementType> = {
@@ -36,13 +49,29 @@ const fmt = (d: Date | null) =>
 const TouchpointTimeline: React.FC<Props> = ({ donor, onApprove }) => {
   // Local rev counter forces re-compute after persisted changes.
   const [rev, setRev] = useState(0);
+  // Tracks milestones currently being sent so we can disable the button and
+  // prevent double-submits.
+  const [pending, setPending] = useState<Set<MilestoneId>>(new Set());
   const milestones = computeTouchpoints(donor);
 
-  const handleApprove = useCallback((m: Milestone) => {
-    markMilestoneDone(donor.id, m.id);
-    setRev(r => r + 1);
-    onApprove?.(m.id, m);
-  }, [donor.id, onApprove]);
+  const handleApprove = useCallback(async (m: Milestone) => {
+    if (pending.has(m.id)) return;
+    setPending(prev => { const n = new Set(prev); n.add(m.id); return n; });
+    try {
+      if (onApprove) {
+        // Parent owns the API call AND the markMilestoneDone write.
+        // We only re-render when the parent reports success.
+        const result = await onApprove(m.id, m);
+        if (result !== false) setRev(r => r + 1);
+      } else {
+        // Standalone fallback (no parent handler): persist locally.
+        markMilestoneDone(donor.id, m.id);
+        setRev(r => r + 1);
+      }
+    } finally {
+      setPending(prev => { const n = new Set(prev); n.delete(m.id); return n; });
+    }
+  }, [donor.id, onApprove, pending]);
 
   const handleSkip = useCallback((m: Milestone) => {
     markMilestoneSkipped(donor.id, m.id);
@@ -83,12 +112,23 @@ const TouchpointTimeline: React.FC<Props> = ({ donor, onApprove }) => {
               </div>
               <div className="touchpoint-actions">
                 {showApprove && (
-                  <button className="touchpoint-approve" onClick={() => handleApprove(m)} title="Approve & send">
-                    <Send size={11} /> Approve & Send
+                  <button
+                    className="touchpoint-approve"
+                    onClick={() => handleApprove(m)}
+                    disabled={pending.has(m.id)}
+                    aria-busy={pending.has(m.id)}
+                    title="Approve & send"
+                  >
+                    <Send size={11} /> {pending.has(m.id) ? 'Sending…' : 'Approve & Send'}
                   </button>
                 )}
                 {(m.state === 'due' || m.state === 'overdue' || m.state === 'upcoming') && (
-                  <button className="touchpoint-skip" onClick={() => handleSkip(m)} title="Skip this touchpoint">
+                  <button
+                    className="touchpoint-skip"
+                    onClick={() => handleSkip(m)}
+                    disabled={pending.has(m.id)}
+                    title="Skip this touchpoint"
+                  >
                     <MoreHorizontal size={11} /> Skip
                   </button>
                 )}
