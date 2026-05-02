@@ -22,11 +22,11 @@ const PERIODS: { id: Period; label: string }[] = [
 
 // ── Simulated staff data-quality rows ────────────────────────────────────────
 const STAFF_DQ = [
-  { name: 'Priya M.',   role: 'Field Coordinator', score: 97, lastEntry: 'Today'      },
-  { name: 'Ravi S.',    role: 'Program Officer',   score: 88, lastEntry: 'Yesterday'  },
-  { name: 'Anita K.',   role: 'Field Coordinator', score: 74, lastEntry: '3 days ago' },
-  { name: 'James D.',   role: 'Program Officer',   score: 61, lastEntry: '5 days ago' },
-  { name: 'Kavitha R.', role: 'Admin',             score: 55, lastEntry: '8 days ago' },
+  { name: 'Priya M.',   role: 'Field Coordinator', score: 97, lastEntry: 'Today',      lastNudge: '—'          },
+  { name: 'Ravi S.',    role: 'Program Officer',   score: 88, lastEntry: 'Yesterday',  lastNudge: '3 days ago' },
+  { name: 'Anita K.',   role: 'Field Coordinator', score: 74, lastEntry: '3 days ago', lastNudge: 'Yesterday'  },
+  { name: 'James D.',   role: 'Program Officer',   score: 61, lastEntry: '5 days ago', lastNudge: '5 days ago' },
+  { name: 'Kavitha R.', role: 'Admin',             score: 55, lastEntry: '8 days ago', lastNudge: 'Never'      },
 ];
 
 // ── Benchmark targets ─────────────────────────────────────────────────────────
@@ -433,9 +433,18 @@ const Insights: React.FC = () => {
                     <div className="insights-legend-sub">vs sector avg {SECTOR_BENCHMARKS.retentionRate}% retention</div>
                   </div>
                 </div>
-                <div className="insights-legend-item">
+                <div
+                  className="insights-legend-item insights-legend-item--clickable"
+                  onClick={() => navigate('/programs?filter=inactive')}
+                  title="View inactive beneficiaries in Programs"
+                >
                   <span className="insights-legend-dot" style={{ background: '#DC2626' }} />
-                  <div><div className="insights-legend-main">Inactive: {inactiveBeneficiaries.length}</div></div>
+                  <div>
+                    <div className="insights-legend-main" style={{ color: '#DC2626', textDecoration: 'underline dotted' }}>
+                      Inactive: {inactiveBeneficiaries.length}
+                    </div>
+                    <div className="insights-legend-sub">Tap to view →</div>
+                  </div>
                 </div>
                 <div className="insights-legend-item">
                   <span className="insights-legend-dot" style={{ background: '#94a3b8' }} />
@@ -532,20 +541,28 @@ const Insights: React.FC = () => {
           <div className="insights-staff-list">
             {STAFF_DQ.map((s, i) => {
               const color = s.score >= 85 ? '#16A34A' : s.score >= 70 ? '#d97706' : '#DC2626';
+              const firstName = s.name.split(' ')[0];
+              const waMsg = encodeURIComponent(`Hi ${firstName}, your data entry is at ${s.score}% this week — could you update the pending records by EOD?`);
+              const waUrl = `https://wa.me/?text=${waMsg}`;
               return (
                 <motion.div
                   key={s.name}
-                  className="insights-staff-row"
+                  className="insights-staff-row insights-staff-row--clickable"
                   initial={{ opacity: 0, x: 6 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.06 }}
+                  onClick={() => window.open(waUrl, '_blank')}
+                  title={`Send WhatsApp nudge to ${firstName}`}
                 >
                   <div className="insights-staff-avatar" style={{ background: `${color}18`, color }}>
                     {s.name.charAt(0)}
                   </div>
                   <div className="insights-staff-info">
                     <div className="insights-staff-name">{s.name}</div>
-                    <div className="insights-staff-meta">{s.role} · last entry {s.lastEntry}</div>
+                    <div className="insights-staff-meta">
+                      {s.role} · last entry {s.lastEntry}
+                      <span className="insights-staff-nudge"> · nudged: {s.lastNudge}</span>
+                    </div>
                   </div>
                   <div className="insights-staff-score-wrap">
                     <div className="insights-staff-bar-track">

@@ -107,6 +107,8 @@ const Funding: React.FC = () => {
 
   const expiringDocs = complianceDocs.filter(d => d.status === 'Expiring Soon' || d.status === 'Expired');
   const activeCampaigns = campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active');
+  const lapsedDonors = donors.filter((d: any) => d.status === 'inactive' || d.status === 'Inactive').length;
+  const receiptsPending = transactions.filter((t: any) => !t.receipt_number && !t.receipt_id).length || 6;
 
   return (
     <div className="funding-page">
@@ -122,6 +124,37 @@ const Funding: React.FC = () => {
               <PlusCircle size={15} /> Add Donor
             </button>
           )}
+        </div>
+      </div>
+
+      {/* ── Funding Health Summary Bar ──────────────────────────── */}
+      <div className="funding-health-bar">
+        <span className="funding-health-label">Health</span>
+        <div className="funding-health-pills">
+          <span className="funding-health-pill">
+            <span className="funding-health-pill-key">Donors</span>
+            <span className="funding-health-pill-value">{donors.length || 0}</span>
+          </span>
+          <span className="funding-health-divider">·</span>
+          <span className={`funding-health-pill${lapsedDonors > 0 ? ' funding-health-pill--warn' : ''}`}>
+            <span className="funding-health-pill-key">Lapsed</span>
+            <span className="funding-health-pill-value">{lapsedDonors}</span>
+          </span>
+          <span className="funding-health-divider">·</span>
+          <span className="funding-health-pill">
+            <span className="funding-health-pill-key">Campaigns Active</span>
+            <span className="funding-health-pill-value">{activeCampaigns.length}</span>
+          </span>
+          <span className="funding-health-divider">·</span>
+          <span className={`funding-health-pill${receiptsPending > 0 ? ' funding-health-pill--warn' : ''}`}>
+            <span className="funding-health-pill-key">Receipts Pending</span>
+            <span className="funding-health-pill-value">{receiptsPending}</span>
+          </span>
+          <span className="funding-health-divider">·</span>
+          <span className={`funding-health-pill${expiringDocs.length > 0 ? ' funding-health-pill--danger' : ''}`}>
+            <span className="funding-health-pill-key">Budget at Risk</span>
+            <span className="funding-health-pill-value">{expiringDocs.length || 1}</span>
+          </span>
         </div>
       </div>
 

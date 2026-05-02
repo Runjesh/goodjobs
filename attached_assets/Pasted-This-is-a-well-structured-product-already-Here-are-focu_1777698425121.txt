@@ -1,0 +1,139 @@
+This is a well-structured product already. Here are focused, high-impact improvements across UI/UX, workflows, and login — only improving what exists, not adding new features.
+
+***
+
+## Login Screen
+
+**Current state:** Teal left panel + role buttons with pre-filled credentials.
+
+**Improvements:**
+
+The role-selector approach is clever for demos but feels like a workaround rather than a real login experience. Improve it without losing the demo functionality:
+
+- **Split into two modes clearly** — "Sign In" and "Explore Demo" as two distinct paths on the same screen. The demo mode gets its own visual treatment (a dashed border or "sandbox" label) so real users never confuse it with their actual account
+- The left teal panel currently introduces the product. Replace the static copy with **one rotating line** that cycles through real outcomes: "Asha Foundation submitted 3 funder reports this month" → "₹2.4L in 80G receipts generated automatically" → "12 beneficiaries re-engaged through automated follow-ups" — social proof in the empty moment before login
+- **Role buttons should preview the Today screen** — hovering or tapping a role (ED, Finance, Field) should show a mini thumbnail of what that role sees, not just pre-fill credentials. Makes the demo instantly more compelling
+- Add a **"Continue with Google"** button prominently — NGO staff almost universally have Google Workspace or Gmail. Removing the password step removes the biggest onboarding friction
+- On mobile, the teal panel disappears. Replace it with a **single hero line** above the form: "Good work deserves great infrastructure" with the logo. Clean, branded, purposeful
+
+***
+
+## Today Screen
+
+**Current state:** Yesterday's wins, Urgent/Needs Attention/Going Well sections, Quick Actions, Stats row.
+
+**Improvements:**
+
+The architecture is right. The details need sharpening:
+
+- **Yesterday's wins strip** should feel celebratory, not just informational. Use a slightly warmer background (soft gold rather than purple), and write the wins as complete sentences rather than data fragments: "Your team logged 14 service visits" feels better than "14 service logs · 3 donations"
+- **Pulsing age badges on urgent items** are good in concept but will become visual noise if there are many items. Cap visible urgent items at **5**, with a "Show 3 more" expander. Users who see 12 red items feel paralysed, not motivated [lazarev](https://www.lazarev.agency/articles/dashboard-ux-design)
+- **Inline action buttons** are the right idea but need one rule: the action button should complete the task, not navigate to it. "Generate" should open a drawer and generate the receipt inline. "Follow up" should open a WhatsApp compose sheet with a pre-drafted message. Navigation should be a secondary "View" link, not the primary CTA
+- The **Snooze button on Needs Attention** items is excellent. Improve it: snooze should offer three durations — "Tomorrow", "3 days", "Next week" — not just 24 hours. And snoozed items should have their own collapsed section ("3 snoozed items") so they are not forgotten entirely
+- **Quick Actions grid** should adapt based on what is actually pending. If there are 6 receipts to generate, the ED's Quick Actions should show "Generate 80G Receipts (6)" not the generic "Funding" tile. Context-aware shortcuts are dramatically more useful than static ones [qodequay](https://www.qodequay.com/enterprise-dashboard-design-action)
+- **Stats row at the bottom** is easy to miss. Move the two most important stats for each role to the top strip, right next to the greeting. ED sees total funds raised + compliance score. Field worker sees beneficiaries active + follow-ups due today. Make the number the first thing they see, not the last
+
+***
+
+## Programs Workspace
+
+**Current state:** Beneficiary enrollment, program tracking, volunteers, events, attendance, service logs.
+
+**Improvements:**
+
+- **Beneficiary list** should default to a **task-oriented sort**, not alphabetical or date-added. Sort by "needs attention first" — inactive beneficiaries, overdue follow-ups, incomplete records at the top. This makes the list a work queue, not a directory
+- **Service log entry** is the most frequent action in the entire platform. It currently requires navigating into a beneficiary record and finding the log section. Add a **floating "Log Service" button** on the Programs page that opens a bottom drawer — search for beneficiary, select service type, add notes, submit. Under 30 seconds, never leaving the Programs page
+- **Beneficiary profile** should open as a **right-side slide panel on desktop**, not a full page navigation. This way the list stays visible, context is preserved, and switching between beneficiaries is one click [toptal](https://www.toptal.com/designers/dashboard-design/mobile-dashboard-ui)
+- On the profile itself, the **AI summary card** ("Meena has been enrolled for 8 months. She missed 3 sessions in April.") should sit at the very top before any tabs. One paragraph, always visible, written in plain language. This is the first thing a field worker reads when they need a quick briefing before a home visit
+- **QR attendance** works but the check-in screen feels like a technical interface. Redesign it as a **camera-first fullscreen experience** — open the screen, camera is already active, no buttons to press before scanning. Make it feel like scanning a UPI QR code, not operating a data entry system
+
+***
+
+## Funding Workspace
+
+**Current state:** Tabbed hub with Donors, Grants, Budgets, Receipts, CSR.
+
+**Improvements:**
+
+- The **tab navigation (Donors / Grants / Budgets / Receipts / CSR)** currently requires knowing which tab has what. Add a **funding health summary bar** above the tabs — 5 numbers in one line: "Donors: 142 · Lapsed: 8 · Grants Active: 4 · Receipts Pending: 6 · Budget at Risk: 1" — so users see the full picture before choosing a tab
+- **Donor profile** should have a **relationship health indicator** — a simple traffic light based on: days since last gift, days since last communication, receipt status, impact update sent. Green/amber/red. One number that tells a fundraiser whether this relationship needs attention before they read a single detail
+- **80G Receipt queue** should work like an email client — checkbox select, bulk generate, bulk send in one flow. Currently it feels like individual actions. The bulk mode should be the default, not an option
+- **Grant budget tracker** progress bars need a **"projected end state" line** — a thin dotted vertical marker showing where utilization will be at grant end date if spending continues at current rate. This is the difference between knowing you've spent 60% and knowing you're on track to underspend by ₹80,000 — two very different situations requiring different responses [knowledgehub.bidvestdata.co](https://knowledgehub.bidvestdata.co.za/best-digital-workflow-management-practices-for-nonprofits)
+- The **CSR tab** currently shows a pipeline. Add a **CSR portfolio map** — a simple card grid showing each CSR partner, their funding amount, the NGOs they support, and a compliance health dot. One screen, full picture, immediately usable for a meeting with a CSR head
+
+***
+
+## Insights / M&E Dashboard
+
+**Current state:** KPI cards with benchmarks, "what the data means" panel, charts, data quality, funder export.
+
+**Improvements:**
+
+- The **"What the data means" panel** is the most innovative feature on this screen. But three sentences feel like too much to process quickly. Restructure it as: **one bold headline sentence** + two supporting lines. "Retention is above sector average — but March shows a dip worth watching. Camp attendance in February drove the highest engagement spike of the year." That structure is easier to quote in a funder call [uxmatters](https://www.uxmatters.com/mt/archives/2025/03/from-features-to-value-designing-saas-dashboards-that-deliver-insights.php)
+- **Period switching (7 days / 30 days / 90 days / This year)** should persist across page reloads using URL params — `?period=90d` — so a program head can bookmark their preferred view and share a specific period with a colleague
+- **Staff data quality panel** is excellent but needs one addition: a **"last nudge sent" timestamp** per staff member, so the admin knows whether to nudge again or wait. Also, clicking a staff member's row should open a pre-drafted WhatsApp message: "Hi [Name], your data entry is at 64% this week — could you update the pending records by EOD?"
+- **Donut chart (active vs inactive beneficiaries)** should have a **click-through** — clicking the inactive segment directly opens the beneficiary list filtered to inactive. Chart to action in one click, not two navigations [pencilandpaper](https://www.pencilandpaper.io/articles/ux-pattern-analysis-data-dashboards)
+- The **funder export** button should ask two questions before generating: "Which funder?" and "Which period?" Then generate a pre-labelled file: `AshaFoundation_TataTrusts_Q1Report_Apr2026.csv`. Named files save 5 minutes of renaming every time
+
+***
+
+## Reports
+
+**Current state:** Four report types, status pipeline, AI Report Assembler banner.
+
+**Improvements:**
+
+- **Status pipeline** (Draft → In Review → Submitted) should be a **visual Kanban strip** at the top, not just KPI count cards. Drag a report from In Review to Submitted. Visual pipelines communicate workflow state faster than numbers [designstudiouiux](https://www.designstudiouiux.com/blog/saas-dashboard-design/)
+- Each report card should show a **data readiness score** before the user opens it — "87% of required data available" in small text under the report title. This tells the editor how much work is ahead before they invest time opening a draft
+- The **AI Report Assembler banner** at the bottom is easy to miss. Move it to the top of the page as a prominent action panel with one message: "3 reports have enough data to auto-draft right now. [Draft All]" — proactive, not passive
+- **Report editor** should auto-save visibly — a small "Saved 2 minutes ago" timestamp in the top bar. NGO staff doing report work often get interrupted. Visible autosave removes anxiety about losing work
+- Add a **"Changes since last version"** toggle at the top of any report that has a previous version. Toggle it on and the changed sections highlight in amber — makes writing the executive summary trivial because you just describe the highlighted deltas
+
+***
+
+## GoodJobs Copilot
+
+**Current state:** AI assistant for cross-module workflows, agent approval for ED/Finance roles.
+
+**Improvements:**
+
+- The Copilot should open as a **persistent right drawer**, not a separate page — so users can ask it a question while looking at their donor list or grant tracker. Context-aware assistance works only when the assistant can see what the user is looking at
+- Add **suggested prompts that adapt to the current page** — when on the Grants page, Copilot suggests: "Draft my Tata Trusts Q2 report" / "Which budget heads are at risk?" / "When is my next compliance deadline?" When on Donors: "Who hasn't received an impact update?" / "Generate all pending receipts" / "Which donors are likely to lapse this quarter?" [orrgroup](https://orrgroup.com/ai-automation/)
+- **Agent approval workflow** currently requires ED/Finance to actively find and approve. Flip it: approvals should arrive as a WhatsApp message with approve/reject buttons. The ED shouldn't have to open the app to approve a routine receipt batch
+- Add a **Copilot history panel** — a log of every agent task run, what it did, what it changed, who approved it. This builds trust with NGO leadership who are nervous about AI making changes without visibility
+
+***
+
+## Permission System
+
+**Current state:** 5 roles with module-level canView / canEdit / canExport / canApproveAgents flags.
+
+**Improvements:**
+
+- **Role indicator** should always be visible — a subtle role badge next to the user's name in the top bar: "Priya · Program Head". Users who share devices (common in small NGOs) should always know which role is active
+- Add a **"View as" mode for admins** — ED can click any staff role and preview exactly what that person sees. Critical for onboarding new staff and debugging permission issues without logging in as them
+- **Permission denied states** should be helpful, not just blocked — instead of a blank page or "Access denied", show: "This section is managed by your Finance team. Contact [name] for help." Make the wall informative [designlab](https://designlab.com/blog/ux-for-nonprofits-improving-user-experiences-on-a-budget)
+
+***
+
+## Data Flow and Fallback
+
+**Current state:** Zustand store with graceful fallback when API is unavailable.
+
+**Improvements:**
+
+- **Offline state should be clearly communicated** — a small banner: "Working offline · Changes will sync when connected" — not silence. Users in the field with bad internet need to know their entries are safe [knowledgehub.bidvestdata.co](https://knowledgehub.bidvestdata.co.za/best-digital-workflow-management-practices-for-nonprofits)
+- **Optimistic UI everywhere** — when a field worker logs a service, mark it as done immediately in the UI. If the sync fails, flag it quietly rather than making them wait for server confirmation. The field experience must feel instant [sigmacomputing](https://www.sigmacomputing.com/blog/mobile-analytics-dashboards)
+- Add a **data freshness indicator** on dashboard numbers — "Last updated 4 min ago" in small grey text under each KPI card. Removes the anxiety of "is this number current or stale?"
+
+***
+
+## The One Improvement That Changes the Whole Feel
+
+The single upgrade that will make Good Jobs feel dramatically more polished across every screen:
+
+**Inline actions everywhere, navigation nowhere.**
+
+Right now most actions require the user to navigate to a different page to complete something. Every time a user has to leave their current context to act on an alert, momentum breaks. [lazarev](https://www.lazarev.agency/articles/dashboard-ux-design)
+
+The rule should be: **if you can see a problem, you can solve it from that exact spot.** Generate the receipt from the Today screen. Log the service from the beneficiary list. Approve the report from the notification. This single principle — applied consistently across every screen — is what separates software that feels like a tool from software that feels like an extension of how people already think and work.

@@ -335,3 +335,63 @@ html.dark .funding-alert {
 html.dark .funding-alert button {
   color: #fbbf24;
 }
+
+/* ── Funding Health Summary Bar ─────────────────────────────── */
+.funding-health-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-bottom: 0.25rem;
+}
+.funding-health-bar::-webkit-scrollbar { display: none; }
+
+.funding-health-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.funding-health-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: nowrap;
+}
+.funding-health-divider {
+  color: var(--color-border);
+  font-size: 1rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.funding-health-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+.funding-health-pill-key {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+}
+.funding-health-pill-value {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+.funding-health-pill--warn .funding-health-pill-value  { color: #d97706; }
+.funding-health-pill--danger .funding-health-pill-value { color: #DC2626; }
+
+html.dark .funding-health-bar {
+  background: var(--color-bg-card);
+  border-color: var(--color-border-light);
+}

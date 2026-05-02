@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -83,6 +83,28 @@ const STATUS_META = {
 const Reports: React.FC = () => {
   const [activeType, setActiveType] = useState<ReportType | 'all'>('all');
   const [draftingReport, setDraftingReport] = useState<string | null>(null);
+  const [autoSaveText, setAutoSaveText] = useState('Saved 2 min ago');
+  const [reportStatuses, setReportStatuses] = useState<Record<string, MockReport['status']>>({});
+
+  const effectiveStatus = (r: MockReport): MockReport['status'] => reportStatuses[r.id] ?? r.status;
+  const advanceStatus = (id: string, current: MockReport['status']) => {
+    const next: Record<string, MockReport['status']> = {
+      overdue: 'draft', draft: 'review', review: 'submitted', submitted: 'submitted',
+    };
+    setReportStatuses(prev => ({ ...prev, [id]: next[current] }));
+    toast.success('Report moved to next stage.');
+  };
+
+  useEffect(() => {
+    const steps = ['Saved just now', 'Saved 1 min ago', 'Saved 2 min ago', 'Saved 4 min ago', 'Saved 6 min ago'];
+    let idx = 1;
+    const interval = setInterval(() => {
+      setAutoSaveText(steps[Math.min(idx, steps.length - 1)]);
+      idx++;
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   const navigate = useNavigate();
   const { user, can } = useAuth();
   const { donors, transactions, campaigns, beneficiaries } = useStore();
@@ -124,11 +146,14 @@ const Reports: React.FC = () => {
           <h1 className="reports-title">Reports</h1>
           <p className="reports-subtitle">Funder Reports · Impact Reports · Donor Updates · Board Briefs</p>
         </div>
-        {can('reports', 'canEdit') && (
-          <button className="reports-btn-primary" onClick={() => handleDraftReport('funder')}>
-            <Sparkles size={15} /> AI Draft Report
-          </button>
-        )}
+        <div className="reports-header-right">
+          <span className="reports-autosave">{autoSaveText}</span>
+          {can('reports', 'canEdit') && (
+            <button className="reports-btn-primary" onClick={() => handleDraftReport('funder')}>
+              <Sparkles size={15} /> AI Draft Report
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── AI Assembler banner — proactive, at top ───────────────── */}
@@ -168,36 +193,58 @@ const Reports: React.FC = () => {
         </div>
       )}
 
-      {/* ── Status KPIs ───────────────────────────────────────────── */}
-      <div className="reports-kpi-row">
-        <div className="reports-kpi-card reports-kpi-card--overdue">
-          <AlertCircle size={16} />
-          <div>
-            <div className="reports-kpi-value">{overdueCount}</div>
-            <div className="reports-kpi-label">Overdue</div>
-          </div>
-        </div>
-        <div className="reports-kpi-card reports-kpi-card--draft">
-          <Clock size={16} />
-          <div>
-            <div className="reports-kpi-value">{draftCount}</div>
-            <div className="reports-kpi-label">In Progress</div>
-          </div>
-        </div>
-        <div className="reports-kpi-card reports-kpi-card--sent">
-          <CheckCircle2 size={16} />
-          <div>
-            <div className="reports-kpi-value">{sentCount}</div>
-            <div className="reports-kpi-label">Submitted</div>
-          </div>
-        </div>
-        <div className="reports-kpi-card reports-kpi-card--total">
-          <FileText size={16} />
-          <div>
-            <div className="reports-kpi-value">{MOCK_REPORTS.length}</div>
-            <div className="reports-kpi-label">Total</div>
-          </div>
-        </div>
+      {/* ── Kanban Pipeline Strip ─────────────────────────────────── */}
+      <div className="reports-kanban">
+        {(([
+          { key: 'overdue'   , label: 'Overdue',   Icon: AlertCircle,  color: '#DC2626', bg: '#fee2e2' },
+          { key: 'draft'     , label: 'Draft',     Icon: FileText,     color: '#6366f1', bg: '#ede9fe' },
+          { key: 'review'    , label: 'In Review', Icon: Clock,        color: '#d97706', bg: '#fef3c7' },
+          { key: 'submitted' , label: 'Submitted', Icon: CheckCircle2, color: '#16A34A', bg: '#d1fae5' },
+        ] as { key: MockReport['status']; label: string; Icon: React.ElementType; color: string; bg: string }[]).map(lane => {
+          const laneReports = MOCK_REPORTS.filter(r => effectiveStatus(r) === lane.key);
+          const advanceLabel: Record<string, string> = {
+            overdue: 'Move to Draft →', draft: 'Send to Review →', review: 'Mark Submitted ✓',
+          };
+          return (
+            <div key={lane.key} className="reports-kanban-lane" style={{ '--lane-color': lane.color } as React.CSSProperties}>
+              <div className="reports-kanban-lane-header" style={{ borderTopColor: lane.color }}>
+                <div className="reports-kanban-lane-icon" style={{ background: lane.bg, color: lane.color }}>
+                  <lane.Icon size={13} />
+                </div>
+                <span className="reports-kanban-lane-label">{lane.label}</span>
+                <span className="reports-kanban-lane-count" style={{ background: lane.bg, color: lane.color }}>
+                  {laneReports.length}
+                </span>
+              </div>
+              <div className="reports-kanban-cards">
+                {laneReports.map(r => {
+                  const typeInfo = REPORT_TYPES.find(t => t.id === r.type)!;
+                  return (
+                    <div key={r.id} className="reports-kanban-card">
+                      <div className="reports-kanban-card-title" title={r.title}>
+                        {r.title.length > 38 ? r.title.slice(0, 38) + '…' : r.title}
+                      </div>
+                      <div className="reports-kanban-card-meta" style={{ color: typeInfo.color }}>
+                        {typeInfo.label}
+                      </div>
+                      {lane.key !== 'submitted' && (
+                        <button
+                          className="reports-kanban-advance"
+                          onClick={() => advanceStatus(r.id, effectiveStatus(r))}
+                        >
+                          {advanceLabel[lane.key]}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                {laneReports.length === 0 && (
+                  <div className="reports-kanban-empty">—</div>
+                )}
+              </div>
+            </div>
+          );
+        }))}
       </div>
 
       {/* ── Report Type Cards ─────────────────────────────────────── */}

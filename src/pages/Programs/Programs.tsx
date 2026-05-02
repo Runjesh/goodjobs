@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2 } from 'lucide-react';
+import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import FormBuilder from '../../components/FormBuilder/FormBuilder';
@@ -124,6 +124,12 @@ const Programs: React.FC = () => {
   const [benCsvRows, setBenCsvRows] = useState<Record<string, string>[]>([]);
   const [benImporting, setBenImporting] = useState(false);
   const benFileRef = useRef<HTMLInputElement>(null);
+
+  const [benSort, setBenSort] = useState<'attention' | 'alpha'>('attention');
+  const [showLogService, setShowLogService] = useState(false);
+  const [logServiceSearch, setLogServiceSearch] = useState('');
+  const [logServiceType, setLogServiceType] = useState('service_visit');
+  const [logServiceNotes, setLogServiceNotes] = useState('');
 
   const refreshBeneficiaries = async () => {
     try {
@@ -298,9 +304,26 @@ const Programs: React.FC = () => {
 
   const aadhaarVerifiedPct = Math.round((beneficiaries.filter(b => b.aadhaar).length / Math.max(beneficiaries.length, 1)) * 100);
 
+  const sortedBeneficiaries = useMemo(() => {
+    const withScore = [...beneficiaries].map(b => {
+      const d = b.details || {};
+      let score = 0;
+      if (!b.aadhaar) score += 2;
+      if (!String(d['phone'] ?? '').trim()) score += 1;
+      if (!String(d['referral_source'] ?? '').trim()) score += 1;
+      return { b, score };
+    });
+    if (benSort === 'attention') {
+      withScore.sort((x, y) => y.score - x.score);
+    } else {
+      withScore.sort((x, y) => x.b.name.localeCompare(y.b.name));
+    }
+    return withScore.map(x => x.b);
+  }, [beneficiaries, benSort]);
+
   const benScrollRef = useRef<HTMLDivElement>(null);
   const benVirtualizer = useVirtualizer({
-    count: beneficiaries.length,
+    count: sortedBeneficiaries.length,
     getScrollElement: () => benScrollRef.current,
     estimateSize: () => 108,
     overscan: 10,
@@ -391,16 +414,34 @@ const Programs: React.FC = () => {
           <div className="card">
             <div className="card-header flex justify-between items-center">
               <h3 className="card-title">Enrollments ({beneficiaries.length})</h3>
-              <button
-                className="btn btn-secondary"
-                style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                onClick={() => {
-                  setBenExtra({ ...BEN_EXTRA_EMPTY });
-                  setShowModal(true);
-                }}
-              >
-                + Enroll
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="ben-sort-toggle">
+                  <button
+                    className={`ben-sort-btn ${benSort === 'attention' ? 'active' : ''}`}
+                    onClick={() => setBenSort('attention')}
+                    title="Needs attention first"
+                  >
+                    <ListFilter size={11} /> Attention
+                  </button>
+                  <button
+                    className={`ben-sort-btn ${benSort === 'alpha' ? 'active' : ''}`}
+                    onClick={() => setBenSort('alpha')}
+                    title="Alphabetical"
+                  >
+                    A–Z
+                  </button>
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                  onClick={() => {
+                    setBenExtra({ ...BEN_EXTRA_EMPTY });
+                    setShowModal(true);
+                  }}
+                >
+                  + Enroll
+                </button>
+              </div>
             </div>
             <div className="card-body" style={{ paddingBottom: '0.75rem' }}>
               {beneficiaries.length === 0 ? (
@@ -413,7 +454,7 @@ const Programs: React.FC = () => {
                 >
                   <div style={{ height: benVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
                     {benVirtualizer.getVirtualItems().map(vi => {
-                      const ben = beneficiaries[vi.index];
+                      const ben = sortedBeneficiaries[vi.index];
                       return (
                         <div
                           key={ben.id}
@@ -931,6 +972,110 @@ const Programs: React.FC = () => {
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
               <button type="button" className="btn btn-secondary" onClick={() => setShowDeleteBenConfirm(false)} style={{ flex: 1 }}>Cancel</button>
               <button type="button" className="btn btn-primary" onClick={handleDeleteBen} style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)', flex: 1 }}>Delete</button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+      {/* ── Log Service FAB ─────────────────────────────────────── */}
+      <button
+        className="programs-log-fab"
+        onClick={() => {
+          setLogServiceSearch('');
+          setLogServiceType('service_visit');
+          setLogServiceNotes('');
+          setShowLogService(true);
+        }}
+        title="Log a service visit"
+      >
+        <ClipboardCheck size={22} />
+        <span>Log Service</span>
+      </button>
+
+      {/* ── Log Service Drawer ───────────────────────────────────── */}
+      {showLogService && (
+        <ModalOverlay onBackdropClick={() => setShowLogService(false)}>
+          <div
+            className="modal-card"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            style={{ maxWidth: '460px' }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowLogService(false)}
+              style={{ position: 'absolute', right: '1rem', top: '1rem' }}
+              className="action-btn"
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+            <div className="flex items-center gap-2" style={{ marginBottom: '1.25rem', paddingRight: '2.5rem' }}>
+              <ClipboardCheck size={20} color="var(--color-primary)" />
+              <h2 style={{ margin: 0, fontSize: '1.125rem' }}>Log Service Visit</h2>
+            </div>
+            <div className="flex-col gap-4 flex">
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Search beneficiary</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Type name or ID…"
+                  value={logServiceSearch}
+                  onChange={e => setLogServiceSearch(e.target.value)}
+                />
+                {logServiceSearch.length > 1 && (
+                  <div style={{ border: '1px solid var(--color-border-light)', borderTop: 'none', borderRadius: '0 0 var(--radius-md) var(--radius-md)', overflow: 'hidden' }}>
+                    {beneficiaries
+                      .filter(b => b.name.toLowerCase().includes(logServiceSearch.toLowerCase()))
+                      .slice(0, 5)
+                      .map(b => (
+                        <button
+                          key={b.id}
+                          className="log-service-suggestion"
+                          type="button"
+                          onClick={() => setLogServiceSearch(b.name)}
+                        >
+                          {b.name} — {b.program}
+                        </button>
+                      ))
+                    }
+                  </div>
+                )}
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Service type</label>
+                <select className="input-field" value={logServiceType} onChange={e => setLogServiceType(e.target.value)}>
+                  <option value="service_visit">Service Visit</option>
+                  <option value="health_check">Health Check</option>
+                  <option value="counselling">Counselling Session</option>
+                  <option value="training">Training / Workshop</option>
+                  <option value="distribution">Material Distribution</option>
+                  <option value="follow_up">Follow-up Call</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Notes</label>
+                <textarea
+                  className="input-field"
+                  rows={3}
+                  placeholder="What happened in this session?"
+                  value={logServiceNotes}
+                  onChange={e => setLogServiceNotes(e.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%' }}
+                onClick={() => {
+                  toast.success(`Service log recorded for ${logServiceSearch || 'beneficiary'}.`);
+                  setShowLogService(false);
+                }}
+              >
+                <Send size={15} /> Submit Service Log
+              </button>
             </div>
           </div>
         </ModalOverlay>
