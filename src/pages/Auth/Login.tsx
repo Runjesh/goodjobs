@@ -67,7 +67,7 @@ const Login: React.FC = () => {
     const meta = ROLE_META[roleId as UserRole];
     const role = roles.find(r => r.id === roleId);
     login({
-      id: `user_${roleId}`,
+      id: `user_${user.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
       email: user.email,
       name: user.name || user.email.split('@')[0],
       role: roleId as UserRole,

@@ -12,6 +12,7 @@ import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
 import toast from 'react-hot-toast';
+import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
 import './Dashboard.css';
 
 const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
@@ -557,6 +558,9 @@ const Dashboard: React.FC = () => {
           </button>
         </div>
       </motion.div>
+
+      {/* ── Get Started Checklist (auto-hides when complete or dismissed) ── */}
+      <GetStartedChecklist />
 
       {/* ── Yesterday strip ──────────────────────────────────────────── */}
       <motion.div className="yesterday-strip" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>

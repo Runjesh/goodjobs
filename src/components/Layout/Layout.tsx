@@ -12,6 +12,7 @@ import IntentBar from './IntentBar';
 import UserChip from '../Auth/UserChip';
 import BottomNav from '../ui/BottomNav';
 import NotificationCenter from '../Notifications/NotificationCenter';
+import WelcomeModal from '../Onboarding/WelcomeModal';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
@@ -433,6 +434,9 @@ const Layout: React.FC = () => {
         isOpen={isNotifOpen}
         onClose={() => setIsNotifOpen(false)}
       />
+
+      {/* First-time welcome modal — auto-shows once per user */}
+      <WelcomeModal />
     </div>
   );
 };

@@ -1,0 +1,745 @@
+Here are every working flow in Good Jobs — end to end, from trigger to completion.
+
+***
+
+## Flow 1 — New NGO Onboarding
+
+```
+NGO discovers Good Jobs (LinkedIn / referral / search)
+    ↓
+Lands on marketing site → clicks "Start Free"
+    ↓
+Signup form: org name, your name, email, phone, cause area, team size
+    ↓
+Google OAuth or email/password
+    ↓
+Email verification link sent → user clicks it
+    ↓
+30-day Operations trial begins automatically (no card required)
+    ↓
+Onboarding wizard launches (5 steps, skippable):
+  Step 1 — Org profile: logo, registration number, 80G number, FCRA status
+  Step 2 — Add your first program: name, cause area, geography, start date
+  Step 3 — Invite team: add email + assign role
+  Step 4 — Import or add first 3 beneficiaries
+  Step 5 — Connect WhatsApp Business number
+    ↓
+Wizard complete → lands on Today screen
+    ↓
+Morning Brief Agent runs first brief:
+  "Welcome to Good Jobs. Here's where to start today."
+  + 3 setup tasks: Add compliance docs / Set grant deadline / Log first service
+    ↓
+Day 7 automated email: "Here's what your agents did this week"
+Day 21 automated email: "Your trial ends in 9 days — choose your plan"
+Day 28 WhatsApp + email: Upgrade prompt with tier comparison
+Day 30 (if no payment): Downgrade to Starter, data preserved, limits enforced
+```
+
+***
+
+## Flow 2 — Field Worker Daily Work (WhatsApp-Native)
+
+This is the most important flow — it covers 80% of field staff daily activity without opening the web app.
+
+```
+8:00 AM — Morning Brief WhatsApp arrives on field worker's phone:
+  "Good morning Kavitha 👋
+   Today's priorities:
+   1. Follow up with Meena Kumari — inactive 16 days
+   2. Enroll new referral from Betul PHC
+   3. Mark attendance for yesterday's camp"
+
+    ↓
+Kavitha reads message, taps "Open Tasks" button in WhatsApp
+    ↓
+
+TASK 1 — Follow up with inactive beneficiary
+  Kavitha visits Meena's home
+  Sends WhatsApp message: "Visited Meena today. She was unwell last 2 weeks,
+  now recovered. Will attend next week. Service: health counselling done."
+    ↓
+  MIS Agent receives narrative
+    ↓
+  Parses: beneficiary=Meena Kumari, service=health counselling,
+          outcome=recovered, follow_up=next_week, date=today
+    ↓
+  Confidence: 0.91 → auto-creates service log + updates status to active
+    ↓
+  WhatsApp reply to Kavitha:
+  "✅ Got it! Service logged for Meena Kumari.
+   Status updated to Active. Record: goodjobs.app/b/1234"
+    ↓
+  Meena's beneficiary record updated:
+    - status: inactive → active
+    - service_logs: new entry added
+    - last_service_date: today
+    - program KPIs updated automatically
+
+    ↓
+
+TASK 2 — Enroll new referral
+  Kavitha sends: "New enrollment: Raju Kumar, 9 years, male,
+  Village Piparia, referred by PHC Betul, education program"
+    ↓
+  MIS Agent parses → confidence 0.78 (age inferred, no DOB)
+    ↓
+  Ambiguity handler kicks in:
+  "Almost done! Just one question:
+   What is Raju's date of birth? (approximate is fine, e.g. 'Jan 2016')"
+    ↓
+  Kavitha replies: "Jan 2016"
+    ↓
+  Agent completes record → creates draft beneficiary
+    ↓
+  WhatsApp reply:
+  "✅ Draft created for Raju Kumar (9yrs, Education).
+   Please add Aadhaar and consent when possible: goodjobs.app/b/1235"
+    ↓
+  Draft appears in Programs → beneficiary list with "Incomplete" badge
+  Program Head sees data quality warning on Today screen
+
+    ↓
+
+TASK 3 — Mark attendance for yesterday's camp
+  Camp was yesterday → system auto-sent attendance link
+  Kavitha taps link → opens PWA attendance screen (works offline)
+  Marks 12 beneficiaries present, 3 absent with reason
+    ↓
+  Service logs auto-created for all 12 present
+  KPIs updated: +12 service visits
+  Event record marked complete
+  Post-event checklist auto-appears on Program Head's Today screen
+```
+
+***
+
+## Flow 3 — Beneficiary Enrollment (Web App)
+
+```
+Program Head opens Programs → clicks "Enroll Beneficiary"
+    ↓
+Enrollment modal opens (40+ fields, grouped into sections):
+  Section A — Basic Info (required):
+    Full name, date of birth, gender
+    Village, district, state, pin code
+    Primary phone (masked in display later)
+    Aadhaar number (encrypted at rest, masked in display)
+
+  Section B — Program (required):
+    Select program from dropdown
+    Referral source (PHC / self / NGO partner / government)
+    Enrollment date (defaults to today)
+    Vulnerability tags (multi-select: orphan / disability /
+                        BPL / migrant / survivor)
+
+  Section C — Household:
+    Household head name
+    Family size
+    Monthly income range
+    Link to existing household record (typeahead search)
+
+  Section D — Consent (required — DPDP Act §7):
+    Data collection purpose displayed in plain language
+    Consent checkbox (cannot submit without)
+    Consent language preference (Hindi / English / Marathi)
+    Consent timestamp auto-recorded
+
+  Section E — Documents:
+    Upload Aadhaar card (optional at enrollment, flagged incomplete)
+    Upload photo
+    Any other document
+
+    ↓
+"Save & Enroll" clicked
+    ↓
+Backend validates:
+  - Required fields present
+  - Aadhaar format valid (if provided)
+  - Duplicate check: name + village + DOB fuzzy match
+  - Consent recorded
+    ↓
+If duplicate suspected:
+  Modal shows existing record side by side
+  "This looks like an existing record. Merge, create new, or cancel?"
+    ↓
+If clean → record created:
+  - Unique beneficiary ID generated (GJ-ORG-XXXX)
+  - Consent stored in Consent Registry (DPDP compliance)
+  - Profile completeness score calculated (e.g. 72%)
+  - If < 80% complete → added to data quality watch list
+    ↓
+Program enrollment record created:
+  - Status: active
+  - Linked to program
+  - First follow-up task auto-created: "Initial assessment in 7 days"
+    ↓
+Field worker assigned to case receives WhatsApp:
+  "New beneficiary assigned: Raju Kumar (Education Program)
+   First follow-up due: [date]. View: goodjobs.app/b/1235"
+```
+
+***
+
+## Flow 4 — Grant Lifecycle (Application to Closure)
+
+```
+STAGE 1 — PIPELINE (Pre-award)
+    ↓
+Fundraising Manager opens Funding → Grants → "Add Grant"
+Enters: funder name, grant name, amount applied, program,
+        application date, expected decision date
+Status: Pipeline
+    ↓
+CSR Research Agent (if enabled) auto-generates approach notes:
+  - Funder's recent grants in similar cause area
+  - Suggested narrative angle for application
+  - Key contacts from public domain
+  Queued as HITL medium-risk → Fundraising Manager approves
+    ↓
+STAGE 2 — APPLIED
+  Application submitted → status updated to "Applied"
+  Follow-up task auto-created: "Follow up with [funder] in 14 days"
+    ↓
+STAGE 3 — AWARDED
+  Grant received → status → "Active"
+  Grant agreement PDF uploaded
+    ↓
+  Grant Parser Agent runs:
+    - Extracts all deadlines from PDF
+    - Extracts deliverables + reporting requirements
+    - Extracts budget heads + approved amounts
+    - Extracts compliance conditions
+    Confidence shown per extraction → Finance reviews
+    ↓
+  Budget heads auto-created in Fund Accounting
+  Deliverables checklist auto-created
+  Report deadlines auto-added to compliance calendar
+  Compliance Guardian Agent begins monitoring this grant
+    ↓
+STAGE 4 — ACTIVE (Ongoing)
+  Every service log entry in linked program
+    → auto-updates grant KPIs
+    → auto-updates deliverable progress
+  Every expense entered in finance module
+    → auto-updates budget utilization
+    → triggers Budget Watchdog if >85% utilized before midpoint
+    ↓
+  T-30 days before report:
+    Compliance Guardian creates task: "Grant report due in 30 days"
+    Task assigned to ED + Program Head + Finance
+    ↓
+  T-14 days:
+    Grant Report Agent generates draft report:
+      - Data readiness check first (must be >40%)
+      - Pulls beneficiary data from Programs
+      - Pulls activity data from service logs
+      - Pulls financial data from budget tracker
+      - Pulls outcomes from M&E
+      - GPT-4o writes narrative sections
+      - KPI table auto-populated
+      - Budget utilization table auto-populated
+    Report created in status: "Draft"
+    ED sees on Today screen: "Grant report draft ready for review"
+    ↓
+  T-7 days:
+    If still in Draft → Compliance Guardian escalates:
+    HITL intent created: risk=high, expires in 4 hours
+    ED receives WhatsApp with approve/review buttons
+    ED opens report, edits narrative sections, approves
+    Report status → "In Review"
+    ↓
+  Finance signs off on budget section
+  Report status → "Submitted"
+  Submission logged: date, recipient email, document version
+  Compliance Guardian marks deadline as complete
+  T+7 days: if no acknowledgement → reminder task created
+    ↓
+STAGE 5 — GRANT CLOSURE
+  Last report submitted → Grant Closure Checklist auto-appears:
+    ✓ Final utilisation certificate generated
+    ✓ Unspent funds returned / rolled over (as per agreement)
+    ✓ All deliverables marked complete
+    ✓ Beneficiary records updated with "program closed"
+    ✓ Documents archived in compliance vault
+    ✓ ED signs off on closure
+  Grant status → "Closed"
+  Summary card created: total spent, beneficiaries served,
+                         outcomes achieved, renewal likelihood score
+```
+
+***
+
+## Flow 5 — Donor Lifecycle (Acquisition to Renewal)
+
+```
+STAGE 1 — ACQUISITION
+    ↓
+Donation received via Razorpay payment link / bank transfer / cash
+    ↓
+Finance Officer logs transaction:
+  Amount, date, donor name, PAN (if available), payment mode,
+  purpose / program tagged, fund type (domestic / foreign)
+    ↓
+System checks if donor exists (name + email + PAN fuzzy match)
+  If new donor → donor record auto-created from transaction data
+  If existing → donation added to existing profile
+    ↓
+80G Receipt Service triggers immediately:
+  Receipt number generated (sequential, org-specific format)
+  PDF generated with: donor name, PAN, amount, date,
+                      org 80G exemption number, org registration
+  PDF uploaded to storage
+  Delivery queued:
+    → Email (if donor email exists + consent given)
+    → WhatsApp (if donor WhatsApp exists + consent given)
+    → Batch download queue (for Finance to print + post)
+  Donor record updated: last_gift_date, total_giving, receipt_status=sent
+    ↓
+STAGE 2 — STEWARDSHIP (0–90 days post donation)
+    ↓
+Day 3:
+  Donor Nurture Agent checks: has thank-you been sent?
+  If no → creates task: "Send personal thank-you to [donor name]"
+  Assigned to Fundraising Manager
+    ↓
+Day 30:
+  Donor tagged to program (from transaction)
+  Program has service logs, beneficiary data, outcomes
+  Donor Nurture Agent checks: enough data for impact update?
+  If yes → drafts impact update:
+    "Dear [Name], your ₹50,000 has reached 47 children in Betul district
+     through our education program. Here are 3 outcomes we measured..."
+    + 1 beneficiary story (auto-selected from case notes)
+    + 1 photo (from event/field uploads)
+  HITL: medium-risk → Fundraising Manager reviews + approves
+  Sent via email + WhatsApp
+    ↓
+Day 90:
+  Impact Narrator Agent generates full impact update:
+    Richer narrative, quarterly outcomes, program photos
+    HITL: medium-risk → ED or Fundraising Manager approves
+    ↓
+STAGE 3 — RENEWAL (11 months post last gift)
+    ↓
+Day 330 (11 months):
+  Donor Stewardship Agent detects renewal window
+  Classifies donor:
+    - Giving history (one-time / repeat / major)
+    - Engagement score (opened emails / attended events / replied WA)
+    - Program affinity (which programs their gifts funded)
+    ↓
+  Drafts personalised renewal appeal:
+    - References last gift amount and date
+    - Shows impact of that gift
+    - Specific ask amount (10–15% above last gift)
+    - Specific program to fund
+  HITL: medium-risk → Fundraising Manager approves + edits ask amount
+  Sent via preferred channel (email / WhatsApp)
+    ↓
+  If no response in 14 days:
+    Lapse risk flag set on donor record
+    Appears on Today screen: "Needs Attention — Donor [Name] at lapse risk"
+    Fundraising Manager can call / personalise outreach
+    ↓
+  If donation received → new cycle begins from Stage 1
+  If no response in 30 days → tagged as "Lapsed"
+    → Different re-engagement sequence begins (dormant donor flow)
+```
+
+***
+
+## Flow 6 — 80G Receipt Generation (Bulk)
+
+```
+Finance Officer opens Funding → Receipts
+    ↓
+Receipts queue shows: 14 transactions with pending receipts
+    ↓
+Filter options: by date range / by program / by amount
+    ↓
+"Select All" checkbox → all 14 selected
+"Bulk Generate" button clicked
+    ↓
+Backend runs ReceiptService for each in parallel:
+  - Idempotency check: skip if already generated
+  - PDF generated for each
+  - Uploaded to storage
+  - Delivery queued (email + WhatsApp per donor preferences)
+    ↓
+Progress bar shows: "Generating 14 receipts... 8/14 complete"
+    ↓
+On completion:
+  Summary shown: "14 receipts generated
+                  11 sent via email, 9 sent via WhatsApp,
+                  3 flagged — PAN missing for tax compliance"
+    ↓
+"Download All" → ZIP file with all 14 PDFs
+Named: OrgName_DonorName_Amount_Date_ReceiptNo.pdf
+    ↓
+3 flagged receipts:
+  Each shows: what's missing (PAN / email / WhatsApp consent)
+  One-click: "Send reminder to donor" → WhatsApp message:
+  "Hi [Name], please share your PAN for your 80G receipt for
+   ₹[amount] donated on [date]. Reply to this message."
+    ↓
+When donor replies with PAN:
+  WhatsApp webhook receives → updates donor record
+  Receipt regenerated automatically
+  Sent to donor immediately
+```
+
+***
+
+## Flow 7 — FCRA Compliance Monitoring
+
+```
+Finance Officer logs foreign currency transaction:
+  Amount, source, purpose, fund_type = "foreign"
+    ↓
+FCRAMonitor calculates live:
+  total_fc_received_this_FY = sum of all foreign transactions
+  admin_spend_on_fc = sum of admin expenses tagged to foreign fund
+  utilization_pct = admin_spend / total_fc × 100
+    ↓
+Health bar in Funding Hub updates in real-time:
+  < 12%: "FCRA Admin: 8.2% ✓" (green)
+  12–16%: "FCRA Admin: 14.1% ⚠" (amber)
+  16–20%: "FCRA Admin: 17.8% 🚨" (red pulsing)
+  ≥ 20%: "FCRA BREACH — 21.3% ❌" (critical banner across top)
+    ↓
+At 16%:
+  Compliance Guardian creates urgent task for Finance Officer:
+  "FCRA admin spend at 16.1% — review non-essential foreign fund expenses"
+  ED sees on Today → Urgent strip
+    ↓
+At 18%:
+  HITL intent created: risk = high
+  ED receives WhatsApp:
+  "⚠️ FCRA Admin cap warning
+   Current: 18.2% of foreign funds spent on administration
+   Cap: 20%
+   Remaining budget: ₹42,000
+   Action needed: Review and restrict admin expenses
+   [View Report] [Acknowledge]"
+    ↓
+At 20%:
+  HITL intent: risk = critical, block_on_timeout = true
+  All new admin expense entries tagged to foreign fund are BLOCKED
+  Error shown: "This expense would breach the FCRA 20% admin cap.
+                Contact your ED to review."
+  ED must approve any override
+    ↓
+End of FY:
+  FCRA Annual Return data auto-compiled:
+    - Total FC received by source
+    - Total spent by category
+    - Admin % final figure
+    - Utilization certificates per grant
+  Finance Officer reviews, exports as CSV for CA / Tally reconciliation
+```
+
+***
+
+## Flow 8 — DPDP Act Compliance
+
+```
+CONSENT CAPTURE (at enrollment):
+    ↓
+Field worker or Program Head enrolls beneficiary
+Enrollment form includes consent section:
+  Plain language notice (Hindi or English):
+  "We will collect your name, address, and health/education data
+   to provide you services and report to our funders.
+   Your data will not be shared without your permission."
+  Consent checkbox (cannot proceed without)
+    ↓
+On submit:
+  Consent record created in consent_registry table:
+    beneficiary_id, org_id, consented_at,
+    consent_language, purpose, consent_version
+    ↓
+
+DATA ERASURE REQUEST (§12):
+    ↓
+Beneficiary or guardian contacts NGO requesting data deletion
+Program Head opens beneficiary record → "Data Rights" panel
+Clicks "Log Erasure Request"
+    ↓
+Erasure request created:
+  requested_by, requested_at, deadline = +30 days
+  Timer starts (30-day legal deadline under DPDP)
+    ↓
+Task auto-created for ED:
+  "DPDP Erasure Request — [Name] — due by [date]"
+  Appears on Today screen as Urgent
+    ↓
+ED reviews: eligible for erasure? (no active legal hold, no FCRA requirement)
+If yes → confirms erasure
+System executes:
+  - Aadhaar reference deleted
+  - PAN deleted
+  - Phone number anonymised (last 4 digits retained for audit)
+  - Address anonymised
+  - Service logs retained (anonymous) for grant compliance
+  - Consent record retained (legal requirement)
+  - Erasure completion logged with timestamp
+    ↓
+Erasure confirmation sent to requester via WhatsApp
+
+BREACH LOG (§8):
+    ↓
+If any data incident detected or reported:
+  "Log Breach" button in Compliance → Compliance Vault
+  Breach details: date, data affected, suspected cause, affected individuals
+    ↓
+72-hour countdown timer starts (DPDP §8 notification deadline)
+    ↓
+ED sees on Today screen: "🚨 DPDP breach logged — notification due in 68h"
+    ↓
+At 24 hours remaining:
+  WhatsApp alert to ED:
+  "DPDP breach notification due in 24 hours.
+   You are required to notify affected individuals and the Data Protection Board.
+   [Draft Notification] [Mark Sent]"
+    ↓
+Notification drafted (if not already) → ED approves → logged
+```
+
+***
+
+## Flow 9 — Impact Report Generation
+
+```
+ED or Program Head opens Reports → clicks "Draft Impact Report"
+    ↓
+Selects: Program, Period, Intended audience (funder / donor / public)
+    ↓
+Data Readiness Check runs:
+  ✓ Beneficiary data: 234 active records (High)
+  ✓ Service logs: 847 entries in period (High)
+  ⚠ Outcome data: 3 of 5 KPIs have data (Medium)
+  ✗ Case studies: 0 stories tagged (Low)
+  ✓ Financial data: Utilization complete (High)
+  Overall readiness: 74%
+    ↓
+Warning shown: "Case study section will need manual writing.
+                All other sections will auto-draft."
+User proceeds
+    ↓
+Grant Report Agent runs (4–8 seconds):
+  Executive Summary → drafted from KPIs + outcomes
+  Program Activities → drafted from service logs
+  Beneficiary Profile → demographics table + narrative
+  Key Outcomes → KPI table + narrative interpretation
+  Financial Summary → budget table + utilization narrative
+  Case Study → placeholder: "Add 1–2 stories here"
+  Next Steps → drafted from program plan
+    ↓
+Report opens in Report Editor:
+  Left panel: sections list
+  Center: editable rich text canvas
+  Right: live data blocks (charts, tables refresh from DB)
+    ↓
+Editor features:
+  - Each AI section shows confidence level
+  - Data changed since draft? → "Refresh this section" prompt
+  - Inline comments between co-reviewers
+  - "Changes since last version" toggle (highlights deltas in amber)
+  - Auto-save: "Saved 2 min ago" in header
+    ↓
+Program Head edits case study section manually
+Finance Officer reviews budget section
+Both approve in editor (role-specific approval buttons)
+    ↓
+Status → "In Review"
+ED opens, reads executive summary, approves
+Status → "Submitted"
+    ↓
+Download as PDF → formatted with org logo, teal design language
+Report archived with version number + submission date
+Submission logged immutably in audit trail
+```
+
+***
+
+## Flow 10 — Board Member Access
+
+```
+ED invites board member:
+  Funding → Team → Invite → email + role = board_member
+    ↓
+Board member receives email:
+  "You've been added to [Org Name] on Good Jobs.
+   Access your board dashboard: [link]"
+    ↓
+Board member logs in → sees Board Dashboard only:
+  (No Programs, Funding, Agent HQ, Settings — read-only gating)
+    ↓
+Board Dashboard shows:
+  Section 1 — Org Health (4 KPI cards):
+    Total beneficiaries | Funds raised YTD | Active grants | Compliance score
+    Each with trend vs last quarter
+
+  Section 2 — Funding Health:
+    Grants: active / at-risk / closing soon
+    Donor pipeline: giving trends
+    FCRA status: safe / warning
+
+  Section 3 — Program Performance:
+    Program-by-program outcome table
+    Beneficiary reach by geography (map card)
+    SDG alignment summary
+
+  Section 4 — Compliance:
+    Statutory docs: current / expiring / expired
+    Grant reports: submitted on time / late / pending
+    DPDP status: consents current / erasure requests pending
+
+  Section 5 — Reports:
+    Last 6 reports — download only, no edit
+    Board briefs generated by Board Briefing Agent
+
+    ↓
+Board Brief Agent runs before each scheduled board meeting:
+  ED sets meeting date in Settings → Board Meetings
+  3 days before: Board Briefing Agent drafts brief:
+    - Org highlights since last meeting
+    - Financial health summary
+    - Key program outcomes
+    - Risks and issues
+    - Decisions needed from board
+  HITL: high-risk → ED approves before board sees it
+  PDF shared to all board members via email
+  Available on board dashboard as download
+```
+
+***
+
+## Flow 11 — Theory of Change Builder
+
+```
+Program Head opens Programs → Theory of Change
+    ↓
+Visual canvas opens with 5 columns:
+  Inputs → Activities → Outputs → Outcomes → Impact
+    ↓
+User adds nodes to each column:
+  Input: "₹15L Tata Trusts grant"
+  Input: "3 field staff"
+  Activity: "Weekly tutoring sessions"
+  Activity: "Monthly parent meetings"
+  Output: "200 children enrolled"
+  Output: "48 sessions conducted"
+  Outcome: "80% children improve reading level"
+  Outcome: "Parent engagement score increases"
+  Impact: "Children complete primary education"
+    ↓
+Nodes connected by drawing arrows between them
+Each connection shows the logical link
+    ↓
+Each Output and Outcome node can be linked to an M&E KPI:
+  "80% improve reading level" → linked to KPI: "Reading Assessment Score"
+  When KPI is updated in Insights, node shows live value:
+  "Current: 73% ← target: 80%"
+    ↓
+ToC auto-generates:
+  - SDG tag suggestions based on outcomes
+  - Indicator suggestions for unmeasured outcomes
+  - Logic gap warnings: "This activity has no measurable output"
+    ↓
+ToC exported as:
+  - PDF visual diagram (for grant applications)
+  - Data table (for M&E reporting)
+  - Embedded in Impact Reports automatically
+```
+
+***
+
+## Flow 12 — Subscription and Upgrade
+
+```
+New org on Starter plan tries to add 201st beneficiary
+    ↓
+System blocks the save
+Contextual upgrade prompt appears inline:
+  "You've reached 200 beneficiaries on the Starter plan.
+   Upgrade to Growth to continue.
+
+   Growth Plan — ₹2,999/month (or ₹1,999/month annual)
+   ✓ Up to 2,000 beneficiaries
+   ✓ AI agents included
+   ✓ Unlimited reports
+   ✓ 10 team members
+
+   [Upgrade to Growth] [View all plans] [Not now]"
+    ↓
+ED clicks "Upgrade to Growth"
+Razorpay checkout opens (pre-filled with org details)
+Selects: monthly or annual
+Enters card / UPI / net banking
+    ↓
+Payment confirmed
+    ↓
+Webhook received from Razorpay:
+  subscription.activated event
+    ↓
+Backend updates org:
+  subscription_tier → growth
+  subscription_status → active
+  current_period_end → +1 month or +1 year
+  Feature flags recalculated immediately
+    ↓
+Feature flags update propagated to frontend (JWT refreshed)
+User sees: beneficiary limit removed, agents now available
+    ↓
+Welcome email: "You're now on Growth. Here's how to activate your agents."
+WhatsApp confirmation: "✅ Good Jobs Growth plan activated"
+    ↓
+If payment fails (card declined / UPI failure):
+  Subscription status → past_due
+  Grace period: 7 days
+  Daily reminder emails + WhatsApp: "Payment failed — retry here"
+  On Day 7: downgrade to Starter, data preserved, limits enforced
+  All active features preserved until end of current period
+```
+
+***
+
+## The Master Data Flow (How All Flows Connect)
+
+```
+FIELD (WhatsApp)          WEB APP                    AGENTS (Background)
+──────────────            ─────────────────          ───────────────────
+Field worker sends   →    MIS Agent parses      →    Beneficiary record
+narrative                 Beneficiary enrolled        updated
+                          Service logged         →    Program KPIs updated
+                                                 →    Grant deliverables updated
+                                                 →    Grant utilization updated
+
+                          Donor donates          →    80G receipt generated
+                          (Razorpay webhook)     →    Donor record updated
+                                                 →    Impact trail linked
+
+                          Grant deadline         →    Compliance Guardian fires
+                          approaches             →    Report draft created
+                                                 →    HITL intent → ED approves
+                                                 →    Report submitted
+                                                 →    Audit log recorded
+
+                          Morning Brief          →    Today screen populated
+                          (daily 8AM)            →    Role-specific priorities
+                                                 →    WhatsApp brief sent
+
+                          Data quality           →    Insights scores updated
+                          (weekly Sunday)        →    Staff nudge queue populated
+                                                 →    One-click WA nudge available
+
+ALL DATA FLOWS INTO:
+  PostgreSQL (source of truth)
+  pgvector (semantic search, Copilot context)
+  Redis (cache, queues, real-time counters)
+  Audit log (immutable, append-only)
+```
+
+Every flow above is self-contained, fully recoverable on failure, and produces a visible outcome the user can see — on screen, via WhatsApp, or in the audit trail.

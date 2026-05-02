@@ -66,6 +66,13 @@ Legacy module pages still accessible: `/crm` `/fundraising` `/finance` `/complia
 - DPDP Act 2023 compliant
 - Donor CRM, CSR prospecting, fundraising, compliance, volunteer management
 
+## Onboarding (NGO-friendly)
+
+- **Welcome modal** (`src/components/Onboarding/WelcomeModal.tsx`) — auto-shown once per user on first login. Three role-specific slides (ED / Finance / Programs / Field / Board) explaining the platform, the AI Copilot, and what setup involves. Plain language, big buttons, fully skippable. Persisted in `localStorage.gj_welcomed_v1` keyed by user id.
+- **Get Started checklist** (`src/components/Onboarding/GetStartedChecklist.tsx`) — appears at the top of the Today screen. 5 steps with progress bar: add beneficiary, add donor, create campaign, upload compliance docs, invite team. Steps auto-complete by reading the store; team step marks done when the CTA is clicked. Auto-hides when all 5 done OR user dismisses (`localStorage.gj_setup_dismissed_v1`).
+- **Per-user isolation** — Login.tsx generates unique user IDs from email (`user_<sanitized_email>`) so each role/account has its own onboarding state.
+- **Demo-mode resilience** — Programs.tsx beneficiary enroll falls back to local store when backend is unreachable, so first-time users can complete the checklist even without a backend. Programs dropdown has a default list of common programs when no beneficiaries exist yet.
+
 ## Today Screen (Dashboard)
 
 - Yesterday's wins strip (computed from store data)

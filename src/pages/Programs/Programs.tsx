@@ -105,9 +105,20 @@ function csvEscapeCell(v: string | number | boolean): string {
   return s;
 }
 
+const DEFAULT_PROGRAMS = [
+  'Education',
+  'Healthcare Camp',
+  'Women Livelihood Center',
+  'Nutrition Programme',
+  'Digital Literacy',
+  'Skill Development',
+  'Other',
+];
+
 const Programs: React.FC = () => {
   const { beneficiaries, addBeneficiary, updateBeneficiary, deleteBeneficiary } = useStore();
-  const programs = Array.from(new Set(beneficiaries.map(b => b.program).filter(Boolean)));
+  const derivedPrograms = Array.from(new Set(beneficiaries.map(b => b.program).filter(Boolean)));
+  const programs = derivedPrograms.length > 0 ? derivedPrograms : DEFAULT_PROGRAMS;
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'mis' | 'forms' | 'toc'>('mis');
   const [form, setForm] = useState({ name: '', program: '', location: '', aadhaar: false, familySize: 1 });
@@ -176,7 +187,18 @@ const Programs: React.FC = () => {
       setBenExtra({ ...BEN_EXTRA_EMPTY });
       setShowModal(false);
     } catch {
-      toast.error('Failed to enroll (backend not reachable).');
+      // Backend unavailable — fall back to local store so demo / offline mode still works
+      addBeneficiary({
+        name: form.name,
+        program: form.program,
+        location: form.location,
+        aadhaar: form.aadhaar,
+        familySize: Number(form.familySize),
+      });
+      toast.success(`${form.name} enrolled (saved locally — sync when backend is back).`);
+      setForm({ name: '', program: programs[0] || '', location: '', aadhaar: false, familySize: 1 });
+      setBenExtra({ ...BEN_EXTRA_EMPTY });
+      setShowModal(false);
     }
   };
 
