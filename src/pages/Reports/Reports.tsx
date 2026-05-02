@@ -77,7 +77,7 @@ const MOCK_REPORTS: MockReport[] = [
 ];
 
 const STATUS_META = {
-  draft:     { label: 'Draft',     color: '#6366f1', bg: '#ede9fe' },
+  draft:     { label: 'Draft',     color: '#7C3AED', bg: '#F5F3FF' },
   review:    { label: 'In Review', color: '#d97706', bg: '#fef3c7' },
   submitted: { label: 'Submitted', color: '#16A34A', bg: '#d1fae5' },
   overdue:   { label: 'Overdue',   color: '#DC2626', bg: '#fee2e2' },
@@ -221,7 +221,7 @@ const Reports: React.FC = () => {
       <div className="reports-kanban">
         {(([
           { key: 'overdue'   , label: 'Overdue',   Icon: AlertCircle,  color: '#DC2626', bg: '#fee2e2' },
-          { key: 'draft'     , label: 'Draft',     Icon: FileText,     color: '#6366f1', bg: '#ede9fe' },
+          { key: 'draft'     , label: 'Draft',     Icon: FileText,     color: '#7C3AED', bg: '#F5F3FF' },
           { key: 'review'    , label: 'In Review', Icon: Clock,        color: '#d97706', bg: '#fef3c7' },
           { key: 'submitted' , label: 'Submitted', Icon: CheckCircle2, color: '#16A34A', bg: '#d1fae5' },
         ] as { key: MockReport['status']; label: string; Icon: React.ElementType; color: string; bg: string }[]).map(lane => {

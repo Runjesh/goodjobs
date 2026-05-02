@@ -130,7 +130,7 @@ const GetStartedChecklist: React.FC = () => {
         label: 'Create your first campaign',
         hint: 'Get a public donation link to share',
         icon: Megaphone,
-        color: '#6366f1',
+        color: '#7C3AED',
         done: campaigns.length > 0,
         path: '/funding',
         cta: 'Create Campaign',

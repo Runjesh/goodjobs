@@ -70,7 +70,7 @@
   gap: 1rem;
   padding: 1rem 1.25rem;
   margin-bottom: 1.25rem;
-  background: linear-gradient(135deg, #ede9fe 0%, #f0fdfa 100%);
+  background: linear-gradient(135deg, #F5F3FF 0%, #f0fdfa 100%);
   border: 1px solid rgba(139, 92, 246, 0.22);
   border-radius: 14px;
   flex-wrap: wrap;
@@ -86,7 +86,7 @@
   height: 36px;
   border-radius: 10px;
   background: rgba(139, 92, 246, 0.18);
-  color: #6366f1;
+  color: #7C3AED;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -125,7 +125,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  background: #6366f1;
+  background: #7C3AED;
   color: #fff;
   border: none;
   padding: 0.5rem 0.9rem;
@@ -135,7 +135,7 @@
   cursor: pointer;
   transition: background 0.15s ease;
 }
-.trial-day7-card-cta:hover { background: #4f46e5; }
+.trial-day7-card-cta:hover { background: #5B21B6; }
 
 .trial-day7-card-dismiss {
   background: none;

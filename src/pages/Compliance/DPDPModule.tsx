@@ -195,7 +195,7 @@ const DPDPModule: React.FC = () => {
         <Shield size={20} color='#2563eb'/>
         <div>
           <span style={{ fontWeight:700, color:'#1e40af', fontSize:'0.875rem' }}>Digital Personal Data Protection Act 2023</span>
-          <span style={{ color:'#3730a3', fontSize:'0.8rem', marginLeft:'0.75rem' }}>Enforcement active from 2025 · Max penalty ₹250 crore</span>
+          <span style={{ color:'#5B21B6', fontSize:'0.8rem', marginLeft:'0.75rem' }}>Enforcement active from 2025 · Max penalty ₹250 crore</span>
         </div>
       </div>
 

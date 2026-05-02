@@ -128,7 +128,7 @@
 
 .fb-field-card.expanded {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
 .fb-field-card:hover {

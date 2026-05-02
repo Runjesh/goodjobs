@@ -53,9 +53,20 @@ Legacy module pages still accessible: `/crm` `/fundraising` `/finance` `/complia
 
 ## Design Language
 
-- Primary color: `#0F766E` (deep teal)
-- Active accent: `#2dd4bf`
-- Sidebar/auth gradient: `#0d3d39 → #134e4a → #0F766E`
+Design tokens live in `src/index.css` (`:root`) and are the single source of truth — every page consumes them via CSS variables, so palette/contrast/shadow tweaks ripple everywhere automatically.
+
+- **Primary**: `#0F766E` (teal-700). Hover `#0B5F5A`, active `#064E48`. Light surface `#D1FAE9`, soft tint `#ECFDF5`.
+- **Active accent**: `#2DD4BF` (teal-400) — used for the sidebar active rail and brand mark.
+- **Secondary accent**: `#7C3AED` (violet-600) — intentional pair with teal, used for the AI/Copilot identity. Replaces the old `#6366f1` indigo leaks that clashed with the teal brand.
+- **Sidebar/auth gradient**: `#0d3d39 → #134e4a → #0F766E`.
+- **Text contrast** (light bg `#F6F8FB`):
+  - `--color-text-primary` `#0F172A` (17.4:1)
+  - `--color-text-secondary` `#334155` (9.8:1, was slate-600)
+  - `--color-text-tertiary` `#64748B` (5.7:1 — now AA, was slate-400 which failed)
+  - `--color-text-muted` `#94A3B8` is non-text only.
+- **Shadows**: neutral-tinted layered drops (`--shadow-sm/md/lg/xl`) plus brand-tinted `--shadow-primary` for primary CTAs. No more indigo-tint on cards.
+- **Radii**: `xs 4 · sm 6 · md 10 · lg 14 · xl 18 · 2xl 24` — modern soft-but-purposeful curve.
+- **Semantic colors** carry their own `*-text` token (`--color-success-text`, `--color-danger-text`, etc.) so badges/deltas stay consistent without hard-coding hex values.
 
 ## Key Features
 

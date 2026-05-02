@@ -75,13 +75,13 @@
   background: var(--color-primary-light);
 }
 .notif-item.unread:hover {
-  background: #dbeafe;
+  background: var(--color-primary-soft);
 }
 html.dark .notif-item.unread {
-  background: rgba(99, 102, 241, 0.1);
+  background: rgba(45, 212, 191, 0.1);
 }
 html.dark .notif-item.unread:hover {
-  background: rgba(99, 102, 241, 0.15);
+  background: rgba(45, 212, 191, 0.18);
 }
 
 .notif-icon-wrap {

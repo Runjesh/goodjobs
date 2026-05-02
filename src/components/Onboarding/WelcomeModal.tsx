@@ -52,7 +52,7 @@ const SLIDES_BY_ROLE: Record<UserRole, Slide[]> = {
     },
     {
       icon: Cpu,
-      color: '#6366f1',
+      color: '#7C3AED',
       title: 'Your AI Copilot does the busywork',
       body: 'Instead of you doing repetitive tasks, GoodJobs Copilot drafts, files, and follows up — you just approve.',
       bullets: [
@@ -192,7 +192,7 @@ const SLIDES_BY_ROLE: Record<UserRole, Slide[]> = {
     },
     {
       icon: Cpu,
-      color: '#6366f1',
+      color: '#7C3AED',
       title: 'Insights, not raw data',
       body: 'GoodJobs interprets the numbers in plain language so you can focus on direction, not data hygiene.',
       bullets: [

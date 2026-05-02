@@ -626,7 +626,7 @@ const Finance: React.FC = () => {
         </div>
         <div className="finance-card fcra-card fcra-gauge-card" style={{ gridColumn: 'span 3', borderColor: fcraStatus.color + '55', background: fcraStatus.bg }}>
           <div className="fcra-card-header">
-            <div className="fund-label" style={{ color: '#4f46e5' }}><span>FCRA Admin Overhead Monitor</span></div>
+            <div className="fund-label" style={{ color: '#7C3AED' }}><span>FCRA Admin Overhead Monitor</span></div>
             <span className="fcra-status-pill" style={{ background: fcraStatus.color }}>
               {fcraStatus.label}
             </span>

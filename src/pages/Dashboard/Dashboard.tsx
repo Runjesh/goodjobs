@@ -143,7 +143,7 @@ function getQuickActions(
       { label: pendingReceipts > 0 ? `Generate Receipts` : 'Funding Hub',     icon: Wallet,        path: '/funding',   color: '#0F766E', badge: pendingReceipts > 0 ? pendingReceipts : undefined },
       { label: inactiveBen > 0 ? `Re-engage Beneficiaries` : 'Programs',      icon: ClipboardList, path: '/programs',  color: '#059669', badge: inactiveBen > 0 ? inactiveBen : undefined },
       { label: 'Reports',                                                        icon: FileText,      path: '/reports',   color: '#7c3aed' },
-      { label: 'AI Copilot',                                                     icon: Cpu,           path: '/agent-hq',  color: '#6366f1' },
+      { label: 'AI Copilot',                                                     icon: Cpu,           path: '/agent-hq',  color: '#7C3AED' },
     ],
     finance: [
       { label: pendingReceipts > 0 ? `Generate Receipts` : 'Funding',  icon: Wallet,    path: '/funding',    color: '#0891b2', badge: pendingReceipts > 0 ? pendingReceipts : undefined },

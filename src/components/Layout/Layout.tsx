@@ -39,7 +39,7 @@ const NAV_ITEMS = [
   { path: '/funding',   icon: Wallet,       label: 'Funding',          module: 'funding',    section: 'workspace' },
   { path: '/insights',  icon: BarChart2,    label: 'Insights',         module: 'insights',   section: 'workspace' },
   { path: '/reports',   icon: FileText,     label: 'Reports',          module: 'reports',    section: 'workspace' },
-  { path: '/agent-hq',  icon: Cpu,          label: 'GoodJobs Copilot', module: 'agent-hq',   section: 'tools', accent: '#6366f1' },
+  { path: '/agent-hq',  icon: Cpu,          label: 'GoodJobs Copilot', module: 'agent-hq',   section: 'tools', accent: '#7C3AED' },
   { path: '/settings',  icon: Settings,     label: 'Settings',         module: 'settings',   section: 'system'  },
 ];
 
