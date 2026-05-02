@@ -21,6 +21,7 @@ import {
   daysSinceStart, isTrialExpired, nudgeFired, withNudgeFired,
   NUDGE_DAY_21, NUDGE_DAY_28,
 } from '../../utils/trial';
+import type { SubscriptionTier } from '../../utils/trial';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
@@ -108,6 +109,17 @@ const Layout: React.FC = () => {
       updateUser({ trial: withNudgeFired(user.trial, 'day21') });
     }
   }, [user?.id, user?.trial?.startedAt, user?.trial?.nudges?.day21, user?.trial?.nudges?.day28, location.pathname, nudgeTick, updateUser]);
+
+  // ── Day-30 enforcement: durably downgrade to Starter the first time we see
+  // an expired trial, so the change persists across reloads/logins (not just
+  // computed at render time). Idempotent thanks to the tier guard.
+  useEffect(() => {
+    if (!user?.trial) return;
+    if (!isTrialExpired(user.trial)) return;
+    const current: SubscriptionTier | undefined = user.subscriptionTier;
+    if (current && current !== 'trial') return; // already on a chosen plan
+    updateUser({ subscriptionTier: 'starter' });
+  }, [user?.trial?.endsAt, user?.subscriptionTier, nudgeTick, updateUser]);
 
   // Scope donor-lifecycle localStorage keys to the active tenant so different
   // orgs sharing this browser can't cross-read milestone state.

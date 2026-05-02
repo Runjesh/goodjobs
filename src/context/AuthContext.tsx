@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { makeFreshTrial, type TrialState, type SubscriptionTier } from '../utils/trial';
+import { makeFreshTrial, loadOrgBilling, saveOrgBilling, type TrialState, type SubscriptionTier } from '../utils/trial';
 
 // ── Role Definitions ──────────────────────────────────────────────────────────
 export type UserRole = 'ed' | 'finance' | 'programs' | 'field' | 'board';
@@ -153,15 +153,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const permissions = user ? ROLE_PERMISSIONS[user.role] : [];
 
   const login = useCallback((newUser: AuthUser) => {
-    // Auto-attach a fresh 30-day trial state if this user has none yet — every
-    // new tenant gets a trial whether they came in via /signup or demo login.
-    const withTrial: AuthUser = newUser.trial
-      ? newUser
-      : { ...newUser, trial: makeFreshTrial() };
-    setUser(withTrial);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(withTrial));
+    // Trial + subscriptionTier belong to the *org*, not the individual user.
+    // Look up any persisted billing for this ngoId so trial timing survives
+    // logout/login (a user cannot reset their trial by signing back in).
+    // Only mint a fresh trial when no billing exists for the org yet.
+    const stored = loadOrgBilling(newUser.ngoId);
+
+    const trial: TrialState =
+      newUser.trial ?? stored?.trial ?? makeFreshTrial();
+    const subscriptionTier: SubscriptionTier | undefined =
+      newUser.subscriptionTier ?? stored?.subscriptionTier;
+
+    const merged: AuthUser = { ...newUser, trial, subscriptionTier };
+
+    // Write back so future logins (and other roles in the same org) see the
+    // same canonical billing state.
+    saveOrgBilling(newUser.ngoId, { trial, subscriptionTier });
+
+    setUser(merged);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
     // Back-compat for pages that read access_token directly
-    localStorage.setItem('access_token', withTrial.token);
+    localStorage.setItem('access_token', merged.token);
   }, []);
 
   const logout = useCallback(() => {
@@ -175,6 +187,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!prev) return prev;
       const next: AuthUser = { ...prev, ...patch };
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      // Mirror billing-related fields to per-org storage so trial state and
+      // tier choices survive logout/login and propagate to other roles.
+      if ('trial' in patch || 'subscriptionTier' in patch) {
+        saveOrgBilling(next.ngoId, { trial: next.trial, subscriptionTier: next.subscriptionTier });
+      }
       return next;
     });
   }, []);

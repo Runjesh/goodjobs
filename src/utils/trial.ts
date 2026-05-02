@@ -99,6 +99,80 @@ export interface TierPlan {
   highlighted?: boolean;
 }
 
+// ── Concrete starter-tier limits (enforced post-expiry) ─────────────────────
+export const STARTER_BENEFICIARY_CAP = 50;
+export const STARTER_PROGRAM_CAP = 1;
+
+export interface TierLimits {
+  beneficiaries: number | null; // null = unlimited
+  programs: number | null;
+  aiAgents: boolean;
+}
+
+/** Concrete feature limits per tier — single source of truth for gating. */
+export function tierLimits(tier: SubscriptionTier): TierLimits {
+  switch (tier) {
+    case 'starter':
+      return { beneficiaries: STARTER_BENEFICIARY_CAP, programs: STARTER_PROGRAM_CAP, aiAgents: false };
+    case 'pro':
+      return { beneficiaries: null, programs: null, aiAgents: true };
+    case 'enterprise':
+      return { beneficiaries: null, programs: null, aiAgents: true };
+    case 'trial':
+    default:
+      // Full access during trial.
+      return { beneficiaries: null, programs: null, aiAgents: true };
+  }
+}
+
+/** True when the tier permits adding one more beneficiary given the current count. */
+export function canAddBeneficiary(tier: SubscriptionTier, currentCount: number): boolean {
+  const cap = tierLimits(tier).beneficiaries;
+  return cap === null || currentCount < cap;
+}
+
+// ── Per-org billing storage (so trial state survives logout/login) ──────────
+// Trial belongs to the *org*, not the individual user — multiple roles within
+// one NGO share one trial timer. Keyed by ngoId.
+
+const ORG_BILLING_KEY = 'gj_org_billing_v1';
+
+export interface OrgBilling {
+  trial?: TrialState;
+  subscriptionTier?: SubscriptionTier;
+}
+
+type OrgBillingMap = Record<string, OrgBilling>;
+
+function readOrgBillingMap(): OrgBillingMap {
+  try {
+    const raw = localStorage.getItem(ORG_BILLING_KEY);
+    return raw ? (JSON.parse(raw) as OrgBillingMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOrgBillingMap(map: OrgBillingMap): void {
+  try {
+    localStorage.setItem(ORG_BILLING_KEY, JSON.stringify(map));
+  } catch {
+    /* quota / disabled storage — non-fatal */
+  }
+}
+
+export function loadOrgBilling(ngoId: string): OrgBilling | undefined {
+  if (!ngoId) return undefined;
+  return readOrgBillingMap()[ngoId];
+}
+
+export function saveOrgBilling(ngoId: string, billing: OrgBilling): void {
+  if (!ngoId) return;
+  const map = readOrgBillingMap();
+  map[ngoId] = { ...map[ngoId], ...billing };
+  writeOrgBillingMap(map);
+}
+
 export const TIER_PLANS: TierPlan[] = [
   {
     id: 'starter',

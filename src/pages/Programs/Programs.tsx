@@ -213,6 +213,7 @@ const Programs: React.FC = () => {
       await refreshBeneficiaries();
       toast.success(`${payload.name} enrolled in ${payload.program}!`);
     } catch {
+      if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
       addBeneficiary(payload);
       toast.success(`${payload.name} enrolled (saved locally — sync when backend is back).`);
     }
@@ -242,6 +243,7 @@ const Programs: React.FC = () => {
       setBenExtra({ ...BEN_EXTRA_EMPTY });
       setShowModal(false);
     } catch {
+      if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
       addBeneficiary({
         name: form.name,
         program: form.program,
