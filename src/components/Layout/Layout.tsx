@@ -19,6 +19,7 @@ import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 import { useStore, type ComplianceDocument } from '../../store/useStore';
 import { getPageVariants } from '../../motion/variants';
+import { setLifecycleScope } from '../../utils/donorLifecycle';
 import './Layout.css';
 
 // ── Navigation Config ────────────────────────────────────────────────────────
@@ -52,6 +53,12 @@ const Layout: React.FC = () => {
   useEffect(() => {
     setIsSidebarOpen(false);
   }, [location.pathname]);
+
+  // Scope donor-lifecycle localStorage keys to the active tenant so different
+  // orgs sharing this browser can't cross-read milestone state.
+  useEffect(() => {
+    setLifecycleScope(user?.ngoId ?? null);
+  }, [user?.ngoId]);
 
   // ⌘K shortcut
   useEffect(() => {
