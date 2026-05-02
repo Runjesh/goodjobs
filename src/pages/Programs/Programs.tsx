@@ -4,6 +4,8 @@ import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activi
 import { useStore, initialBeneficiaries } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import { isTrialExpired, canAddBeneficiary, STARTER_BENEFICIARY_CAP, type SubscriptionTier } from '../../utils/trial';
+import { useTier } from '../../hooks/useTier';
+import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import toast from 'react-hot-toast';
 import FormBuilder from '../../components/FormBuilder/FormBuilder';
 import TheoryOfChangeBuilder from '../../components/Programs/TheoryOfChangeBuilder';
@@ -121,6 +123,8 @@ const DEFAULT_PROGRAMS = [
 const Programs: React.FC = () => {
   const { beneficiaries, addBeneficiary, updateBeneficiary, deleteBeneficiary } = useStore();
   const { user } = useAuth();
+  const { tier: effectiveTierVal, openUpgrade, inTrial } = useTier();
+  const [upgradePromptOpen, setUpgradePromptOpen] = useState(false);
 
   // ── Starter-tier limit gate ─────────────────────────────────────────────
   // We ONLY enforce limits when the org is genuinely on Starter:
@@ -131,16 +135,15 @@ const Programs: React.FC = () => {
   const resolveTier = (): SubscriptionTier | null => {
     if (user?.subscriptionTier && user.subscriptionTier !== 'trial') return user.subscriptionTier;
     if (user?.trial && isTrialExpired(user.trial)) return 'starter';
+    // useTier already collapses past-due → starter; respect it for paid users.
+    if (effectiveTierVal === 'starter' && !inTrial) return 'starter';
     return null; // no enforcement
   };
   const enforceBeneficiaryCap = (additional = 1): boolean => {
     const tier = resolveTier();
     if (!tier) return true; // no trial + no chosen plan → don't gate
     if (canAddBeneficiary(tier, beneficiaries.length + (additional - 1))) return true;
-    toast.error(
-      `Starter plan is capped at ${STARTER_BENEFICIARY_CAP} beneficiaries. Upgrade to Pro to add more.`,
-      { duration: 6000 },
-    );
+    setUpgradePromptOpen(true);
     return false;
   };
 
@@ -1254,6 +1257,27 @@ const Programs: React.FC = () => {
           </div>
         </ModalOverlay>
       )}
+
+      {/* Tier-cap upgrade prompt — opens whenever a Starter user tries to add
+          a beneficiary past the 50-record cap (UI is gated everywhere through
+          enforceBeneficiaryCap so the message + CTA stay consistent). */}
+      <ContextualUpgradePrompt
+        open={upgradePromptOpen}
+        onClose={() => setUpgradePromptOpen(false)}
+        blockedAction="Adding more beneficiaries"
+        reason={`Starter is capped at ${STARTER_BENEFICIARY_CAP} beneficiaries. You've reached the limit.`}
+        nextBenefits={[
+          'Unlimited beneficiaries · unlimited programs',
+          'AI Copilot for reports & receipts',
+          'WhatsApp field data entry',
+          'Priority support + onboarding call',
+        ]}
+        targetTier="growth"
+        onUpgrade={() => {
+          setUpgradePromptOpen(false);
+          openUpgrade({ targetTier: 'growth', source: 'programs_beneficiary_cap' });
+        }}
+      />
     </div>
   );
 };

@@ -10,6 +10,9 @@ import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
 import toast from 'react-hot-toast';
+import { useTier } from '../../hooks/useTier';
+import { recordReportDraft } from '../../utils/trial';
+import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import './Reports.css';
 
 type ReportType = 'funder' | 'impact' | 'donor' | 'board';
@@ -108,13 +111,21 @@ const Reports: React.FC = () => {
   const navigate = useNavigate();
   const { user, can } = useAuth();
   const { donors, transactions, campaigns, beneficiaries } = useStore();
+  const { tier, limits, usage, openUpgrade } = useTier();
+  const [reportUpgradeOpen, setReportUpgradeOpen] = useState(false);
 
   const handleDraftReport = async (type: ReportType) => {
     if (!can('reports', 'canEdit')) {
       toast.error('You do not have permission to generate reports.');
       return;
     }
+    // Tier cap on AI report drafts (Starter = 2/mo, Growth = 20/mo, Scale = ∞)
+    if (limits.reportsPerMonth !== null && usage.reportsThisMonth >= limits.reportsPerMonth) {
+      setReportUpgradeOpen(true);
+      return;
+    }
     setDraftingReport(type);
+    let succeeded = false;
     try {
       const res = await apiFetch('/gen-ai/draft-report', {
         method: 'POST',
@@ -122,10 +133,23 @@ const Reports: React.FC = () => {
       });
       if (!res.ok) throw new Error('Draft failed');
       const data = await res.json();
+      succeeded = true;
       toast.success('Report draft generated! Check your downloads.');
     } catch {
-      toast.success('AI report drafting initiated — check back in a moment.');
+      // Backend not reachable in dev — treat the optimistic UX as a success
+      // for the demo build only (so the counter still ticks). In production
+      // this branch should leave succeeded=false so failed drafts don't
+      // consume quota.
+      if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) {
+        succeeded = true;
+        toast.success('AI report drafting initiated — check back in a moment.');
+      } else {
+        toast.error('AI draft failed. Please try again.');
+      }
     } finally {
+      // Only count the draft if it actually completed; failed attempts must
+      // not consume the monthly quota and trigger a false cap-hit.
+      if (succeeded && user?.ngoId) recordReportDraft(user.ngoId);
       setDraftingReport(null);
     }
   };
@@ -348,6 +372,30 @@ const Reports: React.FC = () => {
         </div>
       </div>
 
+      {/* Tier-cap prompt: monthly AI-draft cap reached on Starter (2/mo) or Growth (20/mo). */}
+      <ContextualUpgradePrompt
+        open={reportUpgradeOpen}
+        onClose={() => setReportUpgradeOpen(false)}
+        blockedAction="More AI-drafted reports"
+        reason={
+          tier === 'starter'
+            ? `Starter includes ${limits.reportsPerMonth} AI-drafted reports per month. You've used ${usage.reportsThisMonth}.`
+            : `Growth includes ${limits.reportsPerMonth} AI-drafted reports per month. You've used ${usage.reportsThisMonth}.`
+        }
+        nextBenefits={
+          tier === 'starter'
+            ? ['20 AI report drafts / month', 'AI Copilot for receipts & funder updates', 'WhatsApp data entry', 'Priority support']
+            : ['Unlimited AI report drafts', 'Unlimited team members', 'SSO + audit log', 'Dedicated success manager']
+        }
+        targetTier={tier === 'starter' ? 'growth' : 'scale'}
+        onUpgrade={() => {
+          setReportUpgradeOpen(false);
+          openUpgrade({
+            targetTier: tier === 'starter' ? 'growth' : 'scale',
+            source: 'reports_monthly_cap',
+          });
+        }}
+      />
     </div>
   );
 };

@@ -8,6 +8,8 @@ import {
 import toast from 'react-hot-toast';
 import './AgentHQ.css';
 import { apiFetch } from '../../api/client';
+import { useTier } from '../../hooks/useTier';
+import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 
 type QueueItem = {
   id: string;
@@ -206,6 +208,12 @@ const IntentCard: React.FC<{
 };
 
 const AgentHQ: React.FC = () => {
+  // Tier gate — Starter doesn't include AI agents. We still render the UI so
+  // users can see what's behind the paywall, but every action button is gated.
+  const { limits: tierLims, openUpgrade: openTierUpgrade } = useTier();
+  const agentsEnabled = tierLims.aiAgents;
+  const [aiUpgradeOpen, setAiUpgradeOpen] = useState(false);
+
   const [approvals, setApprovals] = useState<QueueItem[]>([]);
   const [approvalsLoading, setApprovalsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'queue' | 'metrics' | 'config'>('queue');
@@ -392,22 +400,69 @@ const AgentHQ: React.FC = () => {
           </h1>
           <p className="page-subtitle">Monitor autonomous actions, approve high-stakes tasks, and configure agent behaviour.</p>
         </div>
-        <button
-          className="btn btn-secondary"
-          onClick={async () => {
-            toast('Triggering Board Briefing Agent...', { icon: '🤖' });
-            try {
-              const res = await apiFetch('/trigger/board-brief', { method: 'POST' });
-              if (!res.ok) toast.error('Failed to trigger board brief.');
-              else toast.success('Board briefing triggered.');
-            } catch {
-              toast.error('Failed to trigger board brief (backend not reachable).');
-            }
+        {agentsEnabled ? (
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              toast('Triggering Board Briefing Agent...', { icon: '🤖' });
+              try {
+                const res = await apiFetch('/trigger/board-brief', { method: 'POST' });
+                if (!res.ok) toast.error('Failed to trigger board brief.');
+                else toast.success('Board briefing triggered.');
+              } catch {
+                toast.error('Failed to trigger board brief (backend not reachable).');
+              }
+            }}
+          >
+            <Bot size={16} /> Run Morning Brief Now
+          </button>
+        ) : (
+          <button
+            className="btn btn-secondary"
+            onClick={() => setAiUpgradeOpen(true)}
+            style={{ opacity: 0.85 }}
+            title="AI Copilot is on Growth + Scale plans"
+          >
+            <LockKeyhole size={16} /> Run Morning Brief — Upgrade to unlock
+          </button>
+        )}
+      </div>
+
+      {/* AI features locked banner — Starter plan doesn't include the agents.
+          We still let users browse the queue/config so they understand the
+          surface, but every actionable button is gated. */}
+      {!agentsEnabled && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '0.75rem 1rem', marginBottom: '1rem',
+            background: 'linear-gradient(90deg, #f0fdfa, #fff)',
+            border: '1px solid #99f6e4',
+            borderRadius: '10px',
           }}
         >
-          <Bot size={16} /> Run Morning Brief Now
-        </button>
-      </div>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8,
+            background: '#0F766E', color: '#fff',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            <LockKeyhole size={16} />
+          </div>
+          <div style={{ flex: 1, fontSize: '0.85rem' }}>
+            <strong style={{ color: '#0F766E' }}>AI Copilot is locked on your Starter plan.</strong>
+            <span style={{ color: '#64748b', display: 'block', fontSize: '0.78rem' }}>
+              Upgrade to Growth to enable autonomous agents (morning brief, donor follow-ups, AI-drafted reports, WhatsApp data entry).
+            </span>
+          </div>
+          <button
+            className="btn btn-primary"
+            style={{ padding: '7px 12px', fontSize: '0.78rem' }}
+            onClick={() => setAiUpgradeOpen(true)}
+          >
+            Upgrade to Growth
+          </button>
+        </div>
+      )}
 
       <div className="agent-stats-grid">
         <div className="agent-stat-card">
@@ -692,6 +747,25 @@ const AgentHQ: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Tier-cap prompt — opens whenever a Starter user clicks an AI feature. */}
+      <ContextualUpgradePrompt
+        open={aiUpgradeOpen}
+        onClose={() => setAiUpgradeOpen(false)}
+        blockedAction="AI Copilot & autonomous agents"
+        reason="AI Copilot is included on Growth and Scale plans. Starter is limited to manual workflows."
+        nextBenefits={[
+          'Morning brief, donor follow-ups, AI report drafting',
+          'WhatsApp field data entry',
+          'Unlimited beneficiaries',
+          'Priority support + onboarding call',
+        ]}
+        targetTier="growth"
+        onUpgrade={() => {
+          setAiUpgradeOpen(false);
+          openTierUpgrade({ targetTier: 'growth', source: 'agenthq_locked' });
+        }}
+      />
     </div>
   );
 };

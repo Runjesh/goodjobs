@@ -19,9 +19,10 @@ import TrialUpgradeModal from '../Onboarding/TrialUpgradeModal';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import {
   daysSinceStart, isTrialExpired, nudgeFired, withNudgeFired,
-  NUDGE_DAY_21, NUDGE_DAY_28,
+  NUDGE_DAY_21, NUDGE_DAY_28, daysUntilDowngrade,
 } from '../../utils/trial';
 import type { SubscriptionTier } from '../../utils/trial';
+import PastDueBanner from '../Billing/PastDueBanner';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
@@ -120,6 +121,23 @@ const Layout: React.FC = () => {
     if (current && current !== 'trial') return; // already on a chosen plan
     updateUser({ subscriptionTier: 'starter' });
   }, [user?.trial?.endsAt, user?.subscriptionTier, nudgeTick, updateUser]);
+
+  // ── Past-due hard-downgrade: if the org's payment has been past_due longer
+  // than the grace window, force them to Starter and mark the subscription
+  // canceled. Idempotent — the guard short-circuits once already on Starter.
+  useEffect(() => {
+    if (!user?.billing) return;
+    if (user.billing.status !== 'past_due') return;
+    if (daysUntilDowngrade(user.billing) > 0) return;
+    if (user.subscriptionTier === 'starter') return;
+    updateUser({
+      subscriptionTier: 'starter',
+      billing: { ...user.billing, status: 'canceled' },
+    });
+    toast(`Subscription downgraded to Starter — payment has been overdue past the ${7}-day grace period.`, {
+      icon: '↘️', duration: 7000,
+    });
+  }, [user?.billing?.status, user?.billing?.pastDueSince, user?.subscriptionTier, nudgeTick, updateUser]);
 
   // Scope donor-lifecycle localStorage keys to the active tenant so different
   // orgs sharing this browser can't cross-read milestone state.
@@ -534,6 +552,7 @@ const Layout: React.FC = () => {
             >
               <div className="page-content-inner">
                 <TrialExpiredBanner />
+                <PastDueBanner />
                 <Outlet />
               </div>
             </motion.div>

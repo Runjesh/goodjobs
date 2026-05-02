@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRight } from 'lucide-react';
+import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRight, CreditCard } from 'lucide-react';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import './Settings.css';
 import { apiFetch } from '../../api/client';
+import PlansSection from '../../components/Billing/PlansSection';
+import { useUpgradeListener } from '../../hooks/useTier';
 
 const TABS = [
   { id: 'profile',  label: 'Profile',      icon: <User size={16} /> },
   { id: 'ngo',      label: 'NGO Details',  icon: <Building2 size={16} /> },
+  { id: 'plans',    label: 'Plans & Billing', icon: <CreditCard size={16} /> },
   { id: 'security', label: 'Security',     icon: <Key size={16} /> },
   { id: 'privacy',  label: 'Privacy & DPDP', icon: <Shield size={16} /> },
   { id: 'notifs',   label: 'Notifications',icon: <Bell size={16} /> },
@@ -15,7 +18,35 @@ const TABS = [
 
 const Settings: React.FC = () => {
   const { user, login } = useAuth();
-  const [activeTab, setActiveTab] = useState('profile');
+  // Honor ?tab=plans (or any other tab) so contextual upgrade prompts can deep-link.
+  const initialTab = (() => {
+    if (typeof window === 'undefined') return 'profile';
+    const t = new URL(window.location.href).searchParams.get('tab');
+    return t && TABS.some(x => x.id === t) ? t : 'profile';
+  })();
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // ── Upgrade-event listener (always mounted on /settings) ────────────────────
+  // Any contextual prompt anywhere in the app fires gj:open-upgrade. We catch
+  // it here regardless of which tab is active, then:
+  //   (1) Stamp the requested target/cycle into the URL so PlansSection — which
+  //       only mounts a moment later when activeTab flips — can read the deep
+  //       link from its mount effect (the in-flight CustomEvent has already
+  //       fired and PlansSection's own listener wouldn't be subscribed yet).
+  //   (2) Switch the active tab to 'plans' so PlansSection actually mounts.
+  // This guarantees "open from anywhere" works even when the user is already
+  // on /settings but on a different tab.
+  useUpgradeListener((detail) => {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'plans');
+      if (detail.targetTier) url.searchParams.set('plan', detail.targetTier);
+      if (detail.cycle) url.searchParams.set('cycle', detail.cycle);
+      if (detail.source) url.searchParams.set('src', detail.source);
+      window.history.replaceState(null, '', url.toString());
+    }
+    setActiveTab('plans');
+  });
   const [name, setName] = useState(user?.name || '');
   const [ngoName, setNgoName] = useState(user?.ngoName || 'India NGO Trust');
   const [regNo, setRegNo] = useState('MH/2015/0012345');
@@ -219,6 +250,9 @@ const Settings: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Plans & Billing */}
+          {activeTab === 'plans' && <PlansSection />}
 
           {/* NGO Details */}
           {activeTab === 'ngo' && (

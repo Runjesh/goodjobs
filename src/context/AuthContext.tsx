@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { makeFreshTrial, loadOrgBilling, saveOrgBilling, type TrialState, type SubscriptionTier } from '../utils/trial';
+import { makeFreshTrial, loadOrgBilling, saveOrgBilling, type TrialState, type SubscriptionTier, type BillingState } from '../utils/trial';
 
 // ── Role Definitions ──────────────────────────────────────────────────────────
 export type UserRole = 'ed' | 'finance' | 'programs' | 'field' | 'board';
@@ -119,6 +119,8 @@ export interface AuthUser {
   trial?: TrialState;
   /** Persisted subscription tier when user has chosen one (Task #5). */
   subscriptionTier?: SubscriptionTier;
+  /** Paid-subscription billing state (status, period end, past-due tracking). */
+  billing?: BillingState;
   /** Org metadata captured at signup (cause area, team size, phone). */
   orgProfile?: {
     causeArea?: string;
@@ -178,12 +180,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       newUser.trial ?? stored?.trial;
     const subscriptionTier: SubscriptionTier | undefined =
       newUser.subscriptionTier ?? stored?.subscriptionTier;
+    const billing: BillingState | undefined =
+      newUser.billing ?? stored?.billing;
 
-    const merged: AuthUser = { ...newUser, trial, subscriptionTier };
+    const merged: AuthUser = { ...newUser, trial, subscriptionTier, billing };
 
     // Only persist org billing when there's actually something to persist.
-    if (trial || subscriptionTier) {
-      saveOrgBilling(newUser.ngoId, { trial, subscriptionTier });
+    if (trial || subscriptionTier || billing) {
+      saveOrgBilling(newUser.ngoId, { trial, subscriptionTier, billing });
     }
 
     setUser(merged);
@@ -205,8 +209,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
       // Mirror billing-related fields to per-org storage so trial state and
       // tier choices survive logout/login and propagate to other roles.
-      if ('trial' in patch || 'subscriptionTier' in patch) {
-        saveOrgBilling(next.ngoId, { trial: next.trial, subscriptionTier: next.subscriptionTier });
+      if ('trial' in patch || 'subscriptionTier' in patch || 'billing' in patch) {
+        saveOrgBilling(next.ngoId, {
+          trial: next.trial,
+          subscriptionTier: next.subscriptionTier,
+          billing: next.billing,
+        });
       }
       return next;
     });
