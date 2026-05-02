@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ShieldCheck, Eye, EyeOff, Cpu, Sparkles, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth, ROLE_META, type UserRole } from '../../context/AuthContext';
-import { makeFreshTrial } from '../../utils/trial';
+import { makeFreshTrial, loadOrgBilling } from '../../utils/trial';
 import { apiFetch } from '../../api/client';
 import './Auth.css';
 
@@ -63,18 +63,23 @@ const Login: React.FC = () => {
   const doLogin = (roleId: string, user: typeof demoAccounts[0], token: string | null) => {
     const meta = ROLE_META[roleId as UserRole];
     const role = roles.find(r => r.id === roleId);
+    const ngoId = 'ngo_001';
+    // Demo logins opt-in to the trial showcase, but ONLY mint a fresh trial
+    // the first time this demo org is touched. Subsequent demo logins
+    // rehydrate the existing trial (so day-N nudges actually progress over
+    // time and can't be reset by simply re-logging in).
+    const existingBilling = loadOrgBilling(ngoId);
+    const trial = existingBilling?.trial ?? makeFreshTrial();
     login({
       id: `user_${user.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
       email: user.email,
       name: user.name || user.email.split('@')[0],
       role: roleId as UserRole,
-      ngoId: 'ngo_001',
+      ngoId,
       ngoName: user.org || 'India NGO Trust',
       token: token || `demo-jwt-${roleId}-${Date.now()}`,
       avatar: meta.icon,
-      // Demo logins explicitly opt-in to the trial showcase. Real backend
-      // logins (handleLogin) do NOT, so legacy tenants don't get a trial.
-      trial: makeFreshTrial(),
+      trial,
     });
     toast.success(`Welcome! Signed in as ${role?.label}`, { icon: meta.icon, duration: 3000 });
     setTimeout(() => navigate('/'), 300);
