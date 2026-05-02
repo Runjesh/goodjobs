@@ -624,12 +624,21 @@ const CRM: React.FC = () => {
               </div>
             ) : (
               nurtureQueue.map(({ donor: d, stage, next }) => {
+                // Only milestones in `due`, `overdue`, or a lapsed re-engagement
+                // should mark a touchpoint complete on click.  Upcoming
+                // milestones are not yet actionable — clicking just opens the
+                // donor profile so the user can review or schedule manually.
+                const isActionable =
+                  stage === 'lapsed' ||
+                  next?.state === 'overdue' ||
+                  next?.state === 'due';
                 const ctaLabel = stage === 'lapsed'
                   ? 'Re-engage'
                   : next?.state === 'overdue' ? 'Send overdue update'
                   : next?.state === 'due'     ? 'Approve & Send'
-                  : next ? `Queue ${next.label}` : 'Open profile';
+                  : next ? `Open · ${next.label}` : 'Open profile';
                 const milestoneId = (next?.id ?? (stage === 'lapsed' ? 'renewal' : 'impact')) as 'thankyou' | 'impact' | 'fullimpact' | 'renewal';
+                const pendingKey = `${String(d.id)}:${milestoneId}`;
                 return (
                   <div
                     key={String(d.id)}
@@ -646,11 +655,18 @@ const CRM: React.FC = () => {
                     </div>
                     <button
                       className="nurture-card-action"
-                      disabled={pendingNurture.has(`${String(d.id)}:${milestoneId}`)}
-                      aria-busy={pendingNurture.has(`${String(d.id)}:${milestoneId}`)}
-                      onClick={(e) => { e.stopPropagation(); void handleNurtureAction(String(d.id), milestoneId); }}
+                      disabled={isActionable && pendingNurture.has(pendingKey)}
+                      aria-busy={isActionable && pendingNurture.has(pendingKey)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isActionable) {
+                          void handleNurtureAction(String(d.id), milestoneId);
+                        } else {
+                          setActiveDonorId(String(d.id));
+                        }
+                      }}
                     >
-                      {pendingNurture.has(`${String(d.id)}:${milestoneId}`) ? 'Sending…' : ctaLabel} <ArrowRight size={11} />
+                      {isActionable && pendingNurture.has(pendingKey) ? 'Sending…' : ctaLabel} <ArrowRight size={11} />
                     </button>
                   </div>
                 );
