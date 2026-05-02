@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import './CSR.css';
@@ -99,6 +100,7 @@ function unpackCsrDetails(details?: Record<string, unknown> | null): CsrExtraFor
 }
 
 const CSR: React.FC = () => {
+  const navigate = useNavigate();
   const { csrCards, moveCSRCard, addCSRCard, updateCSRCard, deleteCSRCard } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [dragId, setDragId] = useState<number | string | null>(null);
@@ -591,7 +593,11 @@ const CSR: React.FC = () => {
                     onDragStart={() => handleDragStart(card.id)}
                     style={{ opacity: dragId !== null && String(dragId) === String(card.id) ? 0.5 : 1 }}>
                     <div className="csr-card-header">
-                      <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+                        onClick={() => navigate(`/grants/${encodeURIComponent(String(card.id))}`)}
+                        title="Open grant detail"
+                      >
                         <div className="csr-company">{card.company}</div>
                         <div className="csr-amount">₹{(card.amount / 100000).toFixed(1)}L</div>
                       </div>
@@ -613,7 +619,13 @@ const CSR: React.FC = () => {
                         </button>
                       </div>
                     </div>
-                    <div className="csr-project">{card.project}</div>
+                    <div
+                      className="csr-project"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/grants/${encodeURIComponent(String(card.id))}`)}
+                    >
+                      {card.project}
+                    </div>
                     {(() => {
                       const d = card.details as Record<string, unknown> | undefined;
                       const bits = [d?.sector, d?.contact_name].filter(Boolean) as string[];
@@ -643,8 +655,16 @@ const CSR: React.FC = () => {
                           </button>
                         )}
                         <button className="csr-doc-btn" title="Open Document Room"
-                          onClick={() => setDocRoom({ cardId: card.id, company: card.company })}>
+                          onClick={(e) => { e.stopPropagation(); setDocRoom({ cardId: card.id, company: card.company }); }}>
                           <Folder size={13} /> Docs ({(cardDocs[String(card.id)] || []).length})
+                        </button>
+                        <button
+                          className="csr-doc-btn"
+                          title="Open grant detail"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/grants/${encodeURIComponent(String(card.id))}`); }}
+                          style={{ background: '#ccfbf1', color: '#0F766E', borderColor: '#5eead4' }}
+                        >
+                          <ArrowUpRight size={13} /> Open
                         </button>
                         <span className="flex items-center gap-1" style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>
                           <Clock size={11} /> {card.date}

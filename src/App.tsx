@@ -17,6 +17,7 @@ const Compliance   = lazy(() => import('./pages/Compliance/Compliance'));
 const Finance      = lazy(() => import('./pages/Finance/Finance'));
 const CSR          = lazy(() => import('./pages/CSR/CSR'));
 const Programs     = lazy(() => import('./pages/Programs/Programs'));
+const GrantDetail  = lazy(() => import('./pages/Grants/GrantDetail'));
 const Volunteers   = lazy(() => import('./pages/Volunteers/Volunteers'));
 const AgentHQ      = lazy(() => import('./pages/AgentHQ/AgentHQ'));
 const Login        = lazy(() => import('./pages/Auth/Login'));
@@ -79,6 +80,7 @@ function App() {
             <Route path="crm"         element={<ProtectedRoute module="crm"><CRM /></ProtectedRoute>} />
             <Route path="finance"     element={<ProtectedRoute module="finance"><Finance /></ProtectedRoute>} />
             <Route path="csr"         element={<ProtectedRoute module="csr"><CSR /></ProtectedRoute>} />
+            <Route path="grants/:id"  element={<ProtectedRoute module="csr"><GrantDetail /></ProtectedRoute>} />
             <Route path="volunteers"  element={<ProtectedRoute module="volunteers"><Volunteers /></ProtectedRoute>} />
             <Route path="compliance"  element={<ProtectedRoute module="compliance"><Compliance /></ProtectedRoute>} />
 

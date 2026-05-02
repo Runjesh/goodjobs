@@ -172,9 +172,42 @@ function getQuickActions(
 }
 
 // ── Derive priorities from store ──────────────────────────────────────────────
-function deriveFromStore(role: string, donors: any[], transactions: any[], campaigns: any[], beneficiaries: any[], complianceDocs: any[]): PriorityItem[] {
+function deriveFromStore(role: string, donors: any[], transactions: any[], campaigns: any[], beneficiaries: any[], complianceDocs: any[], csrCards: any[] = []): PriorityItem[] {
   const items: PriorityItem[] = [];
   const nowMs = Date.now();
+
+  // ── Grant T-7 reminder cascade — surface live grants whose next report is within 7 days ──
+  const liveGrants = csrCards.filter((c: any) => c.col === 'live');
+  for (const g of liveGrants) {
+    let nextDue: Date | null = null;
+    try {
+      const raw = localStorage.getItem(`goodjobs.grant.${g.id}.v1`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.nextReportDue) nextDue = new Date(parsed.nextReportDue);
+      }
+    } catch { /* ignore */ }
+    if (!nextDue) {
+      // Match GrantDetail's deterministic mock so T-7 actually fires for some demo cards
+      const seed = String(g.id ?? '0').split('').reduce((s: number, c: string) => s + c.charCodeAt(0), 0);
+      const days = 5 + (Math.abs((seed * 9301 + 49297) % 233280) % 30);
+      nextDue = new Date(Date.now() + days * 86400000);
+    }
+    const days = Math.ceil((nextDue.getTime() - Date.now()) / 86400000);
+    if (days >= -3 && days <= 7) {
+      items.push({
+        id: `grant-t7-${g.id}`,
+        text: days < 0
+          ? `${g.company} grant report ${Math.abs(days)}d overdue — T-0 escalation`
+          : `${g.company} grant report due in ${days}d — T-7 escalation`,
+        action: 'Open grant',
+        path: `/grants/${encodeURIComponent(String(g.id))}`,
+        level: 'urgent',
+        ageDays: Math.max(0, 7 - days),
+      });
+    }
+  }
+
 
   const expiringDocs = complianceDocs.filter(d => d.status === 'Expiring Soon' || d.status === 'Expired');
   if (expiringDocs.length > 0)
@@ -449,7 +482,7 @@ const SnoozedDrawer: React.FC<{ items: PriorityItem[]; onWake: (id: string) => v
 const Dashboard: React.FC = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
-  const { donors, transactions, campaigns, beneficiaries, complianceDocs } = useStore();
+  const { donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards } = useStore();
 
   const [briefItems,   setBriefItems]   = useState<PriorityItem[]>([]);
   const [briefLoading, setBriefLoading] = useState(true);
@@ -516,10 +549,10 @@ const Dashboard: React.FC = () => {
   }, [user?.id, lastRefresh]);
 
   const allItems = useMemo(() => {
-    const store = deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs);
+    const store = deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards);
     const combined = [...briefItems, ...store];
     return combined.length === 0 ? getStaticFallback(role) : combined;
-  }, [briefItems, role, donors, transactions, campaigns, beneficiaries, complianceDocs]);
+  }, [briefItems, role, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards]);
 
   const isSnoozedFn = useCallback((id: string) => !woken.has(id) && isSnoozed(id, snoozed), [snoozed, woken]);
 

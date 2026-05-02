@@ -138,15 +138,34 @@ const Layout: React.FC = () => {
   useEffect(() => {
     if (!can('csr', 'canView')) return;
     let cancelled = false;
+    const seedDemoCsrIfDev = () => {
+      if (!import.meta.env.DEV) return;
+      if (cancelled) return;
+      const existing = useStore.getState().csrCards;
+      if (existing.length > 0) return;
+      setCsrCards([
+        { id: '1', company: 'Reliance Industries', amount: 5000000, project: 'Rural Healthcare Phase 2', tags: ['Health', 'Gujarat'], agent: 'AD', col: 'prospecting', date: 'Stale demo', win_probability: 52 },
+        { id: '2', company: 'Tata Consultancy Services', amount: 2500000, project: 'Digital Literacy 2026', tags: ['Education', 'Tech'], agent: 'RS', col: 'pitch', date: 'Sent on: Oct 12', win_probability: 58 },
+        { id: '3', company: 'HDFC Bank CSR', amount: 8000000, project: 'Women Livelihood Center', tags: ['Livelihood'], agent: 'AD', col: 'diligence', date: 'Audit pending', win_probability: 62 },
+        { id: '4', company: 'Wipro Care', amount: 1200000, project: 'School Infrastructure', tags: ['Education', 'WASH'], agent: 'PM', col: 'mou', date: 'Signed: Oct 15', win_probability: 70 },
+        { id: '5', company: 'Mahindra Finance', amount: 4500000, project: 'Farmer Support Init', tags: ['Agriculture'], agent: 'RS', col: 'live', date: 'Report due: Nov 30', win_probability: 80 },
+        { id: '6', company: 'Infosys Foundation', amount: 6000000, project: 'STEM for Girls', tags: ['Education'], agent: 'AD', col: 'live', date: 'Report due: Dec 15', win_probability: 76 },
+      ] as any);
+    };
     const run = async () => {
       try {
         const res = await apiFetch('/csr/cards');
-        if (!res.ok) return;
+        if (!res.ok) { seedDemoCsrIfDev(); return; }
         const data = await res.json();
         if (cancelled) return;
-        if (Array.isArray(data.cards)) setCsrCards(data.cards as any);
+        if (Array.isArray(data.cards)) {
+          // Always honor the backend response (including empty), then in DEV
+          // overlay demo seed data so the frontend is usable without the API.
+          setCsrCards(data.cards as any);
+          if (data.cards.length === 0) seedDemoCsrIfDev();
+        }
       } catch {
-        /* keep store */
+        seedDemoCsrIfDev();
       }
     };
     run();

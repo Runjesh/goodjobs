@@ -275,6 +275,84 @@ const Funding: React.FC = () => {
               <button onClick={() => navigate('/compliance')}>View <ArrowRight size={12} /></button>
             </div>
           )}
+
+          {/* Active grants quick-links */}
+          {csrCards.length > 0 && (() => {
+            const featured = [...csrCards]
+              .sort((a: any, b: any) => {
+                const order: Record<string, number> = { live: 0, mou: 1, diligence: 2, pitch: 3, prospecting: 4, closed: 5 };
+                return (order[a.col] ?? 9) - (order[b.col] ?? 9);
+              })
+              .slice(0, 6);
+            const stageMap: Record<string, { label: string; color: string }> = {
+              prospecting: { label: 'Pipeline', color: '#94a3b8' },
+              pitch:       { label: 'Applied',  color: '#0891b2' },
+              diligence:   { label: 'Applied',  color: '#0891b2' },
+              mou:         { label: 'Awarded',  color: '#7c3aed' },
+              live:        { label: 'Active',   color: '#0F766E' },
+              closed:      { label: 'Closed',   color: '#64748b' },
+            };
+            return (
+              <div style={{ marginTop: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                  <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, color: 'var(--color-text-primary)' }}>
+                    Grants
+                  </h3>
+                  <button
+                    onClick={() => navigate('/csr')}
+                    style={{ background: 'none', border: 'none', color: '#0F766E', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    Open CSR pipeline <ArrowRight size={12} />
+                  </button>
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+                    gap: '0.65rem',
+                  }}
+                >
+                  {featured.map((g: any) => {
+                    const st = stageMap[g.col] || { label: g.col, color: '#64748b' };
+                    return (
+                      <button
+                        key={String(g.id)}
+                        onClick={() => navigate(`/grants/${encodeURIComponent(String(g.id))}`)}
+                        style={{
+                          textAlign: 'left',
+                          background: '#fff',
+                          border: '1px solid var(--color-border-light)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '0.75rem 0.85rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.35rem',
+                          transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget.style as any).borderColor = '#0F766E'; (e.currentTarget.style as any).transform = 'translateY(-1px)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget.style as any).borderColor = ''; (e.currentTarget.style as any).transform = ''; }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: st.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{st.label}</span>
+                          <ArrowRight size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+                        </div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {g.company}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {g.project}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--color-text-tertiary)', fontWeight: 500 }}>
+                          ₹{(Number(g.amount) / 100000).toFixed(1)}L
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </motion.div>
       )}
 
