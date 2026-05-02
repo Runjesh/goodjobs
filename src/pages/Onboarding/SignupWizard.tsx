@@ -119,9 +119,27 @@ const SignupWizard: React.FC = () => {
         ? Array.from(new Set([...prev.skippedSteps, id]))
         : prev.skippedSteps.filter((s) => s !== id);
       const nextIndex = prev.currentIndex + 1;
+      const wasLast = nextIndex >= WIZARD_STEP_ORDER.length;
+      // After the final step, hand off straight to Today instead of parking
+      // the user on an extra "You're all set" confirmation screen.
+      if (wasLast && userId) {
+        const finalState = finishWizard(userId, { ...prev, completedSteps, skippedSteps, currentIndex: nextIndex });
+        const handedOff = completedSteps.length;
+        const skipped = skippedSteps.length;
+        toast.success(
+          skipped > 0
+            ? `You're all set! ${handedOff} of ${WIZARD_STEP_ORDER.length} steps done — we'll surface the rest in your checklist.`
+            : `You're all set — welcome to GoodJobs!`,
+          { icon: '🎉', duration: 4000 },
+        );
+        updateUser({ needsWizard: false });
+        // setTimeout so React commits the state update before navigation.
+        setTimeout(() => navigate('/', { replace: true }), 0);
+        return finalState;
+      }
       return { ...prev, completedSteps, skippedSteps, currentIndex: nextIndex };
     });
-  }, [commitStep]);
+  }, [commitStep, userId, updateUser, navigate]);
 
   const goBack = useCallback(() => {
     setState((prev) => ({ ...prev, currentIndex: Math.max(0, prev.currentIndex - 1) }));

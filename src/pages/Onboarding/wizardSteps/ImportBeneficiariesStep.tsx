@@ -23,13 +23,14 @@ const ImportBeneficiariesStep: React.FC<Props> = ({ value, onChange, setComplete
   const manualRows: ManualBen[] = v.manualRows ?? [blank(), blank(), blank()];
   const mode: Mode = v.mode ?? 'manual';
 
-  // Step considered complete when we either picked a CSV file or have ≥1 valid manual row.
+  // Step considered complete when we either picked a CSV file or have ≥3 valid
+  // manual rows (matches the "Add 3 manually" copy on the mode tab).
   useEffect(() => {
     if (mode === 'csv') {
       setComplete(!!v.csvName);
     } else {
       const valid = manualRows.filter((r) => r.name.trim().length > 0);
-      setComplete(valid.length >= 1);
+      setComplete(valid.length >= 3);
     }
   }, [mode, v.csvName, manualRows, setComplete]);
 
@@ -161,7 +162,9 @@ const ImportBeneficiariesStep: React.FC<Props> = ({ value, onChange, setComplete
             <Plus size={14} /> Add another row
           </button>
           <div className="wizard-field-hint">
-            We'll add these to your beneficiary list when you click <strong>Save &amp; continue</strong>.
+            Add at least 3 names — we'll save them to your beneficiary list when
+            you click <strong>Save &amp; continue</strong>. Or click <em>Skip for now</em>
+            to come back later.
           </div>
         </>
       )}
