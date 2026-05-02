@@ -10,6 +10,7 @@ import './Programs.css';
 import { apiFetch } from '../../api/client';
 import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
+import EnrollBeneficiaryModal, { computeBeneficiaryCompleteness, type EnrollFormData } from './EnrollBeneficiaryModal';
 
 const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize,phone,email,gender,dob,referral_source,referral_detail,vulnerability,id_doc_type,id_doc_ref,notes\nSita Devi,Health,"Pune, MH",false,4,+9198***01,,female,1992-03-01,shg,Block 4 AWC,"woman_headed,pwd",aadhaar_masked,****8212,\nRavi K,Education,Delhi,true,3,,,male,,camp,,,election_id,ABC1234567,\n';
 
@@ -165,6 +166,60 @@ const Programs: React.FC = () => {
     if (!form.program && programs.length) setForm(prev => ({ ...prev, program: programs[0] }));
   }, [programs, form.program]);
 
+  const packEnrollDetails = (f: EnrollFormData): Record<string, unknown> => {
+    const d: Record<string, unknown> = {};
+    if (f.dob) d.dob = f.dob;
+    if (f.gender) d.gender = f.gender;
+    if (f.phone.trim()) d.phone = f.phone.trim();
+    if (f.email.trim()) d.email = f.email.trim().toLowerCase();
+    if (f.village.trim()) d.village = f.village.trim();
+    if (f.pinCode.trim()) d.pin_code = f.pinCode.trim();
+    if (f.enrollmentDate) d.enrollment_date = f.enrollmentDate;
+    if (f.referralSource) d.referral_source = f.referralSource;
+    if (f.referralDetail.trim()) d.referral_detail = f.referralDetail.trim();
+    if (f.vulnerabilityTags.length) d.vulnerability_flags = f.vulnerabilityTags;
+    if (f.idDocType) d.id_doc_type = f.idDocType;
+    if (f.idDocRef.trim()) d.id_doc_ref = f.idDocRef.trim();
+    if (f.householdId) d.household_id = f.householdId;
+    if (f.householdHead.trim()) d.household_head = f.householdHead.trim();
+    if (f.monthlyIncome) d.monthly_income = f.monthlyIncome;
+    d.consent_given = f.consentGiven;
+    d.consent_language = f.consentLanguage;
+    if (f.consentTimestamp) d.consent_timestamp = f.consentTimestamp;
+    if (f.docAadhaar) d.doc_aadhaar = f.docAadhaar;
+    if (f.docPhoto) d.doc_photo = f.docPhoto;
+    if (f.docOther) d.doc_other = f.docOther;
+    if (f.docsSkipped) d.docs_skipped = true;
+    if (f.notes.trim()) d.notes = f.notes.trim();
+    return d;
+  };
+
+  const handleSectionedEnroll = async (f: EnrollFormData) => {
+    const payload = {
+      name: f.name.trim(),
+      program: f.program,
+      location: f.location.trim(),
+      aadhaar: f.aadhaar,
+      familySize: Number(f.familySize) || 1,
+      details: packEnrollDetails(f),
+    };
+    try {
+      const res = await apiFetch('/programs/beneficiaries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('create');
+      await refreshBeneficiaries();
+      toast.success(`${payload.name} enrolled in ${payload.program}!`);
+    } catch {
+      addBeneficiary(payload);
+      toast.success(`${payload.name} enrolled (saved locally — sync when backend is back).`);
+    }
+    setShowModal(false);
+  };
+
+  // Legacy handler retained for the edit-beneficiary modal which still uses the flat form.
   const handleEnroll = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -187,7 +242,6 @@ const Programs: React.FC = () => {
       setBenExtra({ ...BEN_EXTRA_EMPTY });
       setShowModal(false);
     } catch {
-      // Backend unavailable — fall back to local store so demo / offline mode still works
       addBeneficiary({
         name: form.name,
         program: form.program,
@@ -513,6 +567,24 @@ const Programs: React.FC = () => {
                               })()}
                             </div>
                             <div className="flex gap-2 items-center">
+                              {(() => {
+                                const pct = computeBeneficiaryCompleteness(ben);
+                                const color = pct >= 80 ? '#16A34A' : pct >= 60 ? '#d97706' : '#DC2626';
+                                const bg   = pct >= 80 ? '#f0fdf4' : pct >= 60 ? '#fffbeb' : '#fef2f2';
+                                const bd   = pct >= 80 ? '#86efac' : pct >= 60 ? '#fde68a' : '#fecaca';
+                                return (
+                                  <span
+                                    title={`Profile completeness: ${pct}%`}
+                                    style={{
+                                      fontSize: '0.65rem', fontWeight: 700, padding: '2px 7px',
+                                      borderRadius: '99px', background: bg, color, border: `1px solid ${bd}`,
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {pct}%
+                                  </span>
+                                );
+                              })()}
                               <span className="badge badge-outline" style={{ fontSize: '0.7rem' }}>
                                 {ben.id}
                               </span>
@@ -577,6 +649,15 @@ const Programs: React.FC = () => {
       </div>
 
       {activeTab === 'mis' && showModal && (
+        <EnrollBeneficiaryModal
+          programs={programs}
+          existingBeneficiaries={beneficiaries.length > 0 ? beneficiaries : initialBeneficiaries}
+          initialProgram={programs[0]}
+          onClose={() => setShowModal(false)}
+          onSubmit={handleSectionedEnroll}
+        />
+      )}
+      {false && activeTab === 'mis' && showModal && (
         <ModalOverlay onBackdropClick={() => setShowModal(false)}>
           <div
             className="modal-card modal-card--wide modal-card--tall"

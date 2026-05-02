@@ -475,8 +475,11 @@
 /* ── Data Quality row (side-by-side) ─────────────────── */
 .insights-dq-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 1rem;
+}
+@media (max-width: 1100px) {
+  .insights-dq-row { grid-template-columns: 1fr 1fr; }
 }
 
 .insights-card--dq  {}
@@ -816,3 +819,38 @@ html.dark .insights-staff-row--clickable:hover { background: rgba(15,118,110,0.1
 }
 .insights-legend-item--clickable:hover { background: #fee2e2; }
 html.dark .insights-legend-item--clickable:hover { background: rgba(220,38,38,0.12); }
+
+/* Beneficiary records watch list */
+.insights-card--watch { display: flex; flex-direction: column; }
+.insights-watch-list { display: flex; flex-direction: column; gap: 8px; }
+.insights-watch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-main);
+  border: 1px solid var(--color-border-light);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.insights-watch-row:hover {
+  border-color: var(--color-primary);
+  background: var(--color-bg-card);
+}
+.insights-watch-info { flex: 1; min-width: 0; }
+.insights-watch-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.insights-watch-meta {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

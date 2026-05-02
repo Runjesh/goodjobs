@@ -8,6 +8,7 @@ import {
   Sparkles, Info, UserCheck, ChevronRight, X
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { computeBeneficiaryCompleteness } from '../Programs/EnrollBeneficiaryModal';
 import toast from 'react-hot-toast';
 import './Insights.css';
 
@@ -254,8 +255,17 @@ const Insights: React.FC = () => {
 
   const donorCompleteness = donors.length > 0
     ? Math.round((donors.filter((d: any) => d.email && d.phone).length / donors.length) * 100) : 0;
-  const benCompleteness = beneficiaries.length > 0
-    ? Math.round((beneficiaries.filter((b: any) => b.program || b.status).length / beneficiaries.length) * 100) : 0;
+  // Granular per-beneficiary completeness (Sections A–E coverage)
+  const benCompletenessScores = useMemo(
+    () => beneficiaries.map(b => ({ b, score: computeBeneficiaryCompleteness(b) })),
+    [beneficiaries]
+  );
+  const benCompleteness = benCompletenessScores.length > 0
+    ? Math.round(benCompletenessScores.reduce((s, x) => s + x.score, 0) / benCompletenessScores.length) : 0;
+  const benWatchList = useMemo(
+    () => benCompletenessScores.filter(x => x.score < 80).sort((a, b) => a.score - b.score).slice(0, 6),
+    [benCompletenessScores]
+  );
 
   const dataQualityItems = [
     { label: 'Donor profiles complete',    score: donorCompleteness || 72, color: '#0F766E' },
@@ -530,6 +540,54 @@ const Insights: React.FC = () => {
               </motion.div>
             ))}
           </div>
+        </div>
+
+        {/* ── Beneficiary Records Watch List ───────────────────────── */}
+        <div className="insights-card insights-card--watch">
+          <div className="insights-card-header">
+            <AlertTriangle size={16} className="insights-card-icon" style={{ color: '#d97706' }} />
+            <h3 className="insights-card-title">Beneficiary Records — Watch list</h3>
+            <span className="insights-card-badge" style={{ background: benWatchList.length > 0 ? '#fef3c7' : '#d1fae5', color: benWatchList.length > 0 ? '#92400e' : '#15803d' }}>
+              {benWatchList.length} below 80%
+            </span>
+          </div>
+          {benWatchList.length === 0 ? (
+            <div className="insights-empty" style={{ padding: '1rem 0' }}>
+              {beneficiaries.length === 0
+                ? 'No beneficiaries enrolled yet — completeness watch list will appear here.'
+                : 'All beneficiary records are 80%+ complete. Nice work.'}
+            </div>
+          ) : (
+            <div className="insights-watch-list">
+              {benWatchList.map(({ b, score }) => {
+                const color = score >= 60 ? '#d97706' : '#DC2626';
+                return (
+                  <div key={b.id} className="insights-watch-row insights-staff-row--clickable" onClick={() => navigate('/programs')} title="Open Programs to complete this record">
+                    <div className="insights-watch-info">
+                      <div className="insights-watch-name">{b.name}</div>
+                      <div className="insights-watch-meta">{b.program} · {b.location}</div>
+                    </div>
+                    <div className="insights-staff-score-wrap">
+                      <div className="insights-staff-bar-track">
+                        <div className="insights-staff-bar-fill" style={{ background: color, width: `${score}%` }} />
+                      </div>
+                      <span className="insights-staff-score" style={{ color }}>{score}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+              {benCompletenessScores.filter(x => x.score < 80).length > benWatchList.length && (
+                <button
+                  type="button"
+                  className="insights-card-link"
+                  style={{ marginTop: '0.5rem' }}
+                  onClick={() => navigate('/programs')}
+                >
+                  View all {benCompletenessScores.filter(x => x.score < 80).length} records below 80% <ChevronRight size={13} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Data Quality — Staff ──────────────────────────────────── */}
