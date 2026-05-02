@@ -132,9 +132,16 @@ export async function openRazorpayCheckout(args: OpenCheckoutArgs): Promise<void
 
   const ok = await loadRazorpayScript();
   if (!ok || !window.Razorpay) {
-    // Offline / blocked — fall through to mock so the UX still completes.
-    setTimeout(() => onSuccess(`mock_pay_${Date.now()}`), 100);
-    return;
+    // A real key is configured but the SDK failed to load (offline /
+    // adblock / CSP / network). Granting the paid tier here would bypass
+    // payment entirely, so refuse and let the caller surface the error.
+    // eslint-disable-next-line no-console
+    console.error(
+      '[razorpay] Checkout SDK failed to load — refusing to grant paid tier without payment.'
+    );
+    throw new Error(
+      'Could not reach the payment service. Check your connection or disable ad-blockers, then try again.'
+    );
   }
 
   const rzp = new window.Razorpay({
