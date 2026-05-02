@@ -177,7 +177,8 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
   const nowMs = Date.now();
 
   // ── Grant T-7 reminder cascade — surface live grants whose next report is within 7 days ──
-  const liveGrants = csrCards.filter((c: any) => c.col === 'live');
+  // Gated to ED so other roles aren't bombarded with grant-reporting alerts on Today.
+  const liveGrants = role === 'ed' ? csrCards.filter((c: any) => c.col === 'live') : [];
   for (const g of liveGrants) {
     let nextDue: Date | null = null;
     try {

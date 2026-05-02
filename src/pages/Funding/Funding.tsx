@@ -282,8 +282,7 @@ const Funding: React.FC = () => {
               .sort((a: any, b: any) => {
                 const order: Record<string, number> = { live: 0, mou: 1, diligence: 2, pitch: 3, prospecting: 4, closed: 5 };
                 return (order[a.col] ?? 9) - (order[b.col] ?? 9);
-              })
-              .slice(0, 6);
+              });
             const stageMap: Record<string, { label: string; color: string }> = {
               prospecting: { label: 'Pipeline', color: '#94a3b8' },
               pitch:       { label: 'Applied',  color: '#0891b2' },
