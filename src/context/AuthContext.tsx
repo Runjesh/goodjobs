@@ -124,7 +124,16 @@ export interface AuthUser {
     causeArea?: string;
     teamSize?: string;
     phone?: string;
+    /** Optional org logo (data URL) captured in the wizard. */
+    logoDataUrl?: string;
+    registrationNumber?: string;
+    section80GNumber?: string;
+    fcraStatus?: 'none' | 'pending' | 'active';
   };
+  /** Team members invited from the wizard (mock — no backend send yet). */
+  pendingInvites?: { email: string; role: string; invitedAt: string }[];
+  /** WhatsApp phone wired up during onboarding. */
+  whatsapp?: { phone?: string; verified?: boolean; connectedAt?: string };
 }
 
 interface AuthContextValue {

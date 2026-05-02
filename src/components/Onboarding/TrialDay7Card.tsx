@@ -5,9 +5,14 @@ import { useAuth } from '../../context/AuthContext';
 import {
   daysSinceStart, daysLeftInTrial, isTrialExpired,
   nudgeFired, withNudgeFired,
-  NUDGE_DAY_7, NUDGE_DAY_28,
+  NUDGE_DAY_7,
 } from '../../utils/trial';
 import './TrialBanner.css';
+
+// Card is shown for a tight 7-day window starting on day 7. After day 13
+// the day-21 toast / day-28 modal take over so the Today screen doesn't
+// get cluttered with stale "you're early in your trial" copy.
+const DAY7_CARD_WINDOW_END = 14;
 
 /**
  * Day-7 informational card on the Today screen — encourages exploring
@@ -26,7 +31,7 @@ const TrialDay7Card: React.FC = () => {
 
   const since = daysSinceStart(user.trial);
   const left = daysLeftInTrial(user.trial);
-  if (since < NUDGE_DAY_7 || since >= NUDGE_DAY_28) return null;
+  if (since < NUDGE_DAY_7 || since >= DAY7_CARD_WINDOW_END) return null;
 
   const handleDismiss = () => {
     updateUser({ trial: withNudgeFired(user.trial!, 'day7') });

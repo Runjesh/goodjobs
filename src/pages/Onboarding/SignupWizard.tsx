@@ -106,7 +106,49 @@ const SignupWizard: React.FC = () => {
       });
       return;
     }
-  }, []);
+    // ── Org Profile / Invite Team / WhatsApp persistence ───────────────────
+    // These steps don't touch the global Zustand store, but their values
+    // belong on the canonical auth user record so downstream surfaces
+    // (header, settings, integrations) can read them immediately after the
+    // wizard exits — not just from local wizard state.
+    if (id === 'org-profile') {
+      const op = data.orgProfile;
+      if (!op) return;
+      updateUser({
+        orgProfile: {
+          ...(user?.orgProfile ?? {}),
+          ...(op.logoDataUrl ? { logoDataUrl: op.logoDataUrl } : {}),
+          ...(op.registrationNumber ? { registrationNumber: op.registrationNumber } : {}),
+          ...(op.section80GNumber ? { section80GNumber: op.section80GNumber } : {}),
+          ...(op.fcraStatus ? { fcraStatus: op.fcraStatus } : {}),
+        },
+      });
+      return;
+    }
+    if (id === 'invite-team') {
+      const it = data.inviteTeam;
+      const fresh = (it?.invites ?? []).filter((i) => i.email.trim() && i.role);
+      if (!fresh.length) return;
+      const existing = user?.pendingInvites ?? [];
+      const existingEmails = new Set(existing.map((i) => i.email.toLowerCase()));
+      const merged = [
+        ...existing,
+        ...fresh
+          .filter((i) => !existingEmails.has(i.email.trim().toLowerCase()))
+          .map((i) => ({ email: i.email.trim(), role: i.role, invitedAt: new Date().toISOString() })),
+      ];
+      updateUser({ pendingInvites: merged });
+      return;
+    }
+    if (id === 'connect-whatsapp') {
+      const cw = data.connectWhatsapp;
+      if (!cw?.phone) return;
+      updateUser({
+        whatsapp: { phone: cw.phone, verified: !!cw.verified, connectedAt: new Date().toISOString() },
+      });
+      return;
+    }
+  }, [updateUser, user]);
 
   const advance = useCallback((status: 'completed' | 'skipped') => {
     setState((prev) => {
