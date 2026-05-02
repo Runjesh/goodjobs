@@ -42,7 +42,7 @@ const Settings: React.FC = () => {
   // Team-tab state — local invite UX backed by AuthUser.pendingInvites so the
   // wizard's invites and the Settings invites share one list. Real backend
   // wiring (POST /team/invite) is a follow-up.
-  const { tier, usage } = useTier();
+  const { tier, usage, openUpgrade } = useTier();
   const teamLims = tierLimits(tier);
   const teamCap = teamLims.teamMembers; // null = unlimited
   const [inviteEmail, setInviteEmail] = useState('');
@@ -429,7 +429,14 @@ const Settings: React.FC = () => {
                 targetTier={tier === 'scale' ? 'scale' : 'growth'}
                 onUpgrade={() => {
                   setTeamUpgradeOpen(false);
-                  setActiveTab('plans');
+                  // Hand off to the global upgrade flow so the Plans tab opens
+                  // pre-selected on the next tier and the user can complete
+                  // checkout in one click — matches the spec's friction-moment
+                  // upgrade requirement.
+                  openUpgrade({
+                    targetTier: tier === 'scale' ? 'scale' : 'growth',
+                    source: 'team_cap',
+                  });
                 }}
               />
             </div>

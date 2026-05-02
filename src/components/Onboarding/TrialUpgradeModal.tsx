@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { X, Check, Sparkles, AlertTriangle } from 'lucide-react';
 import { ModalOverlay } from '../ui/ModalOverlay';
-import { TIER_PLANS, daysLeftInTrial, type TrialState } from '../../utils/trial';
+import { TIER_PLANS, daysLeftInTrial, formatINR, type TrialState } from '../../utils/trial';
 import './TrialUpgradeModal.css';
 
 interface Props {
@@ -64,7 +64,11 @@ const TrialUpgradeModal: React.FC<Props> = ({ trial, onDismiss, variant = 'day28
             >
               {plan.highlighted && <div className="trial-plan-badge">Recommended</div>}
               <div className="trial-plan-name">{plan.name}</div>
-              <div className="trial-plan-price">{plan.price}</div>
+              <div className="trial-plan-price">
+                {plan.priceMonthly === 0
+                  ? 'Free'
+                  : <>{formatINR(plan.priceMonthly)}<span style={{ fontSize: '0.7em', fontWeight: 400, opacity: 0.7 }}> /mo</span></>}
+              </div>
               <div className="trial-plan-blurb">{plan.blurb}</div>
               <ul className="trial-plan-features">
                 {plan.features.map((f) => (
