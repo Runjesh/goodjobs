@@ -156,19 +156,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Trial + subscriptionTier belong to the *org*, not the individual user.
     // Look up any persisted billing for this ngoId so trial timing survives
     // logout/login (a user cannot reset their trial by signing back in).
-    // Only mint a fresh trial when no billing exists for the org yet.
+    //
+    // Trial issuance rules (do NOT auto-mint for legacy/real-tenant logins):
+    //   1. If the caller explicitly supplies `trial`, honour it (signup flow,
+    //      demo logins that opt-in to the showcase experience).
+    //   2. Otherwise use any stored org billing.
+    //   3. Otherwise leave trial undefined — pre-existing tenants without a
+    //      trial record do NOT silently receive one.
     const stored = loadOrgBilling(newUser.ngoId);
 
-    const trial: TrialState =
-      newUser.trial ?? stored?.trial ?? makeFreshTrial();
+    const trial: TrialState | undefined =
+      newUser.trial ?? stored?.trial;
     const subscriptionTier: SubscriptionTier | undefined =
       newUser.subscriptionTier ?? stored?.subscriptionTier;
 
     const merged: AuthUser = { ...newUser, trial, subscriptionTier };
 
-    // Write back so future logins (and other roles in the same org) see the
-    // same canonical billing state.
-    saveOrgBilling(newUser.ngoId, { trial, subscriptionTier });
+    // Only persist org billing when there's actually something to persist.
+    if (trial || subscriptionTier) {
+      saveOrgBilling(newUser.ngoId, { trial, subscriptionTier });
+    }
 
     setUser(merged);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));

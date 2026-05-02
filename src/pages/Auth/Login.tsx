@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ShieldCheck, Eye, EyeOff, Cpu, Sparkles, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth, ROLE_META, type UserRole } from '../../context/AuthContext';
+import { makeFreshTrial } from '../../utils/trial';
 import { apiFetch } from '../../api/client';
 import './Auth.css';
 
@@ -71,6 +72,9 @@ const Login: React.FC = () => {
       ngoName: user.org || 'India NGO Trust',
       token: token || `demo-jwt-${roleId}-${Date.now()}`,
       avatar: meta.icon,
+      // Demo logins explicitly opt-in to the trial showcase. Real backend
+      // logins (handleLogin) do NOT, so legacy tenants don't get a trial.
+      trial: makeFreshTrial(),
     });
     toast.success(`Welcome! Signed in as ${role?.label}`, { icon: meta.icon, duration: 3000 });
     setTimeout(() => navigate('/'), 300);
