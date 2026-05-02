@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck } from 'lucide-react';
 import { useStore, initialBeneficiaries } from '../../store/useStore';
+import { useAuth } from '../../context/AuthContext';
+import { effectiveTier, canAddBeneficiary, STARTER_BENEFICIARY_CAP } from '../../utils/trial';
 import toast from 'react-hot-toast';
 import FormBuilder from '../../components/FormBuilder/FormBuilder';
 import TheoryOfChangeBuilder from '../../components/Programs/TheoryOfChangeBuilder';
@@ -118,6 +120,22 @@ const DEFAULT_PROGRAMS = [
 
 const Programs: React.FC = () => {
   const { beneficiaries, addBeneficiary, updateBeneficiary, deleteBeneficiary } = useStore();
+  const { user } = useAuth();
+
+  // ── Starter-tier limit gate ─────────────────────────────────────────────
+  // After the 30-day trial expires the org is downgraded to Starter, which
+  // caps beneficiaries at STARTER_BENEFICIARY_CAP. This helper blocks adds
+  // (single + bulk) once the cap is reached and surfaces an upgrade nudge.
+  const tierForLimits = user?.subscriptionTier ?? effectiveTier(user?.trial);
+  const enforceBeneficiaryCap = (additional = 1): boolean => {
+    if (canAddBeneficiary(tierForLimits, beneficiaries.length + (additional - 1))) return true;
+    toast.error(
+      `Starter plan is capped at ${STARTER_BENEFICIARY_CAP} beneficiaries. Upgrade to Pro to add more.`,
+      { duration: 6000 },
+    );
+    return false;
+  };
+
   const derivedPrograms = Array.from(new Set(beneficiaries.map(b => b.program).filter(Boolean)));
   const programs = derivedPrograms.length > 0 ? derivedPrograms : DEFAULT_PROGRAMS;
   const [showModal, setShowModal] = useState(false);
@@ -195,6 +213,7 @@ const Programs: React.FC = () => {
   };
 
   const handleSectionedEnroll = async (f: EnrollFormData) => {
+    if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
     const payload = {
       name: f.name.trim(),
       program: f.program,
@@ -223,6 +242,7 @@ const Programs: React.FC = () => {
   // Legacy handler retained for the edit-beneficiary modal which still uses the flat form.
   const handleEnroll = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
     try {
       const res = await apiFetch('/programs/beneficiaries', {
         method: 'POST',
@@ -359,6 +379,7 @@ const Programs: React.FC = () => {
       toast.error('No valid rows — need name, program, location columns.');
       return;
     }
+    if (!enforceBeneficiaryCap(beneficiariesPayload.length)) return;
     setBenImporting(true);
     try {
       const res = await apiFetch('/programs/beneficiaries/bulk', {
