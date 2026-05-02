@@ -1,50 +1,35 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, X, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
   daysSinceStart, daysLeftInTrial, isTrialExpired,
+  nudgeFired, withNudgeFired,
   NUDGE_DAY_7, NUDGE_DAY_28,
 } from '../../utils/trial';
 import './TrialBanner.css';
 
-const DISMISS_KEY = 'gj_trial_day7_dismissed_v1';
-
-function isDismissed(userId: string): boolean {
-  try {
-    const m = JSON.parse(localStorage.getItem(DISMISS_KEY) || '{}');
-    return !!m[userId];
-  } catch { return false; }
-}
-
-function markDismissed(userId: string) {
-  try {
-    const m = JSON.parse(localStorage.getItem(DISMISS_KEY) || '{}');
-    m[userId] = Date.now();
-    localStorage.setItem(DISMISS_KEY, JSON.stringify(m));
-  } catch { /* ignore */ }
-}
-
 /**
  * Day-7 informational card on the Today screen — encourages exploring
  * Pro-only features before the trial runs down. Hidden once dismissed,
- * after day 28 (modal takes over), or after expiry.
+ * after day 28 (modal takes over), or after expiry. Dismissal is stored
+ * in the org-scoped trial.nudges.day7 field so all roles within the
+ * same NGO see a consistent state.
  */
 const TrialDay7Card: React.FC = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const navigate = useNavigate();
-  const [hidden, setHidden] = useState(() => (user ? isDismissed(user.id) : true));
 
-  if (!user?.trial || hidden) return null;
+  if (!user?.trial) return null;
   if (isTrialExpired(user.trial)) return null;
+  if (nudgeFired(user.trial, 'day7')) return null;
 
   const since = daysSinceStart(user.trial);
   const left = daysLeftInTrial(user.trial);
   if (since < NUDGE_DAY_7 || since >= NUDGE_DAY_28) return null;
 
   const handleDismiss = () => {
-    markDismissed(user.id);
-    setHidden(true);
+    updateUser({ trial: withNudgeFired(user.trial!, 'day7') });
   };
 
   return (
