@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { makeFreshTrial, type TrialState, type SubscriptionTier } from '../utils/trial';
 
 // ── Role Definitions ──────────────────────────────────────────────────────────
 export type UserRole = 'ed' | 'finance' | 'programs' | 'field' | 'board';
@@ -112,6 +113,18 @@ export interface AuthUser {
   ngoName: string;
   token: string;
   avatar: string;
+  /** True only on the very first login after `/signup`; cleared once wizard exits. */
+  needsWizard?: boolean;
+  /** 30-day trial state — present for newly-signed-up tenants. */
+  trial?: TrialState;
+  /** Persisted subscription tier when user has chosen one (Task #5). */
+  subscriptionTier?: SubscriptionTier;
+  /** Org metadata captured at signup (cause area, team size, phone). */
+  orgProfile?: {
+    causeArea?: string;
+    teamSize?: string;
+    phone?: string;
+  };
 }
 
 interface AuthContextValue {
@@ -121,6 +134,8 @@ interface AuthContextValue {
   login: (user: AuthUser) => void;
   logout: () => void;
   can: (module: string, action: keyof Omit<Permission, 'module'>) => boolean;
+  /** Patch the active user (persists to storage). No-op if no user is logged in. */
+  updateUser: (patch: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -138,16 +153,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const permissions = user ? ROLE_PERMISSIONS[user.role] : [];
 
   const login = useCallback((newUser: AuthUser) => {
-    setUser(newUser);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser));
+    // Auto-attach a fresh 30-day trial state if this user has none yet — every
+    // new tenant gets a trial whether they came in via /signup or demo login.
+    const withTrial: AuthUser = newUser.trial
+      ? newUser
+      : { ...newUser, trial: makeFreshTrial() };
+    setUser(withTrial);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(withTrial));
     // Back-compat for pages that read access_token directly
-    localStorage.setItem('access_token', newUser.token);
+    localStorage.setItem('access_token', withTrial.token);
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem('access_token');
+  }, []);
+
+  const updateUser = useCallback((patch: Partial<AuthUser>) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next: AuthUser = { ...prev, ...patch };
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
   }, []);
 
   const can = useCallback((module: string, action: keyof Omit<Permission, 'module'>): boolean => {
@@ -157,7 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, can }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, can, updateUser }}>
       {children}
     </AuthContext.Provider>
   );
