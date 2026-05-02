@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck } from 'lucide-react';
 import { useStore, initialBeneficiaries } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
-import { effectiveTier, canAddBeneficiary, STARTER_BENEFICIARY_CAP } from '../../utils/trial';
+import { isTrialExpired, canAddBeneficiary, STARTER_BENEFICIARY_CAP, type SubscriptionTier } from '../../utils/trial';
 import toast from 'react-hot-toast';
 import FormBuilder from '../../components/FormBuilder/FormBuilder';
 import TheoryOfChangeBuilder from '../../components/Programs/TheoryOfChangeBuilder';
@@ -123,12 +123,20 @@ const Programs: React.FC = () => {
   const { user } = useAuth();
 
   // ── Starter-tier limit gate ─────────────────────────────────────────────
-  // After the 30-day trial expires the org is downgraded to Starter, which
-  // caps beneficiaries at STARTER_BENEFICIARY_CAP. This helper blocks adds
-  // (single + bulk) once the cap is reached and surfaces an upgrade nudge.
-  const tierForLimits = user?.subscriptionTier ?? effectiveTier(user?.trial);
+  // We ONLY enforce limits when the org is genuinely on Starter:
+  //   (a) explicit subscriptionTier === 'starter' (paid-down or post-trial), OR
+  //   (b) the org has a trial state and that trial has expired.
+  // Legacy/returning users with no trial AND no subscriptionTier are treated
+  // as unlimited so this UI change doesn't retroactively gate them.
+  const resolveTier = (): SubscriptionTier | null => {
+    if (user?.subscriptionTier && user.subscriptionTier !== 'trial') return user.subscriptionTier;
+    if (user?.trial && isTrialExpired(user.trial)) return 'starter';
+    return null; // no enforcement
+  };
   const enforceBeneficiaryCap = (additional = 1): boolean => {
-    if (canAddBeneficiary(tierForLimits, beneficiaries.length + (additional - 1))) return true;
+    const tier = resolveTier();
+    if (!tier) return true; // no trial + no chosen plan → don't gate
+    if (canAddBeneficiary(tier, beneficiaries.length + (additional - 1))) return true;
     toast.error(
       `Starter plan is capped at ${STARTER_BENEFICIARY_CAP} beneficiaries. Upgrade to Pro to add more.`,
       { duration: 6000 },
