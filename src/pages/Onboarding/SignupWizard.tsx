@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, SkipForward, Check, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
+import { useStore } from '../../store/useStore';
 import {
   WIZARD_STEP_ORDER, WIZARD_STEPS,
   loadWizardState, saveWizardState, finishWizard,
@@ -62,9 +63,55 @@ const SignupWizard: React.FC = () => {
     setState((prev) => ({ ...prev, data: { ...prev.data, [key]: value } }));
   }, []);
 
+  // ── Explicit per-step commit on "Save & continue" ────────────────────────
+  // Side-effects (campaign + beneficiary creation) live HERE, not in the step
+  // components, so they run exactly once per step completion (not on every
+  // keystroke). Skipped steps perform no writes — only completed ones do.
+  const commitStep = useCallback((id: WizardStepId, data: WizardData) => {
+    if (id === 'first-program') {
+      const fp = data.firstProgram;
+      if (!fp?.name?.trim() || !fp.causeArea) return;
+      const title = fp.name.trim();
+      // Idempotent: don't double-add if user clicks Continue twice.
+      const existing = useStore.getState().campaigns;
+      if (existing.some((c) => c.title === title && c.details?.source === 'signup-wizard')) return;
+      useStore.getState().addCampaign({
+        title,
+        goal: 250000,
+        status: 'draft',
+        image: 'linear-gradient(135deg, #0F766E, #14b8a6)',
+        cause: fp.causeArea,
+        details: { source: 'signup-wizard', startDate: fp.startDate ?? null, geography: fp.geography ?? null },
+      });
+      return;
+    }
+    if (id === 'import-beneficiaries') {
+      const ib = data.importBeneficiaries;
+      if (!ib || ib.mode !== 'manual') return; // CSV is processed elsewhere.
+      const rows = (ib.manualRows ?? []).filter((r) => r.name.trim());
+      if (!rows.length) return;
+      const existingNames = new Set(useStore.getState().beneficiaries.map((b) => b.name));
+      rows.forEach((r) => {
+        const name = r.name.trim();
+        // Skip dupes so re-clicking Continue is idempotent.
+        if (existingNames.has(name)) return;
+        useStore.getState().addBeneficiary({
+          name,
+          program: r.program.trim() || 'General',
+          location: '—',
+          aadhaar: false,
+          familySize: Math.max(1, Number(r.familySize) || 1),
+        });
+        existingNames.add(name);
+      });
+      return;
+    }
+  }, []);
+
   const advance = useCallback((status: 'completed' | 'skipped') => {
     setState((prev) => {
       const id = WIZARD_STEP_ORDER[prev.currentIndex];
+      if (status === 'completed') commitStep(id, prev.data);
       const completedSteps = status === 'completed'
         ? Array.from(new Set([...prev.completedSteps, id]))
         : prev.completedSteps.filter((s) => s !== id);
@@ -74,7 +121,7 @@ const SignupWizard: React.FC = () => {
       const nextIndex = prev.currentIndex + 1;
       return { ...prev, completedSteps, skippedSteps, currentIndex: nextIndex };
     });
-  }, []);
+  }, [commitStep]);
 
   const goBack = useCallback(() => {
     setState((prev) => ({ ...prev, currentIndex: Math.max(0, prev.currentIndex - 1) }));

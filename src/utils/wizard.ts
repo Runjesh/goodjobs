@@ -78,7 +78,13 @@ export interface WizardData {
     startDate?: string;
   };
   inviteTeam?: { invites: { email: string; role: string }[] };
-  importBeneficiaries?: { mode?: 'csv' | 'manual'; count?: number; csvName?: string };
+  importBeneficiaries?: {
+    mode?: 'csv' | 'manual';
+    count?: number;
+    csvName?: string;
+    /** Persisted manual entry rows so reload/back resumes draft data. */
+    manualRows?: { name: string; program: string; familySize: string }[];
+  };
   connectWhatsapp?: { phone?: string; verified?: boolean };
 }
 

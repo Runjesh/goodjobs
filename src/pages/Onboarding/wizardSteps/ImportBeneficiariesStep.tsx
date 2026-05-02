@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Upload, FileText, X, Plus } from 'lucide-react';
 import type { WizardData } from '../../../utils/wizard';
-import { useStore } from '../../../store/useStore';
 
 type Mode = 'csv' | 'manual';
 type Value = NonNullable<WizardData['importBeneficiaries']>;
@@ -18,12 +17,10 @@ const blank = (): ManualBen => ({ name: '', program: '', familySize: '1' });
 const ImportBeneficiariesStep: React.FC<Props> = ({ value, onChange, setComplete }) => {
   const v: Value = value ?? { mode: 'manual' };
   const fileRef = useRef<HTMLInputElement>(null);
-  const addBeneficiary = useStore((s) => s.addBeneficiary);
 
-  // Local form state for the manual rows. Persisted into wizard state once committed.
-  const [manualRows, setManualRows] = useState<ManualBen[]>(() => [blank(), blank(), blank()]);
-  const [committed, setCommitted] = useState(false);
-
+  // Manual rows live entirely in wizard state so reload/back resumes draft data.
+  // No localStorage; the wizard shell already persists state.data on every change.
+  const manualRows: ManualBen[] = v.manualRows ?? [blank(), blank(), blank()];
   const mode: Mode = v.mode ?? 'manual';
 
   // Step considered complete when we either picked a CSV file or have ≥1 valid manual row.
@@ -37,7 +34,6 @@ const ImportBeneficiariesStep: React.FC<Props> = ({ value, onChange, setComplete
   }, [mode, v.csvName, manualRows, setComplete]);
 
   const switchMode = (next: Mode) => {
-    setCommitted(false);
     onChange({ ...v, mode: next, count: 0, csvName: undefined });
   };
 
@@ -46,41 +42,24 @@ const ImportBeneficiariesStep: React.FC<Props> = ({ value, onChange, setComplete
     if (!file) return;
     // Roughly estimate row count from byte size — UX-only.
     const estimatedRows = Math.max(1, Math.round(file.size / 80));
-    onChange({ mode: 'csv', csvName: file.name, count: estimatedRows });
+    onChange({ ...v, mode: 'csv', csvName: file.name, count: estimatedRows });
+  };
+
+  const writeRows = (next: ManualBen[]) => {
+    const validCount = next.filter((r) => r.name.trim()).length;
+    onChange({ ...v, mode: 'manual', manualRows: next, count: validCount });
   };
 
   const updateRow = (i: number, patch: Partial<ManualBen>) => {
-    setManualRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    writeRows(manualRows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   };
 
   const removeRow = (i: number) => {
-    setManualRows((prev) => prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev);
+    if (manualRows.length === 1) return;
+    writeRows(manualRows.filter((_, idx) => idx !== i));
   };
 
-  const addRow = () => setManualRows((prev) => [...prev, blank()]);
-
-  // When the user clicks Save & Continue (handled by wizard shell), the latest
-  // form state is already persisted in wizard data, but we also want to push
-  // the manual rows into the store. We commit on first valid render so beneficiaries
-  // appear immediately on Programs page after wizard.
-  useEffect(() => {
-    if (mode !== 'manual' || committed) return;
-    const valid = manualRows.filter((r) => r.name.trim());
-    if (valid.length === 0) return;
-    // Commit when at least one row has a name; subsequent edits are not pushed
-    // to avoid duplicating entries — that's expected for a wizard one-shot.
-    valid.forEach((r) => {
-      addBeneficiary({
-        name: r.name.trim(),
-        program: r.program.trim() || 'General',
-        location: '—',
-        aadhaar: false,
-        familySize: Math.max(1, Number(r.familySize) || 1),
-      });
-    });
-    onChange({ ...v, mode: 'manual', count: valid.length });
-    setCommitted(true);
-  }, [manualRows, mode, committed, addBeneficiary, onChange, v]);
+  const addRow = () => writeRows([...manualRows, blank()]);
 
   return (
     <>
@@ -107,7 +86,7 @@ const ImportBeneficiariesStep: React.FC<Props> = ({ value, onChange, setComplete
           className={`wizard-mode-tab ${mode === 'manual' ? 'is-active' : ''}`}
           onClick={() => switchMode('manual')}
         >
-          <strong>✍️ Add 3 manually</strong>
+          <strong>✍️ Add a few manually</strong>
           <span>Just type a few names to feel the system.</span>
         </button>
       </div>
@@ -181,11 +160,9 @@ const ImportBeneficiariesStep: React.FC<Props> = ({ value, onChange, setComplete
           <button type="button" className="wizard-add-btn" onClick={addRow}>
             <Plus size={14} /> Add another row
           </button>
-          {committed && (
-            <div className="wizard-field-hint" style={{ color: '#16A34A' }}>
-              ✓ Saved to your beneficiary list.
-            </div>
-          )}
+          <div className="wizard-field-hint">
+            We'll add these to your beneficiary list when you click <strong>Save &amp; continue</strong>.
+          </div>
         </>
       )}
     </>

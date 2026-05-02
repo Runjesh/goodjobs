@@ -1,6 +1,5 @@
 import React, { useEffect } from 'react';
 import type { WizardData } from '../../../utils/wizard';
-import { useStore } from '../../../store/useStore';
 import { useAuth } from '../../../context/AuthContext';
 
 type Value = NonNullable<WizardData['firstProgram']>;
@@ -20,7 +19,6 @@ const CAUSE_AREAS = [
 const FirstProgramStep: React.FC<Props> = ({ value, onChange, setComplete }) => {
   const v: Value = value ?? {};
   const { user } = useAuth();
-  const addCampaign = useStore((s) => s.addCampaign);
 
   // Pre-fill cause area from signup data the first time we land here.
   useEffect(() => {
@@ -36,21 +34,8 @@ const FirstProgramStep: React.FC<Props> = ({ value, onChange, setComplete }) => 
 
   const patch = (p: Partial<Value>) => onChange({ ...v, ...p });
 
-  // Side-effect: when name + cause are present, drop a draft campaign into the
-  // store so the new tenant has at least one campaign on Funding screen.
-  useEffect(() => {
-    if (!v.name?.trim() || !v.causeArea) return;
-    const existing = useStore.getState().campaigns;
-    if (existing.some((c) => c.title === v.name)) return;
-    addCampaign({
-      title: v.name.trim(),
-      goal: 250000,
-      status: 'draft',
-      image: 'linear-gradient(135deg, #0F766E, #14b8a6)',
-      cause: v.causeArea,
-      details: { source: 'signup-wizard', startDate: v.startDate ?? null, geography: v.geography ?? null },
-    });
-  }, [v.name, v.causeArea, v.startDate, v.geography, addCampaign]);
+  // No store writes here — the wizard shell creates the campaign exactly once
+  // when the user clicks "Save & continue" (advance with status='completed').
 
   return (
     <>
