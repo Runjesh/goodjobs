@@ -2,12 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Plus, Link as LinkIcon, Share2, Download, QrCode, X, Heart, BarChart2, TrendingUp, Users, IndianRupee, RefreshCw, Loader2, Bot, Edit, Trash2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import './Fundraising.css';
 
 const Fundraising: React.FC = () => {
+  useFocusFromUrl('campaign');
   const { campaigns, transactions, addTransaction, donors, deleteCampaign } = useStore();
   const campBreakdownScrollRef = useRef<HTMLDivElement>(null);
   const campBreakdownVirtualizer = useVirtualizer({
@@ -556,6 +558,7 @@ const Fundraising: React.FC = () => {
                       <div
                         key={c.id}
                         data-index={vr.index}
+                        data-focus-id={String(c.id)}
                         ref={campBreakdownVirtualizer.measureElement}
                         style={{
                           position: 'absolute',

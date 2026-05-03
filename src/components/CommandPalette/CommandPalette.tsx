@@ -11,8 +11,10 @@ const ENTITY_ICON: Record<EntityKind, React.ComponentType<{ size?: number }>> = 
   donor: Heart,
   beneficiary: Users,
   csr: Briefcase,
+  grant: ShieldCheck,
   campaign: Flag,
   program: FolderKanban,
+  report: Mail,
   team: UserPlus,
 };
 
@@ -82,6 +84,10 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
   const [confirmDonor, setConfirmDonor] = useState<DonorConfirm | null>(null);
   const [confirmIntent, setConfirmIntent] = useState<IntentConfirm | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  // Enter only intercepts entity navigation after the user has explicitly
+  // arrowed into the result list. Otherwise Enter still runs the directive
+  // / quick-capture parser via the form's onSubmit.
+  const [arrowedIntoResults, setArrowedIntoResults] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -107,7 +113,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
   }, [entityResults]);
 
   // Reset selection whenever the result set changes.
-  useEffect(() => { setActiveIndex(0); }, [entityResults]);
+  useEffect(() => { setActiveIndex(0); setArrowedIntoResults(false); }, [entityResults]);
 
   useEffect(() => {
     if (isOpen && inputRef.current) {
@@ -142,11 +148,16 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
       if (entityResults.length === 0) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        setArrowedIntoResults(true);
         setActiveIndex(i => (i + 1) % entityResults.length);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        setArrowedIntoResults(true);
         setActiveIndex(i => (i - 1 + entityResults.length) % entityResults.length);
-      } else if (e.key === 'Enter') {
+      } else if (e.key === 'Enter' && arrowedIntoResults) {
+        // Only override the form's normal Enter behaviour when the user has
+        // explicitly navigated into the result list with arrow keys. Mouse
+        // clicks on rows still navigate via onClick.
         const r = entityResults[activeIndex];
         if (r) {
           e.preventDefault();
@@ -156,7 +167,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, confirmDonor, confirmIntent, entityResults, activeIndex, handleEntityNavigate]);
+  }, [isOpen, onClose, confirmDonor, confirmIntent, entityResults, activeIndex, arrowedIntoResults, handleEntityNavigate]);
 
   const hour = new Date().getHours();
   const rhythmHint = useMemo(() => {

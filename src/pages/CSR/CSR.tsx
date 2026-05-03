@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import toast from 'react-hot-toast';
 import './CSR.css';
 import { apiFetch } from '../../api/client';
@@ -100,6 +101,7 @@ function unpackCsrDetails(details?: Record<string, unknown> | null): CsrExtraFor
 }
 
 const CSR: React.FC = () => {
+  useFocusFromUrl('card');
   const navigate = useNavigate();
   const { csrCards, moveCSRCard, addCSRCard, updateCSRCard, deleteCSRCard } = useStore();
   const [showModal, setShowModal] = useState(false);
@@ -589,7 +591,7 @@ const CSR: React.FC = () => {
                 {colCards.map(card => {
                   const touchHint = formatActivityHint(card.last_activity_at || card.updated_at);
                   return (
-                  <div key={String(card.id)} className="kanban-card" draggable
+                  <div key={String(card.id)} className="kanban-card" data-focus-id={String(card.id)} draggable
                     onDragStart={() => handleDragStart(card.id)}
                     style={{ opacity: dragId !== null && String(dragId) === String(card.id) ? 0.5 : 1 }}>
                     <div className="csr-card-header">

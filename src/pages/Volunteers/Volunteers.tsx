@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Clock, Users, MapPin, UserPlus, Send, CheckCircle2, ShieldAlert, X, Bell, Calendar, Edit, Trash2 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import toast from 'react-hot-toast';
 import './Volunteers.css';
 import { apiFetch } from '../../api/client';
@@ -69,6 +70,7 @@ function unpackVolProfile(profile?: Record<string, unknown> | null): VolProfileF
 }
 
 const Volunteers: React.FC = () => {
+  useFocusFromUrl('focus');
   const { volunteers, addVolunteer, updateVolunteer, deleteVolunteer } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
@@ -526,6 +528,7 @@ const Volunteers: React.FC = () => {
                         <div
                           key={vol.id}
                           data-index={vi.index}
+                          data-focus-id={String(vol.id)}
                           ref={rosterVirtualizer.measureElement}
                           style={{
                             position: 'absolute',

@@ -567,3 +567,55 @@
   border: 1px solid #fcd34d;
   color: #92400e;
 }
+
+/* Per-recipient failure / skipped list inside composer */
+.composer-failures {
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-md);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 0.8rem;
+}
+.composer-failures > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+.composer-failures > summary::-webkit-details-marker { display: none; }
+.composer-failures-hint {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 0.7rem;
+  color: #b91c1c;
+}
+.composer-failures-section {
+  margin-top: 0.5rem;
+}
+.composer-failures-label {
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+  color: #7f1d1d;
+}
+.composer-failures ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-weight: 400;
+  color: #7f1d1d;
+}
+
+/* Focus-flash highlight (used by useFocusFromUrl deep-links) */
+.focus-flash {
+  animation: focus-flash 1.6s ease-out;
+}
+@keyframes focus-flash {
+  0%   { background-color: rgba(124, 58, 237, 0.18); box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.35); }
+  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+}

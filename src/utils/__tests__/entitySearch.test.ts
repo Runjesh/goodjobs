@@ -11,6 +11,7 @@ const beneficiaries: Beneficiary[] = [
 ];
 const csrCards: CSRCard[] = [
   { id: 1, company: 'Tata Consultancy', amount: 500000, project: 'STEM for Girls', tags: [], agent: 'AD', col: 'pitch', date: '' },
+  { id: 2, company: 'Infosys Foundation', amount: 800000, project: 'Tata Health Outreach', tags: [], agent: 'RG', col: 'live', date: '' },
 ];
 const campaigns: Campaign[] = [
   { id: 'c1', title: 'Digital Literacy for Rural Girls', raised: 1000, goal: 100000, donorsCount: 5, status: 'active', image: '' },
@@ -51,5 +52,23 @@ describe('searchEntities', () => {
   it('encodes donor focus path', () => {
     const r = searchEntities('rohan', idx);
     expect(r[0].path).toBe('/crm?focus=2');
+  });
+
+  it('separates active grants (col=live/mou) from CSR pipeline', () => {
+    const r = searchEntities('tata', idx);
+    const grant = r.find(x => x.kind === 'grant');
+    const csr = r.find(x => x.kind === 'csr');
+    expect(grant?.path).toBe('/grants/2');
+    expect(csr?.path).toBe('/csr?card=1');
+  });
+
+  it('matches reports by funder', () => {
+    const r = searchEntities('hdfc', idx);
+    expect(r.some(x => x.kind === 'report' && x.label.includes('UC Report'))).toBe(true);
+  });
+
+  it('matches reports by title keyword', () => {
+    const r = searchEntities('board brief', idx);
+    expect(r.find(x => x.kind === 'report')?.path).toMatch(/^\/reports\?report=/);
   });
 });

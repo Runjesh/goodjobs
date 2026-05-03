@@ -405,6 +405,11 @@ const CRM: React.FC = () => {
 
   const [emailNotConnected, setEmailNotConnected] = useState(false);
   const [composerSending, setComposerSending] = useState(false);
+  /** Per-recipient failure list from the most recent send — surfaced as an
+   *  expandable list below the composer when present, and persisted until
+   *  the user closes/reopens the composer. */
+  const [lastSendFailures, setLastSendFailures] = useState<string[]>([]);
+  const [lastSendSkipped, setLastSendSkipped] = useState<string[]>([]);
 
   const handleSendComposer = async () => {
     const donorIds = bulkMode ? Array.from(selectedIds) : (activeDonor?.id ? [activeDonor.id] : []);
@@ -414,6 +419,8 @@ const CRM: React.FC = () => {
     const message = (customMessage || selectedTemplate.body || '').toString();
     setComposerSending(true);
     setEmailNotConnected(false);
+    setLastSendFailures([]);
+    setLastSendSkipped([]);
 
     try {
       // Email branches to the dedicated email endpoint; if missing, surface a
@@ -462,12 +469,18 @@ const CRM: React.FC = () => {
           }
         } catch { /* keep defaults */ }
         const skipped = missingEmail.map(id => donorMap.get(String(id))?.name || String(id));
-        const failedSummary = failed.length ? ` · ${failed.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}` : '';
-        const skippedSummary = skipped.length ? ` · skipped (no email): ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}` : '';
+        setLastSendFailures(failed);
+        setLastSendSkipped(skipped);
+        const failedSummary = failed.length ? ` · ${failed.length} failed` : '';
+        const skippedSummary = skipped.length ? ` · ${skipped.length} skipped (no email)` : '';
         toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}${skippedSummary}`, { icon: '📧', duration: 6000 });
-        setShowComposer(false);
-        setSelectedIds(new Set());
-        setBulkMode(false);
+        // Keep composer open if anything failed/skipped so the user sees the
+        // expandable list; close cleanly when everything succeeded.
+        if (failed.length === 0 && skipped.length === 0) {
+          setShowComposer(false);
+          setSelectedIds(new Set());
+          setBulkMode(false);
+        }
         return;
       }
 
@@ -495,11 +508,14 @@ const CRM: React.FC = () => {
             .map((r: any) => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
         }
       } catch { /* keep defaults */ }
-      const failedSummary = failed.length ? ` · ${failed.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}` : '';
+      setLastSendFailures(failed);
+      const failedSummary = failed.length ? ` · ${failed.length} failed` : '';
       toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}`, { icon: '📲', duration: 6000 });
-      setShowComposer(false);
-      setSelectedIds(new Set());
-      setBulkMode(false);
+      if (failed.length === 0) {
+        setShowComposer(false);
+        setSelectedIds(new Set());
+        setBulkMode(false);
+      }
     } catch {
       toast.error('Failed to send (backend not reachable).');
     } finally {
@@ -516,6 +532,9 @@ const CRM: React.FC = () => {
     if (selectedIds.size === 0) { toast.error('Select at least one donor first.'); return; }
     setComposerChannel(channel);
     setBulkMode(true);
+    setEmailNotConnected(false);
+    setLastSendFailures([]);
+    setLastSendSkipped([]);
     setShowComposer(true);
   };
 
@@ -530,6 +549,8 @@ const CRM: React.FC = () => {
       }
     }
     setEmailNotConnected(false);
+    setLastSendFailures([]);
+    setLastSendSkipped([]);
     setShowComposer(true);
   };
 
@@ -1192,6 +1213,30 @@ const CRM: React.FC = () => {
                 <label className="input-label">Subject Line</label>
                 <input type="text" className="input-field" placeholder="e.g. Your impact this month 🙏" />
               </div>
+            )}
+
+            {(lastSendFailures.length > 0 || lastSendSkipped.length > 0) && (
+              <details className="composer-failures" open>
+                <summary>
+                  <AlertTriangle size={14} />
+                  {lastSendFailures.length > 0 && <span>{lastSendFailures.length} failed</span>}
+                  {lastSendFailures.length > 0 && lastSendSkipped.length > 0 && <span> · </span>}
+                  {lastSendSkipped.length > 0 && <span>{lastSendSkipped.length} skipped (no email)</span>}
+                  <span className="composer-failures-hint">click to expand</span>
+                </summary>
+                {lastSendFailures.length > 0 && (
+                  <div className="composer-failures-section">
+                    <div className="composer-failures-label">Delivery failed</div>
+                    <ul>{lastSendFailures.map(name => <li key={`f-${name}`}>{name}</li>)}</ul>
+                  </div>
+                )}
+                {lastSendSkipped.length > 0 && (
+                  <div className="composer-failures-section">
+                    <div className="composer-failures-label">Skipped — no email on file</div>
+                    <ul>{lastSendSkipped.map(name => <li key={`s-${name}`}>{name}</li>)}</ul>
+                  </div>
+                )}
+              </details>
             )}
 
             {emailNotConnected && (

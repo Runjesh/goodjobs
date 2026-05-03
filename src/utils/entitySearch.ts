@@ -1,6 +1,15 @@
 import type { Donor, Beneficiary, CSRCard, Campaign, Volunteer } from '../store/useStore';
 
-export type EntityKind = 'donor' | 'beneficiary' | 'csr' | 'campaign' | 'program' | 'team';
+export type EntityKind = 'donor' | 'beneficiary' | 'csr' | 'grant' | 'campaign' | 'program' | 'report' | 'team';
+
+/** Static catalogue of report types — mirrors the seed list in Reports.tsx. */
+export const REPORT_CATALOGUE: { id: string; title: string; type: string; funder?: string }[] = [
+  { id: '1', title: 'Q2 Progress Report — Tata Trusts', type: 'funder', funder: 'Tata Trusts' },
+  { id: '2', title: 'Annual Impact Report 2025–26', type: 'impact' },
+  { id: '3', title: 'Donor Impact Update — April 2026', type: 'donor' },
+  { id: '4', title: 'Board Brief — Q1 FY 2026–27', type: 'board' },
+  { id: '5', title: 'UC Report — CSR Fund Education', type: 'funder', funder: 'HDFC Bank CSR' },
+];
 
 export interface EntityResult {
   kind: EntityKind;
@@ -96,10 +105,22 @@ export function searchEntities(query: string, idx: EntityIndexInput): EntityResu
   }
   out.push(...benHits);
 
-  // CSR cards — match company, project, agent.
+  // CSR cards (pipeline stages) and Grants (mou/live = signed/active grants).
   const csrHits: EntityResult[] = [];
+  const grantHits: EntityResult[] = [];
   for (const c of idx.csrCards) {
-    if (matches(q, c.company) || matches(q, c.project) || matches(q, c.agent)) {
+    const hit = matches(q, c.company) || matches(q, c.project) || matches(q, c.agent);
+    if (!hit) continue;
+    const isGrant = c.col === 'mou' || c.col === 'live';
+    if (isGrant && grantHits.length < PER_GROUP_CAP) {
+      grantHits.push({
+        kind: 'grant',
+        id: String(c.id),
+        label: `${c.project} · ${c.company}`,
+        context: `${c.col === 'live' ? 'Active grant' : 'MOU signed'} · ${csrContext(c)}`,
+        path: `/grants/${encodeURIComponent(String(c.id))}`,
+      });
+    } else if (!isGrant && csrHits.length < PER_GROUP_CAP) {
       csrHits.push({
         kind: 'csr',
         id: String(c.id),
@@ -108,9 +129,9 @@ export function searchEntities(query: string, idx: EntityIndexInput): EntityResu
         path: `/csr?card=${encodeURIComponent(String(c.id))}`,
       });
     }
-    if (csrHits.length >= PER_GROUP_CAP) break;
   }
   out.push(...csrHits);
+  out.push(...grantHits);
 
   // Campaigns — match title, cause.
   const campHits: EntityResult[] = [];
@@ -145,6 +166,22 @@ export function searchEntities(query: string, idx: EntityIndexInput): EntityResu
   }
   out.push(...programHits);
 
+  // Reports (static catalogue) — match title, funder, type.
+  const reportHits: EntityResult[] = [];
+  for (const r of REPORT_CATALOGUE) {
+    if (matches(q, r.title) || matches(q, r.funder || '') || matches(q, r.type)) {
+      reportHits.push({
+        kind: 'report',
+        id: r.id,
+        label: r.title,
+        context: r.funder ? `${r.type} report · ${r.funder}` : `${r.type} report`,
+        path: `/reports?report=${encodeURIComponent(r.id)}`,
+      });
+    }
+    if (reportHits.length >= PER_GROUP_CAP) break;
+  }
+  out.push(...reportHits);
+
   // Volunteers / team — match name, skill.
   const teamHits: EntityResult[] = [];
   for (const v of idx.volunteers) {
@@ -169,7 +206,9 @@ export const ENTITY_GROUP_LABEL: Record<EntityKind, string> = {
   donor: 'Donors',
   beneficiary: 'Beneficiaries',
   csr: 'CSR pipeline',
+  grant: 'Grants',
   campaign: 'Campaigns',
   program: 'Programs',
+  report: 'Reports',
   team: 'Team',
 };

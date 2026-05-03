@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck } from 'lucide-react';
 import { useStore, initialBeneficiaries } from '../../store/useStore';
+import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import { useAuth } from '../../context/AuthContext';
 import { isTrialExpired, canAddBeneficiary, STARTER_BENEFICIARY_CAP, type SubscriptionTier } from '../../utils/trial';
 import { useTier } from '../../hooks/useTier';
@@ -121,6 +122,7 @@ const DEFAULT_PROGRAMS = [
 ];
 
 const Programs: React.FC = () => {
+  useFocusFromUrl('beneficiary');
   const { beneficiaries, addBeneficiary, updateBeneficiary, deleteBeneficiary } = useStore();
   const { user } = useAuth();
   const { tier: effectiveTierVal, openUpgrade, inTrial } = useTier();
@@ -569,6 +571,7 @@ const Programs: React.FC = () => {
                         <div
                           key={ben.id}
                           data-index={vi.index}
+                          data-focus-id={ben.id}
                           ref={benVirtualizer.measureElement}
                           style={{
                             position: 'absolute',
