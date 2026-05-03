@@ -15,6 +15,7 @@ import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import StageBadge from '../../components/Donor/StageBadge';
 import TouchpointTimeline from '../../components/Donor/TouchpointTimeline';
+import DonorImpactPanel from '../../components/Donor/DonorImpactPanel';
 import {
   computeStage,
   nextDueMilestone,
@@ -1081,6 +1082,10 @@ const CRM: React.FC = () => {
             </div>
 
             <div className="detail-body">
+              {/* Donor → campaign(s) → programme(s) → outcomes trail.
+                  This is the funder-pitch panel from the Session 2 audit. */}
+              <DonorImpactPanel donor={activeDonor} />
+
               <div className="timeline-section">
                 <div style={{ marginBottom: '1.25rem' }}>
                   <TouchpointTimeline

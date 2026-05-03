@@ -148,4 +148,13 @@ Closed the highest-leverage loops the audit flagged so the modules feel like one
 
 State lives in `useStore` (`programBudgets`, `beneficiaryOutcomes`, `grantTranches`, `misReviewIntents`) and is persisted to `localStorage` keys `goodjobs.*.v1`. Helpers in `src/utils/programFinance.ts`, `outcomes.ts`, `grantLifecycle.ts`. Demo seeds gated on `SEED_DEMO_DATA`.
 
-Sessions 2 & 3 (deferred): Volunteer↔Program, Compliance→Grant cascade, Donor→Impact trail, contextual agent triggers, WhatsApp portal, full SROI module, role-based dashboards.
+## Session 2: Cross-module audit (May 2026)
+
+Three more cross-module loops shipped (Task #21):
+- **Volunteer ↔ Program** — `volunteerAssignments` slice (LS-persisted) captures hours/role/last-visit per volunteer per programme. Managed inline from the Volunteer edit modal (`VolunteerProgramAssignments`); rolled up on each programme card via `ProgramEffortSummary` so an NGO can answer "who actually delivered this programme?".
+- **Compliance → Grant cascade** — `complianceGrantLinks` slice + `selectAtRiskGrants()` selector flag any grant whose linked doc is within 30d of expiry (yellow) or already expired (red). Surfaced as an `AtRiskGrantsBanner` at the top of `GrantDetail`, and as a `ComplianceCascadeQueue` block at the top of the Agent HQ HITL queue with a "Renew first" deep-link to Compliance.
+- **Donor → Program → Impact trail** — `DonorImpactPanel` on the CRM donor detail walks donor → campaigns → programmes (joined via `Campaign.cause`) → measured outcome aggregate from `beneficiaryOutcomes`. Designed as the funder-pitch view.
+
+New helpers: `src/utils/{volunteerProgram,complianceGrant,donorImpact}.ts`. Demo seeds (3 volunteer assignments, 4 compliance-grant links covering HDFC/TCS/Infosys grants) gated on `SEED_DEMO_DATA`. tsc clean, 87/87 unit tests pass (3 new spec files).
+
+Session 3 (deferred): WhatsApp field portal, full SROI module, role-based dashboards.

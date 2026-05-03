@@ -17,6 +17,7 @@ import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import EnrollBeneficiaryModal, { computeBeneficiaryCompleteness, type EnrollFormData } from './EnrollBeneficiaryModal';
 import ProgramBudgetBar from '../../components/Programs/ProgramBudgetBar';
+import ProgramEffortSummary from '../../components/Programs/ProgramEffortSummary';
 import OutcomeForm from '../../components/Programs/OutcomeForm';
 
 const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize,phone,email,gender,dob,referral_source,referral_detail,vulnerability,id_doc_type,id_doc_ref,notes\nSita Devi,Health,"Pune, MH",false,4,+9198***01,,female,1992-03-01,shg,Block 4 AWC,"woman_headed,pwd",aadhaar_masked,****8212,\nRavi K,Education,Delhi,true,3,,,male,,camp,,,election_id,ABC1234567,\n';
@@ -691,9 +692,10 @@ const Programs: React.FC = () => {
               </div>
               <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                 {derivedPrograms.map(p => (
-                  <div key={p}>
+                  <div key={p} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                     <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 2 }}>{p}</div>
                     <ProgramBudgetBar programName={p} allowEdit />
+                    <ProgramEffortSummary programName={p} />
                   </div>
                 ))}
               </div>

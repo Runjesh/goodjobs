@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import { useStore } from '../../store/useStore';
 import './GrantDetail.css';
 import GrantTrancheCard from '../../components/Grants/GrantTrancheCard';
+import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 
 type LifecycleStage = 'pipeline' | 'applied' | 'awarded' | 'active' | 'closed';
 
@@ -273,6 +274,12 @@ const GrantDetail: React.FC = () => {
           <span> · </span>
           <span className="grant-crumb-current">{card.company}</span>
         </span>
+      </div>
+
+      {/* Compliance → grant cascade banner. Renders only when this grant
+          has a linked compliance doc that is expiring or already expired. */}
+      <div style={{ marginBottom: '0.75rem' }}>
+        <AtRiskGrantsBanner grantId={String(card.id)} />
       </div>
 
       {/* ── Header ───────────────────────────────────── */}

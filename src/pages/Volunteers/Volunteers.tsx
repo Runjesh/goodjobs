@@ -8,6 +8,7 @@ import './Volunteers.css';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { findShiftConflict } from '../../utils/shiftConflict';
+import VolunteerProgramAssignments from '../../components/Volunteers/VolunteerProgramAssignments';
 
 type Shift = { id: number; title: string; date: string; location: string; filled: number; total: number; role: string };
 type Signup = { id: string; shiftId: number; volunteerName: string; createdAt?: string; details?: Record<string, unknown> };
@@ -952,6 +953,13 @@ const Volunteers: React.FC = () => {
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Volunteer</button>
             </form>
+
+            {/* Volunteer ↔ Programme link. Hours logged here roll up into the
+                programme's effort total on the Programs page. */}
+            <VolunteerProgramAssignments
+              volunteerId={String(editVol.id)}
+              volunteerName={String(editVol.name ?? 'Volunteer')}
+            />
           </div>
         </ModalOverlay>
       )}

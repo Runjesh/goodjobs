@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import type { ProgramBudget } from '../utils/programFinance';
 import type { BeneficiaryOutcome } from '../utils/outcomes';
 import type { GrantTranche } from '../utils/grantLifecycle';
+import type { VolunteerAssignment } from '../utils/volunteerProgram';
+import type { ComplianceGrantLink } from '../utils/complianceGrant';
+import { programIdFromName } from '../utils/programFinance';
 
 /**
  * Cross-module connective state (Session 1 of the audit).
@@ -147,6 +150,12 @@ interface AppState {
   grantTranches:         GrantTranche[];
   misReviewIntents:      MisReviewIntent[];
 
+  // ── Cross-module connective state (Session 2) ──────────────────────────
+  // volunteerAssignments: who is delivering which programme + hours
+  // complianceGrantLinks: which compliance doc(s) gate which grant
+  volunteerAssignments:  VolunteerAssignment[];
+  complianceGrantLinks:  ComplianceGrantLink[];
+
   setProgramBudgets:      (b: ProgramBudget[]) => void;
   upsertProgramBudget:    (b: ProgramBudget) => void;
   recordProgramSpend:     (programId: string, amount: number) => void;
@@ -156,6 +165,10 @@ interface AppState {
   releaseGrantTranche:    (id: string) => void;
   addMisReviewIntent:     (i: MisReviewIntent) => void;
   decideMisReviewIntent:  (id: string, decision: 'approved' | 'edited' | 'dismissed', patch?: Partial<MisReviewIntent['extracted']>) => void;
+  upsertVolunteerAssignment: (a: VolunteerAssignment) => void;
+  removeVolunteerAssignment: (id: string) => void;
+  addComplianceGrantLink:    (l: ComplianceGrantLink) => void;
+  removeComplianceGrantLink: (id: string) => void;
 
   setDonors: (donors: Donor[]) => void;
   setComplianceDocs: (docs: ComplianceDocument[]) => void;
@@ -253,6 +266,8 @@ const LS_BUDGETS   = 'goodjobs.programBudgets.v1';
 const LS_OUTCOMES  = 'goodjobs.beneficiaryOutcomes.v1';
 const LS_TRANCHES  = 'goodjobs.grantTranches.v1';
 const LS_MIS       = 'goodjobs.misReviewIntents.v1';
+const LS_VOL_ASSIGN = 'goodjobs.volunteerAssignments.v1';
+const LS_COMP_LINKS = 'goodjobs.complianceGrantLinks.v1';
 
 function loadLS<T>(key: string, fallback: T): T {
   try {
@@ -272,6 +287,49 @@ const seedBudgets: ProgramBudget[] = SEED_DEMO_CONNECTIONS ? [
   { programId: 'women-livelihood-center', label: 'Women Livelihood Center', planned: 1_500_000, spent: 420_000, grantId: '3', windowEnd: new Date(Date.now() + 35 * 86_400_000).toISOString().slice(0, 10), restricted: true },
   { programId: 'digital-literacy-2026',   label: 'Digital Literacy 2026',   planned:   800_000, spent: 610_000, grantId: '2', windowEnd: new Date(Date.now() + 50 * 86_400_000).toISOString().slice(0, 10), restricted: true },
   { programId: 'healthcare-camp',         label: 'Healthcare Camp',         planned:   300_000, spent:  80_000 },
+] : [];
+
+const seedVolAssignments: VolunteerAssignment[] = SEED_DEMO_CONNECTIONS ? [
+  {
+    id: 'va-101-wlc',
+    volunteerId: 'V-101',
+    programId: programIdFromName('Women Livelihood Center'),
+    programLabel: 'Women Livelihood Center',
+    hours: 18,
+    lastVisit: new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10),
+    role: 'Tailoring trainer',
+    createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+  },
+  {
+    id: 'va-102-hc',
+    volunteerId: 'V-102',
+    programId: programIdFromName('Healthcare Camp'),
+    programLabel: 'Healthcare Camp',
+    hours: 36,
+    lastVisit: new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10),
+    role: 'Camp coordinator',
+    createdAt: new Date(Date.now() - 45 * 86_400_000).toISOString(),
+  },
+  {
+    id: 'va-104-dl',
+    volunteerId: 'V-104',
+    programId: programIdFromName('Digital Literacy 2026'),
+    programLabel: 'Digital Literacy 2026',
+    hours: 12,
+    lastVisit: new Date(Date.now() - 9 * 86_400_000).toISOString().slice(0, 10),
+    role: 'Photography & social',
+    createdAt: new Date(Date.now() - 20 * 86_400_000).toISOString(),
+  },
+] : [];
+
+const seedComplianceLinks: ComplianceGrantLink[] = SEED_DEMO_CONNECTIONS ? [
+  // HDFC Bank Women Livelihood grant requires 12A + 80G
+  { id: 'cl-3-80g',  grantId: '3', complianceDocId: 'doc-2', reason: 'Donor 80G receipt requirement' },
+  { id: 'cl-3-12a',  grantId: '3', complianceDocId: 'doc-1', reason: '12A registration on file' },
+  // TCS Digital Literacy requires 80G
+  { id: 'cl-2-80g',  grantId: '2', complianceDocId: 'doc-2', reason: 'Donor 80G receipt requirement' },
+  // Infosys Foundation grant requires CSR-1
+  { id: 'cl-6-csr1', grantId: '6', complianceDocId: 'doc-4', reason: 'CSR-1 mandatory for funder' },
 ] : [];
 
 const seedTranches: GrantTranche[] = SEED_DEMO_CONNECTIONS ? [
@@ -295,6 +353,8 @@ export const useStore = create<AppState>((set) => ({
   beneficiaryOutcomes: loadLS<BeneficiaryOutcome[]>(LS_OUTCOMES, []),
   grantTranches:       loadLS<GrantTranche[]>(LS_TRANCHES, seedTranches),
   misReviewIntents:    loadLS<MisReviewIntent[]>(LS_MIS, []),
+  volunteerAssignments: loadLS<VolunteerAssignment[]>(LS_VOL_ASSIGN, seedVolAssignments),
+  complianceGrantLinks: loadLS<ComplianceGrantLink[]>(LS_COMP_LINKS, seedComplianceLinks),
 
   setProgramBudgets: (programBudgets) => { saveLS(LS_BUDGETS, programBudgets); set({ programBudgets }); },
   upsertProgramBudget: (b) => set((state) => {
@@ -347,6 +407,31 @@ export const useStore = create<AppState>((set) => ({
     );
     saveLS(LS_MIS, next);
     return { misReviewIntents: next };
+  }),
+  upsertVolunteerAssignment: (a) => set((state) => {
+    const next = state.volunteerAssignments.some(x => x.id === a.id)
+      ? state.volunteerAssignments.map(x => x.id === a.id ? { ...x, ...a } : x)
+      : [a, ...state.volunteerAssignments];
+    saveLS(LS_VOL_ASSIGN, next);
+    return { volunteerAssignments: next };
+  }),
+  removeVolunteerAssignment: (id) => set((state) => {
+    const next = state.volunteerAssignments.filter(a => a.id !== id);
+    saveLS(LS_VOL_ASSIGN, next);
+    return { volunteerAssignments: next };
+  }),
+  addComplianceGrantLink: (l) => set((state) => {
+    if (state.complianceGrantLinks.some(x => x.grantId === l.grantId && x.complianceDocId === l.complianceDocId)) {
+      return {};
+    }
+    const next = [l, ...state.complianceGrantLinks];
+    saveLS(LS_COMP_LINKS, next);
+    return { complianceGrantLinks: next };
+  }),
+  removeComplianceGrantLink: (id) => set((state) => {
+    const next = state.complianceGrantLinks.filter(l => l.id !== id);
+    saveLS(LS_COMP_LINKS, next);
+    return { complianceGrantLinks: next };
   }),
 
   setDonors: (donors) => set(() => ({ donors })),

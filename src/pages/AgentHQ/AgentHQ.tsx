@@ -11,6 +11,7 @@ import { apiFetch } from '../../api/client';
 import { useTier } from '../../hooks/useTier';
 import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import MisReviewQueue from '../../components/AgentHQ/MisReviewQueue';
+import ComplianceCascadeQueue from '../../components/AgentHQ/ComplianceCascadeQueue';
 
 type QueueItem = {
   id: string;
@@ -561,6 +562,7 @@ const AgentHQ: React.FC = () => {
                 </div>
               </div>
               <div className="card-body">
+                <ComplianceCascadeQueue />
                 <MisReviewQueue />
                 <div className="approval-list">
                   {approvals.map(approval => (
