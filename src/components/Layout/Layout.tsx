@@ -14,6 +14,7 @@ import BottomNav from '../ui/BottomNav';
 import NotificationCenter from '../Notifications/NotificationCenter';
 import WelcomeModal from '../Onboarding/WelcomeModal';
 import TrialPill from './TrialPill';
+import DemoModePill from './DemoModePill';
 import TrialExpiredBanner from '../Onboarding/TrialExpiredBanner';
 import TrialUpgradeModal from '../Onboarding/TrialUpgradeModal';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
@@ -489,6 +490,7 @@ const Layout: React.FC = () => {
 
           {/* Actions */}
           <div className="header-actions">
+            <DemoModePill />
             <TrialPill />
             <select
               className="header-lang-select"

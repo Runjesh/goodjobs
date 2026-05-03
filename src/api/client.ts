@@ -73,5 +73,29 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     if (token) headers.set('Authorization', `Bearer ${token}`);
   }
 
-  return fetch(url, { ...init, headers });
+  try {
+    const res = await fetch(url, { ...init, headers });
+    // Some hosts (the static-site origin) answer with HTML 404/405 for API
+    // paths instead of refusing the connection. Treat those as "no backend"
+    // and fall through to the local mock so the UI keeps working — but only
+    // when the mock is actually enabled (i.e. dev / static-only deploys).
+    // If a real backend is configured and returns 404, surface the real 404
+    // so we don't silently mask backend bugs.
+    if (res.status === 404 || res.status === 405 || res.status === 502 || res.status === 503) {
+      const ct = res.headers.get('content-type') ?? '';
+      if (!ct.includes('application/json')) {
+        const { mockResponse, isMockEnabled } = await import('./mockBackend');
+        if (isMockEnabled()) return mockResponse(path, init);
+      }
+    }
+    return res;
+  } catch {
+    // TypeError from fetch usually means: connection refused, DNS failure, or
+    // CORS preflight blocked — i.e. there is no reachable backend. Synthesise
+    // a plausible response so the UI stays usable end-to-end. mockResponse
+    // itself respects isMockEnabled() and returns 503 if the operator has
+    // disabled the fallback explicitly.
+    const { mockResponse } = await import('./mockBackend');
+    return mockResponse(path, init);
+  }
 }
