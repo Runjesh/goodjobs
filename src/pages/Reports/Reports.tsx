@@ -206,10 +206,14 @@ const Reports: React.FC = () => {
               <button
                 key={rt.id}
                 className="reports-ai-btn"
-                style={{ borderColor: rt.color, color: rt.color }}
                 onClick={() => handleDraftReport(rt.id)}
                 disabled={draftingReport === rt.id}
               >
+                <span
+                  className="reports-ai-btn-dot"
+                  style={{ background: rt.color }}
+                  aria-hidden="true"
+                />
                 {draftingReport === rt.id ? '…' : rt.label}
               </button>
             ))}
