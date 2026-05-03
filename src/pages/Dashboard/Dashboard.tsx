@@ -9,7 +9,7 @@ import {
   ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, X
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth, defaultPresetForRole } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
 import { computeStage, nextDueMilestone } from '../../utils/donorLifecycle';
 import { readComplianceReminders } from '../../utils/complianceReminders';
@@ -541,9 +541,15 @@ const Dashboard: React.FC = () => {
   const [showAllUrgent,setShowAllUrgent]= useState(false);
 
   const role         = user?.role ?? 'ed';
+  // Dashboard preset (Session 3) overrides the role used to lay out Today —
+  // permissions still come from `role`, but ordering/visibility on the home
+  // screen follows the user-selected preset (Field Officer / Programme Manager
+  // / Executive Director). Falls back to a sensible default per role.
+  const preset       = user?.dashboardPreset ?? defaultPresetForRole(role);
+  const layoutRole   = preset; // preset values map 1:1 to the layout-role keys ('field' | 'programs' | 'ed')
   const greeting     = getGreeting();
-  const quickActions = useMemo(() => getQuickActions(role, transactions, beneficiaries, campaigns), [role, transactions, beneficiaries, campaigns]);
-  const roleStats    = useMemo(() => getRoleStats(role, transactions, beneficiaries, complianceDocs, donors, campaigns), [role, transactions, beneficiaries, complianceDocs, donors, campaigns]);
+  const quickActions = useMemo(() => getQuickActions(layoutRole, transactions, beneficiaries, campaigns), [layoutRole, transactions, beneficiaries, campaigns]);
+  const roleStats    = useMemo(() => getRoleStats(layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns), [layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns]);
 
   const handleSnooze = useCallback((id: string, hours: number) => {
     snoozeItem(id, hours);
@@ -598,10 +604,10 @@ const Dashboard: React.FC = () => {
   }, [user?.id, lastRefresh]);
 
   const allItems = useMemo(() => {
-    const store = deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards);
+    const store = deriveFromStore(layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards);
     const combined = [...briefItems, ...store];
-    return combined.length === 0 ? getStaticFallback(role) : combined;
-  }, [briefItems, role, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards]);
+    return combined.length === 0 ? getStaticFallback(layoutRole) : combined;
+  }, [briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards]);
 
   const isSnoozedFn = useCallback((id: string) => !woken.has(id) && isSnoozed(id, snoozed), [snoozed, woken]);
 

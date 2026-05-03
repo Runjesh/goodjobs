@@ -17,7 +17,7 @@ import TrialPill from './TrialPill';
 import DemoModePill from './DemoModePill';
 import TrialExpiredBanner from '../Onboarding/TrialExpiredBanner';
 import TrialUpgradeModal from '../Onboarding/TrialUpgradeModal';
-import { useAuth, ROLE_META } from '../../context/AuthContext';
+import { useAuth, ROLE_META, DASHBOARD_PRESETS, defaultPresetForRole, type DashboardPreset } from '../../context/AuthContext';
 import {
   daysSinceStart, isTrialExpired, nudgeFired, withNudgeFired,
   NUDGE_DAY_21, NUDGE_DAY_28, daysUntilDowngrade,
@@ -43,6 +43,138 @@ const NAV_ITEMS = [
   { path: '/agent-hq',  icon: Cpu,          label: 'GoodJobs Copilot', module: 'agent-hq',   section: 'tools', accent: '#7C3AED' },
   { path: '/settings',  icon: Settings,     label: 'Settings',         module: 'settings',   section: 'system'  },
 ];
+
+// ── UserMenu (header dropdown with role-preset switcher) ────────────────────
+const UserMenu: React.FC = () => {
+  const { user, updateUser, logout } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  if (!user) return null;
+  const meta = ROLE_META[user.role];
+  const activePreset: DashboardPreset = user.dashboardPreset ?? defaultPresetForRole(user.role);
+
+  const choosePreset = (id: DashboardPreset) => {
+    updateUser({ dashboardPreset: id });
+    setOpen(false);
+    const label = DASHBOARD_PRESETS.find(p => p.id === id)?.label ?? id;
+    toast(`Dashboard switched to ${label} view.`, { icon: '🎛️', duration: 2200 });
+    if (window.location.pathname !== '/') navigate('/');
+  };
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <div
+        className="header-user"
+        onClick={() => setOpen(o => !o)}
+        role="button"
+        tabIndex={0}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="User menu"
+      >
+        <div
+          className="header-user-avatar"
+          style={{ background: `linear-gradient(135deg, ${meta.color}, ${meta.color}bb)` }}
+        >
+          {user.name.charAt(0).toUpperCase()}
+        </div>
+        <div className="header-user-info">
+          <span className="header-user-name">{user.name.split(' ')[0]}</span>
+          <span className="header-user-role">{meta.icon} {meta.label}</span>
+        </div>
+      </div>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+            width: 280, background: 'white',
+            border: '1px solid var(--color-border-light)',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: 'var(--shadow-xl)',
+            zIndex: 200, padding: '0.6rem',
+          }}
+        >
+          <div style={{
+            fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em',
+            textTransform: 'uppercase', color: 'var(--color-text-tertiary)',
+            padding: '0.25rem 0.4rem 0.4rem',
+          }}>
+            Dashboard view
+          </div>
+          {DASHBOARD_PRESETS.map(p => {
+            const isActive = activePreset === p.id;
+            return (
+              <button
+                key={p.id}
+                role="menuitemradio"
+                aria-checked={isActive}
+                onClick={() => choosePreset(p.id)}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                  width: '100%', textAlign: 'left',
+                  padding: '0.5rem 0.55rem', border: 'none',
+                  background: isActive ? 'var(--color-primary-soft, #ecfdf5)' : 'transparent',
+                  borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                  marginBottom: 2,
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', lineHeight: 1.1 }}>{p.icon}</span>
+                <span style={{ flex: 1 }}>
+                  <span style={{
+                    display: 'block', fontSize: '0.83rem', fontWeight: 600,
+                    color: isActive ? 'var(--color-primary)' : 'var(--color-text-primary)',
+                  }}>
+                    {p.label}{isActive && ' ✓'}
+                  </span>
+                  <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                    {p.description}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+          <div style={{ borderTop: '1px solid var(--color-border-light)', margin: '0.5rem -0.6rem' }} />
+          <button
+            role="menuitem"
+            onClick={() => { setOpen(false); navigate('/settings'); }}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left',
+              padding: '0.45rem 0.55rem', border: 'none', background: 'transparent',
+              borderRadius: 'var(--radius-md)', cursor: 'pointer',
+              fontSize: '0.83rem', color: 'var(--color-text-primary)',
+            }}
+          >
+            ⚙️ Account settings
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => { setOpen(false); logout(); navigate('/login'); }}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left',
+              padding: '0.45rem 0.55rem', border: 'none', background: 'transparent',
+              borderRadius: 'var(--radius-md)', cursor: 'pointer',
+              fontSize: '0.83rem', color: 'var(--color-danger, #b91c1c)',
+            }}
+          >
+            ↪ Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ── Component ────────────────────────────────────────────────────────────────
 const Layout: React.FC = () => {
@@ -519,24 +651,7 @@ const Layout: React.FC = () => {
             </button>
 
             {user && meta && (
-              <div
-                className="header-user"
-                onClick={() => navigate('/settings')}
-                role="button"
-                tabIndex={0}
-                aria-label="User settings"
-              >
-                <div
-                  className="header-user-avatar"
-                  style={{ background: `linear-gradient(135deg, ${meta.color}, ${meta.color}bb)` }}
-                >
-                  {user.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="header-user-info">
-                  <span className="header-user-name">{user.name.split(' ')[0]}</span>
-                  <span className="header-user-role">{meta.icon} {meta.label}</span>
-                </div>
-              </div>
+              <UserMenu />
             )}
           </div>
         </header>

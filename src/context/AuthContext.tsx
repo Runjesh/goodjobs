@@ -136,6 +136,35 @@ export interface AuthUser {
   pendingInvites?: { email: string; role: string; invitedAt: string }[];
   /** WhatsApp phone wired up during onboarding. */
   whatsapp?: { phone?: string; verified?: boolean; connectedAt?: string };
+  /**
+   * Dashboard preset (Session 3): re-orders Today cards and hides modules
+   * irrelevant to the chosen working mode. Independent of `role` (which still
+   * drives module-level permissions); a Programme Manager can temporarily
+   * switch their dashboard to a Field Officer view without changing what they
+   * can access.
+   */
+  dashboardPreset?: DashboardPreset;
+}
+
+// ── Dashboard presets (Session 3) ─────────────────────────────────────────────
+export type DashboardPreset = 'field' | 'programs' | 'ed';
+
+export const DASHBOARD_PRESETS: { id: DashboardPreset; label: string; description: string; icon: string }[] = [
+  { id: 'field',    label: 'Field Officer',       description: 'Today, programs and tasks first. Hides finance & funding.', icon: '🗺️' },
+  { id: 'programs', label: 'Programme Manager',   description: 'Programs, beneficiaries and insights up top.',                icon: '📋' },
+  { id: 'ed',       label: 'Executive Director',  description: 'Funding, compliance and full org view.',                      icon: '👤' },
+];
+
+/** Map a user's permission role to a sensible default dashboard preset. */
+export function defaultPresetForRole(role: UserRole): DashboardPreset {
+  switch (role) {
+    case 'field':    return 'field';
+    case 'programs': return 'programs';
+    case 'finance':
+    case 'board':
+    case 'ed':
+    default:         return 'ed';
+  }
 }
 
 interface AuthContextValue {

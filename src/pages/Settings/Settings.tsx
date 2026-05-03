@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRight, CreditCard, Users, Mail, X as XIcon, Lock } from 'lucide-react';
+import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRight, CreditCard, Users, Mail, X as XIcon, Lock, MessageCircle } from 'lucide-react';
+import WhatsAppPortal from '../../components/Settings/WhatsAppPortal';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import './Settings.css';
@@ -14,6 +15,7 @@ const TABS = [
   { id: 'team',     label: 'Team',         icon: <Users size={16} /> },
   { id: 'ngo',      label: 'NGO Details',  icon: <Building2 size={16} /> },
   { id: 'plans',    label: 'Plans & Billing', icon: <CreditCard size={16} /> },
+  { id: 'whatsapp', label: 'WhatsApp Portal', icon: <MessageCircle size={16} /> },
   { id: 'security', label: 'Security',     icon: <Key size={16} /> },
   { id: 'privacy',  label: 'Privacy & DPDP', icon: <Shield size={16} /> },
   { id: 'notifs',   label: 'Notifications',icon: <Bell size={16} /> },
@@ -294,6 +296,9 @@ const Settings: React.FC = () => {
 
           {/* Plans & Billing */}
           {activeTab === 'plans' && <PlansSection />}
+
+          {/* WhatsApp Field Portal */}
+          {activeTab === 'whatsapp' && <WhatsAppPortal />}
 
           {/* Team & Invites */}
           {activeTab === 'team' && (

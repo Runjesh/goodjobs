@@ -13,6 +13,7 @@ import { readToCForProgram } from '../../utils/tocStorage';
 import toast from 'react-hot-toast';
 import './Insights.css';
 import OutcomesAggregateCard from '../../components/Insights/OutcomesAggregateCard';
+import SroiCard from '../../components/Insights/SroiCard';
 
 type Period = '7d' | '30d' | '90d' | 'year';
 
@@ -218,6 +219,39 @@ const ExportDialog: React.FC<ExportDialogProps> = ({ onClose, onExport }) => {
   );
 };
 
+// ── Programme Impact tabs (Outcomes ↔ SROI) ──────────────────────────────────
+const ImpactTabs: React.FC = () => {
+  const [tab, setTab] = useState<'outcomes' | 'sroi'>('outcomes');
+  return (
+    <div style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem' }}>
+        {([
+          { id: 'outcomes', label: 'Programme outcomes' },
+          { id: 'sroi',     label: 'SROI report' },
+        ] as const).map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 999,
+              border: tab === t.id ? '1px solid var(--color-primary)' : '1px solid var(--color-border-light)',
+              background: tab === t.id ? 'var(--color-primary)' : 'white',
+              color: tab === t.id ? 'white' : 'var(--color-text-secondary)',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === 'outcomes' ? <OutcomesAggregateCard /> : <SroiCard />}
+    </div>
+  );
+};
+
 // ── Main Component ────────────────────────────────────────────────────────────
 const Insights: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -356,8 +390,9 @@ const Insights: React.FC = () => {
         </div>
       </div>
 
-      {/* Programme outcomes — outcome→output loop closing the audit gap. */}
-      <OutcomesAggregateCard />
+      {/* Programme outcomes / SROI — tabbed view closes the audit gap. */}
+      <ImpactTabs />
+
 
       {/* ── KPI Row ───────────────────────────────────────────────── */}
       <div className="insights-kpi-row">
