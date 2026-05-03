@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -1478,6 +1478,85 @@ def touch_csr_card(card_id: str, current_user: TokenUser = Depends(require_role(
         if not row:
             raise HTTPException(status_code=404, detail="CSR card not found.")
         return {"status": "ok", "card_id": row[0], "source": "db"}
+
+
+# ── Per-card grant lifecycle state ────────────────────────────────────────
+# JSONB-blob round-trip so parser approvals, deliverables progress, reports,
+# budget heads, closure checklist, and the isClosed flag are shared across
+# devices and teammates instead of living only in one browser's localStorage.
+# In memory mode we keep an analogous {ngo_id: {card_id: state}} map.
+
+CSR_GRANT_STATE_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+
+@app.get("/csr/cards/{card_id}/grant-state", tags=["CSR"])
+def get_csr_card_grant_state(card_id: str, current_user: TokenUser = Depends(require_role("ed", "csr", "programs", "board"))):
+    with db_conn() as conn:
+        if conn is None:
+            store = CSR_GRANT_STATE_MEM_BY_NGO.get(current_user.ngo_id, {})
+            entry = store.get(str(card_id))
+            if not entry:
+                return {"state": None, "updated_at": None, "source": "memory"}
+            return {"state": entry.get("state") or {}, "updated_at": entry.get("updated_at"), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COALESCE(grant_state, '{}'::jsonb), grant_state_updated_at
+            FROM csr_pipeline_cards
+            WHERE ngo_id = %s AND id = %s
+            """,
+            (current_user.ngo_id, str(card_id)),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="CSR card not found.")
+        state = _parse_jsonb(row[0])
+        # Empty dict ⇒ never been written; let the client fall back to its
+        # deterministic mock without overwriting it. Use `None` so the client
+        # can distinguish "no server state yet" from "server says blank".
+        return {
+            "state": state if state else None,
+            "updated_at": _ts_iso(row[1]),
+            "source": "db",
+        }
+
+
+@app.put("/csr/cards/{card_id}/grant-state", tags=["CSR"])
+def put_csr_card_grant_state(
+    card_id: str,
+    body: Dict[str, Any] = Body(...),
+    current_user: TokenUser = Depends(require_role("ed", "csr", "programs")),
+):
+    state = body.get("state") if isinstance(body, dict) else None
+    if not isinstance(state, dict):
+        raise HTTPException(status_code=400, detail="Body must be {state: object}.")
+    ts = datetime.now(timezone.utc).isoformat()
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_csr(current_user.ngo_id)
+            cards = CSR_CARDS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            if not any(str(c.get("id")) == str(card_id) for c in cards):
+                raise HTTPException(status_code=404, detail="CSR card not found.")
+            CSR_GRANT_STATE_MEM_BY_NGO.setdefault(current_user.ngo_id, {})[str(card_id)] = {
+                "state": state, "updated_at": ts,
+            }
+            return {"status": "saved", "updated_at": ts, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE csr_pipeline_cards
+            SET grant_state = %s::jsonb,
+                grant_state_updated_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ngo_id = %s AND id = %s
+            RETURNING grant_state_updated_at
+            """,
+            (json.dumps(state), current_user.ngo_id, str(card_id)),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="CSR card not found.")
+        return {"status": "saved", "updated_at": _ts_iso(row[0]), "source": "db"}
 
 
 @app.get("/csr/cards/{card_id}/documents", tags=["CSR"])

@@ -122,6 +122,12 @@ CREATE TABLE IF NOT EXISTS csr_pipeline_cards (
 ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS win_probability INTEGER NOT NULL DEFAULT 55;
 ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
+-- Per-card grant lifecycle state (parser approvals, deliverables progress,
+-- reports, budget heads, closure checklist, isClosed flag). Read/written by
+-- GrantDetail.tsx through GET/PUT /csr/cards/{id}/grant-state. Stored as one
+-- JSONB blob so the shape can evolve without migrations.
+ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS grant_state JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS grant_state_updated_at TIMESTAMP WITH TIME ZONE;
 
 CREATE INDEX IF NOT EXISTS idx_csr_pipeline_ngo ON csr_pipeline_cards(ngo_id);
 

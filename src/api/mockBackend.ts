@@ -289,6 +289,19 @@ const HANDLERS: Handler[] = [
     handle: () => jsonResponse({ ok: true, transaction_id: rid('trx') }),
   },
 
+  // ── Per-card grant lifecycle state (Task #6) ───────────────────────────────
+  // GET returns `state: null` so the client falls back to its deterministic
+  // mock; PUT just acks. Real persistence happens against the backend; this
+  // exists so frontend-only deploys don't crash and so CI tests don't 404.
+  {
+    test: (p, m) => m === 'GET' && /^\/csr\/cards\/[^/]+\/grant-state$/.test(p),
+    handle: () => jsonResponse({ state: null, updated_at: null, source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'PUT' && /^\/csr\/cards\/[^/]+\/grant-state$/.test(p),
+    handle: () => jsonResponse({ status: 'saved', updated_at: new Date().toISOString(), source: 'mock' }),
+  },
+
   // ── Generic CRUD families: respond with optimistic success ─────────────────
   {
     test: (p, m) => m === 'GET' && (

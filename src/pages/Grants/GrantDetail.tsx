@@ -14,6 +14,8 @@ import GrantProgramsPanel from '../../components/Grants/GrantProgramsPanel';
 import GrantBudgetHeadsPanel from '../../components/Grants/GrantBudgetHeadsPanel';
 import { selectGrantUtilisation } from '../../utils/grantBudgetHeads';
 import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
+import { apiFetch } from '../../api/client';
+import { mergeGrantState, sanitiseGrantStateForServer } from '../../utils/grantState';
 
 type LifecycleStage = 'pipeline' | 'applied' | 'awarded' | 'active' | 'closed';
 
@@ -186,9 +188,16 @@ const GrantDetail: React.FC = () => {
   const card = useMemo(() => csrCards.find(c => String(c.id) === String(id)), [csrCards, id]);
 
   const [state, setState] = useState<GrantState>(() => loadGrantState(card));
-  // Track which card.id our `state` was hydrated from localStorage for, to avoid
-  // a save-before-load race that would overwrite persisted state with the mock.
+  // Track which card.id our `state` was hydrated for, to avoid a save-before-
+  // load race that would overwrite persisted state with the mock.
   const [hydratedForId, setHydratedForId] = useState<string | null>(card ? String(card.id) : null);
+  // Flips to the card.id after the initial GET settles (success, empty, OR
+  // network error). The PUT effect waits for this so we never clobber newer
+  // server state with stale localStorage/mock on mount.
+  const [serverHydratedFor, setServerHydratedFor] = useState<string | null>(null);
+  // 'idle' between writes; 'saving' while a PUT is in flight; 'error' if the
+  // last PUT failed (we still keep the LS write so nothing is lost).
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   // Persisted closure flag survives page reload even if API resets card.col to 'live'
   const baseStage: LifecycleStage = state.isClosed
     ? 'closed'
@@ -199,21 +208,77 @@ const GrantDetail: React.FC = () => {
   const [activeActiveTab, setActiveActiveTab] = useState<'deliverables' | 'budget' | 'reports' | 'cascade'>('deliverables');
   const [editingRow, setEditingRow] = useState<string | null>(null);
 
+  // Hydrate for this card: LS is the fast cache, the server is source-of-
+  // truth. Server fields win when present; missing fields fall through to
+  // whatever the cache had so a partial server response can never blank out
+  // a user's edits.
   useEffect(() => {
     if (!card) return;
     const cardKey = String(card.id);
     if (hydratedForId === cardKey) return;
-    setState(loadGrantState(card));
+    const cached = loadGrantState(card);
+    setState(cached);
     setHydratedForId(cardKey);
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(`/csr/cards/${encodeURIComponent(cardKey)}/grant-state`);
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          const serverState = data?.state as Partial<GrantState> | null | undefined;
+          if (serverState) {
+            setState(prev => {
+              // Merge into the latest local state, not the cache snapshot, so
+              // any edits the user made between mount and fetch survive on
+              // fields the server payload didn't touch.
+              const merged = mergeGrantState(prev, serverState);
+              // Refresh the LS cache so a refresh-without-server still shows
+              // the server-resident state.
+              saveGrantState(card.id, merged);
+              return merged;
+            });
+          }
+        }
+      } catch { /* offline — LS cache stays in effect */ }
+      finally {
+        // Always release the PUT gate, even on network failure, so the user
+        // can keep working offline. In offline mode the PUT will fail too,
+        // surfaced as the "Local only" sync chip.
+        if (!cancelled) setServerHydratedFor(cardKey);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [card, hydratedForId]);
 
+  // Persist on change: write LS immediately (optimistic), then debounce a PUT
+  // to the server so rapid edits coalesce into one network round-trip. Gated
+  // on `serverHydratedFor` so the initial mount can't PUT stale cache before
+  // we've seen what the server already has.
   useEffect(() => {
     if (!card) return;
-    // Skip save until we've hydrated for this card; otherwise the initial mock
-    // would clobber any previously-persisted state in localStorage.
     if (hydratedForId !== String(card.id)) return;
     saveGrantState(card.id, state);
-  }, [state, card, hydratedForId]);
+    if (serverHydratedFor !== String(card.id)) return;
+
+    const cardKey = String(card.id);
+    setSyncStatus('saving');
+    const handle = window.setTimeout(async () => {
+      try {
+        const payload = sanitiseGrantStateForServer(state);
+        const res = await apiFetch(`/csr/cards/${encodeURIComponent(cardKey)}/grant-state`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: payload }),
+        });
+        setSyncStatus(res.ok ? 'saved' : 'error');
+      } catch {
+        setSyncStatus('error');
+      }
+    }, 800);
+    return () => window.clearTimeout(handle);
+  }, [state, card, hydratedForId, serverHydratedFor]);
 
   const parserRows = useMemo(() => buildParserRows(card), [card]);
 
@@ -315,6 +380,17 @@ const GrantDetail: React.FC = () => {
           )}
           {baseStage === 'closed' && (
             <span className="grant-closed-pill"><Award size={14} /> Closed</span>
+          )}
+          {/* Tiny sync indicator so users know their edits are being shared,
+              not just stashed in this browser. */}
+          {syncStatus === 'saving' && (
+            <span className="grant-sync-chip" title="Saving to server…"><Clock size={12} /> Saving…</span>
+          )}
+          {syncStatus === 'saved' && (
+            <span className="grant-sync-chip grant-sync-chip--ok" title="Synced to server"><Check size={12} /> Synced</span>
+          )}
+          {syncStatus === 'error' && (
+            <span className="grant-sync-chip grant-sync-chip--err" title="Server unreachable — saved in this browser only"><AlertCircle size={12} /> Local only</span>
           )}
         </div>
       </motion.div>
