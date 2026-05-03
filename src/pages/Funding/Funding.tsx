@@ -9,6 +9,7 @@ import {
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import './Funding.css';
+import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 
 type Tab = 'overview' | 'donors' | 'fundraising' | 'finance' | 'csr' | 'compliance';
 
@@ -275,6 +276,13 @@ const Funding: React.FC = () => {
               <button onClick={() => navigate('/compliance')}>View <ArrowRight size={12} /></button>
             </div>
           )}
+
+          {/* Compliance → grant cascade banner: any grant whose linked
+              compliance doc is expiring/expired is flagged before the user
+              even opens it. */}
+          <div style={{ marginTop: '1rem' }}>
+            <AtRiskGrantsBanner />
+          </div>
 
           {/* Active grants quick-links */}
           {csrCards.length > 0 && (() => {

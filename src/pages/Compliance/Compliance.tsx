@@ -7,6 +7,7 @@ import DPDPModule from './DPDPModule';
 import './Compliance.css';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
+import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import {
   buildComplianceReminders,
   persistComplianceReminders,
@@ -53,6 +54,16 @@ const Compliance: React.FC = () => {
     getScrollElement: () => regDocScrollRef.current,
     estimateSize: () => 56,
     overscan: 12,
+  });
+
+  // Read `?focus=<docId>` (e.g. from a "Renew first" CTA in Agent HQ /
+  // GrantDetail / Funding) and scroll/highlight the matching row.
+  useFocusFromUrl('focus', {
+    resolveIndex: (id) => {
+      const idx = complianceDocs.findIndex(d => d.id === id);
+      return idx >= 0 ? idx : null;
+    },
+    onScrollToIndex: (idx) => regDocVirtualizer.scrollToIndex(idx, { align: 'center' }),
   });
 
   const vaultTableScrollRef = useRef<HTMLDivElement>(null);
@@ -465,6 +476,7 @@ const Compliance: React.FC = () => {
                   <div
                     key={doc.id}
                     data-index={vr.index}
+                    data-focus-id={doc.id}
                     ref={regDocVirtualizer.measureElement}
                     style={{
                       position: 'absolute',
