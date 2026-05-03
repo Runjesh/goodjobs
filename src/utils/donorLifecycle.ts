@@ -159,6 +159,11 @@ function persistRemote(donorId: string | number, state: DonorLifecycleState): vo
     void apiFetch(`/crm/donors/${encodeURIComponent(String(donorId))}/lifecycle`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
+      // Same rationale as CRM's outreach call: lifecycle is the server-side
+      // source of truth for milestones. If the backend is unreachable we
+      // want a real failure (logged below) — not a mock 200 that masks a
+      // permanently-local write.
+      noMockFallback: true,
       body: JSON.stringify({ state }),
     }).catch(() => { /* see fn doc */ });
   } catch {

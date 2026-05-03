@@ -231,6 +231,13 @@ const CRM: React.FC = () => {
         const res = await apiFetch('/crm/outreach', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          // noMockFallback: a milestone must only be marked done on a real
+          // backend success. Without this, the global mock fallback inside
+          // apiFetch would synthesise a 200 OK whenever the backend is
+          // unreachable (dev with no FastAPI, static-only deploys, etc.)
+          // and we'd silently false-green — the exact regression Task #9
+          // closes off.
+          noMockFallback: true,
           body: JSON.stringify({
             mode: 'draft',
             channel: 'whatsapp',
@@ -243,10 +250,6 @@ const CRM: React.FC = () => {
       } catch {
         success = false;
       }
-      // No DEV fallback: a milestone is only marked done on a real successful
-      // outreach response. This is the contract Task #9 locks in — failures
-      // (network down, backend offline, 4xx/5xx) leave the touchpoint in its
-      // overdue/due state so the team retries instead of seeing a false-green.
 
       if (success) {
         // Only mark the milestone as completed AFTER the outreach actually

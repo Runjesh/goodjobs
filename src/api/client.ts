@@ -63,10 +63,29 @@ export function getAccessToken(): string | null {
   }
 }
 
-export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+/**
+ * Extra options layered on top of the standard `RequestInit`.
+ *
+ * `noMockFallback` — when true, `apiFetch` never falls through to the local
+ * mock backend on connection / 404 / 405 errors. Use this for endpoints
+ * where a silent mock-success would create a *false-green* (e.g. donor
+ * lifecycle persistence and outreach sends — Task #9): we'd rather the
+ * caller see a real failure and surface "send failed, please retry" than
+ * mark a milestone done because the mock cheerfully returned 200.
+ */
+export interface ApiFetchInit extends RequestInit {
+  noMockFallback?: boolean;
+}
+
+export async function apiFetch(path: string, init: ApiFetchInit = {}): Promise<Response> {
   const base = getApiBaseUrl();
   const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? path : `/${path}`}`;
   const headers = new Headers(init.headers);
+  const noMock = init.noMockFallback === true;
+  // Strip our custom field before handing to fetch so it doesn't end up on
+  // the actual Request init.
+  const { noMockFallback: _nmf, ...fetchInit } = init;
+  void _nmf;
 
   if (!headers.has('Authorization')) {
     const token = getAccessToken();
@@ -74,18 +93,18 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   }
 
   try {
-    const res = await fetch(url, { ...init, headers });
+    const res = await fetch(url, { ...fetchInit, headers });
     // Some hosts (the static-site origin) answer with HTML 404/405 for API
     // paths instead of refusing the connection. Treat those as "no backend"
     // and fall through to the local mock so the UI keeps working — but only
     // when the mock is actually enabled (i.e. dev / static-only deploys).
     // If a real backend is configured and returns 404, surface the real 404
     // so we don't silently mask backend bugs.
-    if (res.status === 404 || res.status === 405 || res.status === 502 || res.status === 503) {
+    if (!noMock && (res.status === 404 || res.status === 405 || res.status === 502 || res.status === 503)) {
       const ct = res.headers.get('content-type') ?? '';
       if (!ct.includes('application/json')) {
         const { mockResponse, isMockEnabled } = await import('./mockBackend');
-        if (isMockEnabled()) return mockResponse(path, init);
+        if (isMockEnabled()) return mockResponse(path, fetchInit);
       }
     }
     return res;
@@ -95,7 +114,15 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     // a plausible response so the UI stays usable end-to-end. mockResponse
     // itself respects isMockEnabled() and returns 503 if the operator has
     // disabled the fallback explicitly.
+    if (noMock) {
+      // Caller has explicitly opted out of mock fallback (e.g. an outreach
+      // send): surface a real failure so the UI doesn't false-green.
+      return new Response(
+        JSON.stringify({ error: 'Backend unreachable.' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     const { mockResponse } = await import('./mockBackend');
-    return mockResponse(path, init);
+    return mockResponse(path, fetchInit);
   }
 }
