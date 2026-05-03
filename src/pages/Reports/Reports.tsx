@@ -7,6 +7,7 @@ import {
   TrendingUp, Send, Eye, ArrowRight, Sparkles
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
 import toast from 'react-hot-toast';
@@ -85,6 +86,7 @@ const STATUS_META = {
 };
 
 const Reports: React.FC = () => {
+  useFocusFromUrl('report');
   const [activeType, setActiveType] = useState<ReportType | 'all'>('all');
   const [draftingReport, setDraftingReport] = useState<string | null>(null);
   const [autoSaveText, setAutoSaveText] = useState('Saved 2 min ago');
@@ -394,6 +396,7 @@ const Reports: React.FC = () => {
             return (
               <motion.div
                 key={report.id}
+                data-focus-id={report.id}
                 className="reports-list-item"
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}

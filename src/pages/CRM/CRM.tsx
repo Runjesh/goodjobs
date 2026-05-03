@@ -411,6 +411,10 @@ const CRM: React.FC = () => {
   const [lastSendFailures, setLastSendFailures] = useState<string[]>([]);
   const [lastSendSkipped, setLastSendSkipped] = useState<string[]>([]);
 
+  /** Shape of the per-recipient response from /crm/outreach{,/email}. */
+  interface OutreachResultRow { donor_id: string | number; ok: boolean; error?: string }
+  interface OutreachResponse { results?: OutreachResultRow[] }
+
   const handleSendComposer = async () => {
     const donorIds = bulkMode ? Array.from(selectedIds) : (activeDonor?.id ? [activeDonor.id] : []);
     if (donorIds.length === 0) { toast.error('Select at least one donor.'); return; }
@@ -460,12 +464,12 @@ const CRM: React.FC = () => {
         let sent = sendableIds.length;
         let failed: string[] = [];
         try {
-          const data = await res.json();
+          const data = (await res.json()) as OutreachResponse;
           if (Array.isArray(data?.results)) {
-            sent = data.results.filter((r: any) => r.ok).length;
+            sent = data.results.filter(r => r.ok).length;
             failed = data.results
-              .filter((r: any) => !r.ok)
-              .map((r: any) => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
+              .filter(r => !r.ok)
+              .map(r => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
           }
         } catch { /* keep defaults */ }
         const skipped = missingEmail.map(id => donorMap.get(String(id))?.name || String(id));
@@ -500,12 +504,12 @@ const CRM: React.FC = () => {
       let sent = donorIds.length;
       let failed: string[] = [];
       try {
-        const data = await res.json();
+        const data = (await res.json()) as OutreachResponse;
         if (Array.isArray(data?.results)) {
-          sent = data.results.filter((r: any) => r.ok).length;
+          sent = data.results.filter(r => r.ok).length;
           failed = data.results
-            .filter((r: any) => !r.ok)
-            .map((r: any) => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
+            .filter(r => !r.ok)
+            .map(r => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
         }
       } catch { /* keep defaults */ }
       setLastSendFailures(failed);
@@ -851,9 +855,18 @@ const CRM: React.FC = () => {
                           {(() => {
                             const na = deriveNextAction(donor);
                             return (
-                              <div className={`donor-next-action donor-next-action--${na.band}`} title="Suggested next action">
+                              <button
+                                type="button"
+                                className={`donor-next-action donor-next-action--${na.band}`}
+                                title="Open composer pre-seeded with this action"
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  setActiveDonor(donor);
+                                  openSingleCompose('whatsapp', na.templateId);
+                                }}
+                              >
                                 <Zap size={10} /> {na.label}
-                              </div>
+                              </button>
                             );
                           })()}
                         </div>

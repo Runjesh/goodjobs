@@ -36,7 +36,10 @@ describe('searchEntities', () => {
     const r = searchEntities('digital literacy', idx);
     expect(r.some(x => x.kind === 'beneficiary')).toBe(true);
     expect(r.some(x => x.kind === 'campaign')).toBe(true);
-    expect(r.some(x => x.kind === 'program')).toBe(true);
+    const program = r.find(x => x.kind === 'program');
+    expect(program).toBeDefined();
+    // Program now deep-links to first beneficiary in the program.
+    expect(program?.path).toBe('/programs?beneficiary=B1');
   });
 
   it('matches CSR cards by company snippet', () => {

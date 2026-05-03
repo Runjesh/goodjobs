@@ -41,13 +41,15 @@ function csrContext(c: CSRCard): string {
   return `${c.col} · ${amt} · ${c.project}`;
 }
 
-function programsFromBeneficiaries(bens: Beneficiary[]): { name: string; count: number }[] {
-  const m = new Map<string, number>();
+function programsFromBeneficiaries(bens: Beneficiary[]): { name: string; count: number; firstId: string }[] {
+  const m = new Map<string, { count: number; firstId: string }>();
   for (const b of bens) {
     if (!b.program) continue;
-    m.set(b.program, (m.get(b.program) || 0) + 1);
+    const cur = m.get(b.program);
+    if (cur) cur.count += 1;
+    else m.set(b.program, { count: 1, firstId: String(b.id) });
   }
-  return [...m.entries()].map(([name, count]) => ({ name, count }));
+  return [...m.entries()].map(([name, v]) => ({ name, count: v.count, firstId: v.firstId }));
 }
 
 function matches(needle: string, hay: string): boolean {
@@ -154,12 +156,14 @@ export function searchEntities(query: string, idx: EntityIndexInput): EntityResu
   const programHits: EntityResult[] = [];
   for (const p of programsFromBeneficiaries(idx.beneficiaries)) {
     if (matches(q, p.name)) {
+      // Deep-link to the first beneficiary in the program so the page lands
+      // on a concrete record rather than a generic module view.
       programHits.push({
         kind: 'program',
         id: p.name,
         label: p.name,
         context: `${p.count} beneficiaries enrolled`,
-        path: `/programs?program=${encodeURIComponent(p.name)}`,
+        path: `/programs?beneficiary=${encodeURIComponent(p.firstId)}`,
       });
     }
     if (programHits.length >= PER_GROUP_CAP) break;
