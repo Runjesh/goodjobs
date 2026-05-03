@@ -7,6 +7,9 @@ import type { ComplianceGrantLink } from '../utils/complianceGrant';
 import type { ProgramGrantLink } from '../utils/programGrantLink';
 import type { GrantBudgetHead, GrantTag, JournalExpense } from '../utils/grantBudgetHeads';
 export type { JournalExpense } from '../utils/grantBudgetHeads';
+import type { Task } from '../utils/tasks';
+import { buildRecurringNextInstance } from '../utils/tasks';
+import { dispatchOnComplete } from '../utils/taskDispatcher';
 import { programIdFromName } from '../utils/programFinance';
 
 /**
@@ -169,6 +172,15 @@ interface AppState {
   grantBudgetHeads:      GrantBudgetHead[];
   journalEntries:        JournalExpense[];
 
+  /** Cross-module Tasks slice — see src/utils/tasks.ts. */
+  tasks:                 Task[];
+  addTask:               (t: Task) => void;
+  upsertTaskByIntent:    (t: Task) => void;
+  updateTask:            (id: string, patch: Partial<Task>) => void;
+  completeTask:          (id: string, now?: Date) => Task | null;
+  snoozeTask:            (id: string, untilIso: string) => void;
+  dismissTask:           (id: string) => void;
+
   // Custom programme names defined by the org (in addition to those
   // derived from existing beneficiaries). Persisted to localStorage so
   // a freshly-created programme survives a refresh even before any
@@ -301,6 +313,7 @@ const LS_PROG_GRANT_LINKS = 'goodjobs.programGrantLinks.v1';
 const LS_CUSTOM_PROGRAMS = 'goodjobs.customPrograms.v1';
 const LS_BUDGET_HEADS    = 'goodjobs.grantBudgetHeads.v1';
 const LS_JOURNAL_ENTRIES = 'goodjobs.journalEntries.v1';
+const LS_TASKS = 'goodjobs.tasks.v1';
 
 function loadLS<T>(key: string, fallback: T): T {
   try {
@@ -415,7 +428,7 @@ const seedTranches: GrantTranche[] = SEED_DEMO_CONNECTIONS ? [
   { id: 'tr-2-1', grantId: '2', number: 1, amount: 2_500_000, expectedDate: new Date(Date.now() - 30*86_400_000).toISOString().slice(0,10), status: 'released', releasedAt: new Date(Date.now() - 30*86_400_000).toISOString() },
 ] : [];
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   // Start empty; hydrate from backend on app load.
   donors: [],
   campaigns: [],
@@ -436,6 +449,102 @@ export const useStore = create<AppState>((set) => ({
   customPrograms:       loadLS<string[]>(LS_CUSTOM_PROGRAMS, []),
   grantBudgetHeads:     loadLS<GrantBudgetHead[]>(LS_BUDGET_HEADS, seedGrantBudgetHeads),
   journalEntries:       loadLS<JournalExpense[]>(LS_JOURNAL_ENTRIES, seedJournalEntries),
+  tasks:                loadLS<Task[]>(LS_TASKS, []),
+
+  addTask: (t) => set((state) => {
+    const next = [t, ...state.tasks];
+    saveLS(LS_TASKS, next);
+    return { tasks: next };
+  }),
+  upsertTaskByIntent: (t) => set((state) => {
+    if (!t.sourceIntentId) {
+      const next = [t, ...state.tasks];
+      saveLS(LS_TASKS, next);
+      return { tasks: next };
+    }
+    const idx = state.tasks.findIndex(x => x.sourceIntentId === t.sourceIntentId);
+    let next: Task[];
+    if (idx === -1) {
+      next = [t, ...state.tasks];
+    } else {
+      // Preserve user-driven state (status / snooze); refresh display
+      // fields from the upsert payload. Mirror upsertInboxTask: only
+      // backfill onCompleteAction when prior didn't have one.
+      const prior = state.tasks[idx];
+      const merged: Task = {
+        ...prior,
+        title: t.title,
+        description: t.description,
+        relatedEntityType: prior.relatedEntityType ?? t.relatedEntityType,
+        relatedEntityId:   prior.relatedEntityId   ?? t.relatedEntityId,
+        // Mirror the bridge helper: refresh onCompleteAction only when prior
+        // didn't have one. Existing wiring is never silently overwritten.
+        onCompleteAction: prior.onCompleteAction ?? t.onCompleteAction,
+        priority: t.priority,
+        meta: { ...(prior.meta ?? {}), ...(t.meta ?? {}) },
+        updatedAt: new Date().toISOString(),
+      };
+      next = state.tasks.slice();
+      next[idx] = merged;
+    }
+    saveLS(LS_TASKS, next);
+    return { tasks: next };
+  }),
+  updateTask: (id, patch) => set((state) => {
+    const next = state.tasks.map(t =>
+      t.id === id ? { ...t, ...patch, updatedAt: new Date().toISOString() } : t
+    );
+    saveLS(LS_TASKS, next);
+    return { tasks: next };
+  }),
+  completeTask: (id, now = new Date()) => {
+    const state = get();
+    const target = state.tasks.find(t => t.id === id);
+    if (!target) return null;
+    // AppState is structurally a superset of TaskDispatcherStore; we cast
+    // through unknown because CSRCard / ComplianceDocument are nominal types
+    // that don't carry the dispatcher's index-signature shape.
+    const dispatchResult = dispatchOnComplete(
+      target.onCompleteAction,
+      state as unknown as Parameters<typeof dispatchOnComplete>[1],
+      now,
+    );
+    if (!dispatchResult.ok) {
+      // Side-effect failed — keep the task open so the user can retry rather
+      // than silently marking it done. Caller (Tasks.tsx) reads the null
+      // return to skip its success toast.
+      return null;
+    }
+
+    const completed: Task = {
+      ...target,
+      status: 'done',
+      completedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    const recurNext = buildRecurringNextInstance(target, now);
+    let next = state.tasks.map(t => (t.id === id ? completed : t));
+    if (recurNext) next = [recurNext, ...next];
+    saveLS(LS_TASKS, next);
+    set({ tasks: next });
+    return completed;
+  },
+  snoozeTask: (id, untilIso) => set((state) => {
+    const next = state.tasks.map(t =>
+      t.id === id
+        ? { ...t, status: 'snoozed' as const, snoozeUntil: untilIso, updatedAt: new Date().toISOString() }
+        : t
+    );
+    saveLS(LS_TASKS, next);
+    return { tasks: next };
+  }),
+  dismissTask: (id) => set((state) => {
+    const next = state.tasks.map(t =>
+      t.id === id ? { ...t, status: 'dismissed' as const, updatedAt: new Date().toISOString() } : t
+    );
+    saveLS(LS_TASKS, next);
+    return { tasks: next };
+  }),
 
   addCustomProgram: (name) => set((state) => {
     const trimmed = name.trim();

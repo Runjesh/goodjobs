@@ -9,6 +9,7 @@ import {
   ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, X
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { isVisibleToday, type Task } from '../../utils/tasks';
 import { useAuth, defaultPresetForRole } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
 import { computeStage, nextDueMilestone } from '../../utils/donorLifecycle';
@@ -532,6 +533,9 @@ const Dashboard: React.FC = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
   const { donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards } = useStore();
+  // Today screen reads from the same cross-module Tasks slice that Tasks.tsx
+  // and per-record panels use, so a single source of truth drives all surfaces.
+  const sliceTasks = useStore(s => s.tasks);
 
   const [briefItems,   setBriefItems]   = useState<PriorityItem[]>([]);
   const [briefLoading, setBriefLoading] = useState(true);
@@ -603,11 +607,35 @@ const Dashboard: React.FC = () => {
     return () => { cancelled = true; };
   }, [user?.id, lastRefresh]);
 
+  const taskItems = useMemo<PriorityItem[]>(() => {
+    const routeFor = (t: Task): string | undefined => {
+      if (!t.relatedEntityType || !t.relatedEntityId) return '/tasks';
+      const id = encodeURIComponent(t.relatedEntityId);
+      switch (t.relatedEntityType) {
+        case 'donor':       return `/crm?donor=${id}`;
+        case 'grant':       return `/grants/${id}`;
+        case 'csr':         return `/csr?card=${id}`;
+        case 'beneficiary': return `/programs?beneficiary=${id}`;
+        case 'compliance':  return `/compliance?focus=${id}`;
+        default:            return '/tasks';
+      }
+    };
+    return sliceTasks
+      .filter(t => isVisibleToday(t))
+      .map<PriorityItem>(t => ({
+        id: `task:${t.id}`,
+        text: t.title,
+        action: 'Open task',
+        path: routeFor(t),
+        level: t.priority === 'urgent' || t.priority === 'high' ? 'urgent' : 'attention',
+      }));
+  }, [sliceTasks]);
+
   const allItems = useMemo(() => {
     const store = deriveFromStore(layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards);
-    const combined = [...briefItems, ...store];
+    const combined = [...taskItems, ...briefItems, ...store];
     return combined.length === 0 ? getStaticFallback(layoutRole) : combined;
-  }, [briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards]);
+  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards]);
 
   const isSnoozedFn = useCallback((id: string) => !woken.has(id) && isSnoozed(id, snoozed), [snoozed, woken]);
 
