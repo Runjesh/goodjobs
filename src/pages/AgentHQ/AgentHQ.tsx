@@ -230,7 +230,7 @@ const AgentHQ: React.FC = () => {
   const [batchRunning, setBatchRunning] = useState(false);
   const [logSearch, setLogSearch] = useState('');
 
-  const loadApprovals = async () => {
+  const loadApprovals = async (opts: { showError?: boolean } = {}) => {
     setApprovalsLoading(true);
     try {
       const res = await apiFetch('/intent/queue?status=queued&limit=50');
@@ -238,7 +238,11 @@ const AgentHQ: React.FC = () => {
       const data = await res.json();
       setApprovals(Array.isArray(data.items) ? data.items : []);
     } catch {
-      toast.error('Failed to load intent queue.');
+      // Backend may be offline (frontend-only deployments). Fall back to an
+      // empty queue silently on initial load; only surface a toast when the
+      // user explicitly retried.
+      setApprovals([]);
+      if (opts.showError) toast.error('Failed to load intent queue.');
     } finally {
       setApprovalsLoading(false);
     }
@@ -533,7 +537,7 @@ const AgentHQ: React.FC = () => {
                   >
                     {batchRunning ? 'Working…' : `Approve & run all (${approvals.length})`}
                   </button>
-                  <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={loadApprovals} disabled={approvalsLoading}>
+                  <button className="btn btn-secondary" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }} onClick={() => loadApprovals({ showError: true })} disabled={approvalsLoading}>
                     {approvalsLoading ? 'Loading…' : 'Refresh'}
                   </button>
                 </div>
