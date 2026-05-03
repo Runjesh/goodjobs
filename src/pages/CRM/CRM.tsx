@@ -861,7 +861,7 @@ const CRM: React.FC = () => {
                                 title="Open composer pre-seeded with this action"
                                 onClick={(ev) => {
                                   ev.stopPropagation();
-                                  setActiveDonor(donor);
+                                  setActiveDonorId(String(donor.id));
                                   openSingleCompose('whatsapp', na.templateId);
                                 }}
                               >
