@@ -59,8 +59,8 @@ describe('findShiftConflict', () => {
     expect(findShiftConflict(morning, [nextDay])).toBeNull();
   });
 
-  it('skips the target shift itself', () => {
-    expect(findShiftConflict(morning, [morning])).toBeNull();
+  it('treats duplicate signup for the same shift id as a conflict', () => {
+    expect(findShiftConflict(morning, [morning])?.id).toBe(1);
   });
 
   it('falls back to same-day match when one side has no parseable times', () => {

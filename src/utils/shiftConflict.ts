@@ -97,9 +97,13 @@ export function findShiftConflict<T extends ConflictableShift>(
   others: T[],
 ): T | null {
   const t = parseShiftInterval(target.date);
+  // Duplicate signup for the *same* shift is itself a conflict — block client-side
+  // so the operator gets the same inline UX and we don't rely on a backend 409.
+  for (const o of others) {
+    if (String(o.id) === String(target.id)) return o;
+  }
   if (!t.dayKey) return null;
   for (const o of others) {
-    if (String(o.id) === String(target.id)) continue;
     const p = parseShiftInterval(o.date);
     if (!p.dayKey || p.dayKey !== t.dayKey) continue;
     // Both have intervals → require real overlap.
