@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import './CSR.css';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
+import GrantFundingSummary from '../../components/CSR/GrantFundingSummary';
 
 const columns = [
   { id: 'prospecting', title: 'Prospecting', class: 'col-prospecting' },
@@ -633,6 +634,7 @@ const CSR: React.FC = () => {
                     >
                       {card.project}
                     </div>
+                    <GrantFundingSummary grantId={String(card.id)} />
                     {(() => {
                       const d = card.details as Record<string, unknown> | undefined;
                       const bits = [d?.sector, d?.contact_name].filter(Boolean) as string[];

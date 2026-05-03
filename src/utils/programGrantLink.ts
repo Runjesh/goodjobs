@@ -1,8 +1,9 @@
 import type { ProgramBudget } from './programFinance';
-import { budgetUtilization } from './programFinance';
+import { budgetUtilization, programIdFromName } from './programFinance';
 import type { GrantTranche } from './grantLifecycle';
 import type { ComplianceGrantLink } from './complianceGrant';
-import type { ComplianceDocument } from '../store/useStore';
+import type { ComplianceDocument, Beneficiary } from '../store/useStore';
+import type { BeneficiaryOutcome } from './outcomes';
 
 /**
  * Explicit edge between a programme (slugified id) and a grant (CSR card id).
@@ -110,4 +111,93 @@ export function grantHealthForProgram(
   if (overspent && status !== 'overdue') status = 'at_risk';
 
   return { utilisationPct, nextReportDue, status };
+}
+
+/** One row of "what does this grant fund?" — used by both the grant detail
+ *  Programs panel and the CSR Kanban card summary. */
+export interface GrantProgramRollup {
+  programId: string;
+  programLabel: string;
+  beneficiaryCount: number;
+  /** Service-log count over the lookback window (0 if outcomes not provided). */
+  serviceLogCount: number;
+  /** % of linked beneficiaries with at least one outcome in window
+   *  (0 when no outcomes data is provided or no beneficiaries exist). */
+  reportReadinessPct: number;
+  /** Pass-through from ProgramGrantLink so callers can render badges. */
+  role?: string;
+  /** The originating link id (handy for keys / unlink actions). */
+  linkId: string;
+}
+
+interface RollupInputs {
+  links: ProgramGrantLink[];
+  beneficiaries: Beneficiary[];
+  customPrograms?: string[];
+  outcomes?: BeneficiaryOutcome[];
+  /** Lookback window for service-log + report-readiness math. */
+  periodDays?: number;
+  now?: number;
+}
+
+/**
+ * Returns one rollup row per programme this grant funds, with live
+ * beneficiary count and (optionally) service-log count + report-readiness
+ * scored over `periodDays`. Pure / memo-friendly — callers wrap in useMemo.
+ */
+export function selectGrantProgramRollups(
+  grantId: string,
+  inp: RollupInputs,
+): GrantProgramRollup[] {
+  const periodDays = inp.periodDays ?? 90;
+  const now        = inp.now ?? Date.now();
+  const cutoff     = now - periodDays * 86_400_000;
+  const customPrograms = inp.customPrograms ?? [];
+  const outcomes       = inp.outcomes ?? [];
+
+  const myLinks = selectProgramsForGrant(inp.links, grantId);
+
+  return myLinks.map(l => {
+    const labelFromBens =
+      inp.beneficiaries.find(b => programIdFromName(b.program || '') === l.programId)?.program;
+    const labelFromCustom =
+      customPrograms.find(c => programIdFromName(c) === l.programId);
+    const programLabel = labelFromBens || labelFromCustom || l.programId;
+
+    const programBens = inp.beneficiaries.filter(
+      b => programIdFromName(b.program || '') === l.programId,
+    );
+    const benIds = new Set(programBens.map(b => b.id));
+
+    const periodOutcomes = outcomes.filter(o => {
+      if (o.programId !== l.programId) return false;
+      const t = new Date(o.measuredAt).getTime();
+      return Number.isFinite(t) && t >= cutoff;
+    });
+
+    const measuredBenIds = new Set(
+      periodOutcomes.map(o => o.beneficiaryId).filter(id => benIds.has(id)),
+    );
+    const reportReadinessPct = programBens.length === 0
+      ? 0
+      : Math.round((measuredBenIds.size / programBens.length) * 100);
+
+    return {
+      programId: l.programId,
+      programLabel,
+      beneficiaryCount: programBens.length,
+      serviceLogCount: periodOutcomes.length,
+      reportReadinessPct,
+      role: l.role,
+      linkId: l.id,
+    };
+  });
+}
+
+/** Quick aggregate for a glance line ("funds N programmes · M beneficiaries"). */
+export function summariseGrantFunding(rollups: GrantProgramRollup[]) {
+  return {
+    programCount: rollups.length,
+    beneficiaryTotal: rollups.reduce((s, r) => s + r.beneficiaryCount, 0),
+  };
 }

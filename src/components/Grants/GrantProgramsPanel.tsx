@@ -5,20 +5,16 @@ import toast from 'react-hot-toast';
 import { useStore } from '../../store/useStore';
 import { ModalOverlay } from '../ui/ModalOverlay';
 import { programIdFromName } from '../../utils/programFinance';
-import { selectProgramsForGrant } from '../../utils/programGrantLink';
+import {
+  selectProgramsForGrant,
+  selectGrantProgramRollups,
+  type GrantProgramRollup,
+} from '../../utils/programGrantLink';
 
 interface Props {
   grantId: string;
   /** Lookback window for "this period" calculations (days). */
   periodDays?: number;
-}
-
-interface ProgramRollup {
-  programId: string;
-  programLabel: string;
-  beneficiaryCount: number;
-  serviceLogCount: number;
-  reportReadinessPct: number;
 }
 
 /**
@@ -51,38 +47,12 @@ const GrantProgramsPanel: React.FC<Props> = ({ grantId, periodDays = 90 }) => {
   const linkedIds = new Set(myLinks.map(l => l.programId));
   const availablePrograms = knownProgramLabels.filter(name => !linkedIds.has(programIdFromName(name)));
 
-  const periodCutoff = Date.now() - periodDays * 86_400_000;
-
-  const rollups: ProgramRollup[] = useMemo(() => {
-    return myLinks.map(l => {
-      // Resolve a display label: prefer link's known programme name from beneficiaries.
-      const labelFromBens = beneficiaries.find(b => programIdFromName(b.program || '') === l.programId)?.program;
-      const labelFromCustom = customPrograms.find(c => programIdFromName(c) === l.programId);
-      const programLabel = labelFromBens || labelFromCustom || l.programId;
-
-      const programBens = beneficiaries.filter(b => programIdFromName(b.program || '') === l.programId);
-      const benIds = new Set(programBens.map(b => b.id));
-
-      const periodOutcomes = outcomes.filter(o => {
-        if (o.programId !== l.programId) return false;
-        const t = new Date(o.measuredAt).getTime();
-        return Number.isFinite(t) && t >= periodCutoff;
-      });
-
-      const measuredBenIds = new Set(periodOutcomes.map(o => o.beneficiaryId).filter(id => benIds.has(id)));
-      const reportReadinessPct = programBens.length === 0
-        ? 0
-        : Math.round((measuredBenIds.size / programBens.length) * 100);
-
-      return {
-        programId: l.programId,
-        programLabel,
-        beneficiaryCount: programBens.length,
-        serviceLogCount: periodOutcomes.length,
-        reportReadinessPct,
-      };
-    });
-  }, [myLinks, beneficiaries, outcomes, customPrograms, periodCutoff]);
+  const rollups: GrantProgramRollup[] = useMemo(
+    () => selectGrantProgramRollups(grantId, {
+      links, beneficiaries, customPrograms, outcomes, periodDays,
+    }),
+    [grantId, links, beneficiaries, customPrograms, outcomes, periodDays],
+  );
 
   const handleAdd = () => {
     if (!pickProgram) { toast.error('Pick a programme to link.'); return; }
@@ -137,15 +107,14 @@ const GrantProgramsPanel: React.FC<Props> = ({ grantId, periodDays = 90 }) => {
         </div>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {rollups.map((r, i) => {
-            const link = myLinks[i];
+          {rollups.map((r) => {
             const ready = r.reportReadinessPct;
             const readyTone = ready >= 75 ? '#16A34A' : ready >= 40 ? '#d97706' : '#DC2626';
             const readyBg   = ready >= 75 ? '#f0fdf4' : ready >= 40 ? '#fffbeb' : '#fef2f2';
             const readyBd   = ready >= 75 ? '#86efac' : ready >= 40 ? '#fde68a' : '#fecaca';
             return (
               <li
-                key={link.id}
+                key={r.linkId}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '0.6rem',
                   padding: '0.55rem 0.7rem',
@@ -157,9 +126,9 @@ const GrantProgramsPanel: React.FC<Props> = ({ grantId, periodDays = 90 }) => {
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                     {r.programLabel}
-                    {link.role && (
+                    {r.role && (
                       <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        · {link.role}
+                        · {r.role}
                       </span>
                     )}
                   </div>
@@ -194,7 +163,7 @@ const GrantProgramsPanel: React.FC<Props> = ({ grantId, periodDays = 90 }) => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { removeLink(link.id); toast.success('Link removed.'); }}
+                  onClick={() => { removeLink(r.linkId); toast.success('Link removed.'); }}
                   title="Unlink programme"
                   aria-label="Unlink programme"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--color-text-tertiary)' }}
