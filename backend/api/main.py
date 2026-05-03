@@ -2884,6 +2884,24 @@ class UpdateNgoRequest(BaseModel):
     fcra_reg: Optional[str] = None
     pan: Optional[str] = None
     state: Optional[str] = None
+    # Wizard-only optional extras (Task #12). Persisted into ngos.meta JSONB
+    # so we don't have to grow the ngos schema for every new wizard field.
+    section_80g: Optional[str] = None
+    cause_area: Optional[str] = None
+    logo_data_url: Optional[str] = None
+    fcra_status: Optional[str] = None  # 'none' | 'pending' | 'active'
+    whatsapp_phone: Optional[str] = None
+    whatsapp_verified: Optional[bool] = None
+    whatsapp_connected_at: Optional[str] = None
+
+
+class NgoInviteEntry(BaseModel):
+    email: str
+    role: str
+
+
+class NgoInviteRequest(BaseModel):
+    invites: List[NgoInviteEntry]
 
 
 class NotificationPrefsRequest(BaseModel):
@@ -3096,14 +3114,25 @@ def get_settings(current_user: TokenUser = Depends(get_current_user)):
             s = _settings_mem(current_user)
             return {
                 "profile": {"full_name": s["profile"].get("full_name")},
-                "ngo": {**s["ngo"], "ngo_id": current_user.ngo_id},
+                "ngo": {**s["ngo"], "ngo_id": current_user.ngo_id, "meta": s.get("ngo_meta", {})},
                 "notification_prefs": s.get("notification_prefs", {}),
             }
         cur = conn.cursor()
         cur.execute("SELECT full_name FROM users WHERE id = %s::uuid", (current_user.user_id,))
         u = cur.fetchone()
-        cur.execute("SELECT name, reg_no, fcra_reg, pan, state FROM ngos WHERE id = %s::uuid", (current_user.ngo_id,))
-        n = cur.fetchone()
+        # ngos.meta is created lazily by post_settings_ngo (Task #12). Tolerate
+        # the column not existing yet on older DBs.
+        try:
+            cur.execute(
+                "SELECT name, reg_no, fcra_reg, pan, state, COALESCE(meta, '{}'::jsonb) FROM ngos WHERE id = %s::uuid",
+                (current_user.ngo_id,),
+            )
+            n = cur.fetchone()
+            ngo_meta = _parse_jsonb(n[5]) if n else {}
+        except Exception:
+            cur.execute("SELECT name, reg_no, fcra_reg, pan, state FROM ngos WHERE id = %s::uuid", (current_user.ngo_id,))
+            n = cur.fetchone()
+            ngo_meta = {}
         # prefs table is created lazily; handle missing table safely
         p = None
         try:
@@ -3127,9 +3156,28 @@ def get_settings(current_user: TokenUser = Depends(get_current_user)):
                 "fcra_reg": (n[2] if n else None),
                 "pan": (n[3] if n else None),
                 "state": (n[4] if n else None),
+                "meta": ngo_meta,
             },
             "notification_prefs": (p[0] if p else {}),
         }
+
+
+def _ngo_meta_patch(body: "UpdateNgoRequest") -> Dict[str, Any]:
+    """Build the JSON patch that goes into ngos.meta for wizard extras."""
+    patch: Dict[str, Any] = {}
+    if body.section_80g is not None:    patch["section_80g"] = body.section_80g
+    if body.cause_area is not None:     patch["cause_area"] = body.cause_area
+    if body.logo_data_url is not None:  patch["logo_data_url"] = body.logo_data_url
+    if body.fcra_status is not None:    patch["fcra_status"] = body.fcra_status
+    if (body.whatsapp_phone is not None
+            or body.whatsapp_verified is not None
+            or body.whatsapp_connected_at is not None):
+        patch["whatsapp"] = {
+            **({"phone": body.whatsapp_phone} if body.whatsapp_phone is not None else {}),
+            **({"verified": bool(body.whatsapp_verified)} if body.whatsapp_verified is not None else {}),
+            **({"connected_at": body.whatsapp_connected_at} if body.whatsapp_connected_at is not None else {}),
+        }
+    return patch
 
 
 @app.post("/settings/profile", tags=["Settings"])
@@ -3150,24 +3198,155 @@ def post_settings_profile(body: UpdateProfileRequest, current_user: TokenUser = 
 
 @app.post("/settings/ngo", tags=["Settings"])
 def post_settings_ngo(body: UpdateNgoRequest, current_user: TokenUser = Depends(get_current_user)):
+    meta_patch = _ngo_meta_patch(body)
     with db_conn() as conn:
         if conn is None:
             s = _settings_mem(current_user)
-            s["ngo"] = {**s["ngo"], **body.model_dump()}
-            return {"ok": True, "ngo": s["ngo"], "source": "memory"}
+            # Keep core fields on s["ngo"] and stash wizard extras separately
+            # under s["ngo_meta"] so the GET shape mirrors the DB version.
+            core = {k: v for k, v in body.model_dump().items()
+                    if k in ("name", "reg_no", "fcra_reg", "pan", "state") and v is not None}
+            s["ngo"] = {**s["ngo"], **core}
+            if meta_patch:
+                s["ngo_meta"] = {**s.get("ngo_meta", {}), **meta_patch}
+            return {"ok": True, "ngo": {**s["ngo"], "meta": s.get("ngo_meta", {})}, "source": "memory"}
         cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE ngos
-            SET name = %s, reg_no = %s, fcra_reg = %s, pan = %s, state = %s
-            WHERE id = %s::uuid
-            RETURNING name, reg_no, fcra_reg, pan, state
-            """,
-            (body.name, body.reg_no, body.fcra_reg, body.pan, body.state, current_user.ngo_id),
-        )
+        # Lazy-add the meta column so older DBs upgrade themselves on first
+        # wizard run. Same pattern as user_notification_prefs above.
+        try:
+            cur.execute("ALTER TABLE ngos ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb")
+        except Exception:
+            pass
+        if meta_patch:
+            cur.execute(
+                """
+                UPDATE ngos
+                SET name = %s, reg_no = %s, fcra_reg = %s, pan = %s, state = %s,
+                    meta = COALESCE(meta, '{}'::jsonb) || %s::jsonb
+                WHERE id = %s::uuid
+                RETURNING name, reg_no, fcra_reg, pan, state, COALESCE(meta, '{}'::jsonb)
+                """,
+                (body.name, body.reg_no, body.fcra_reg, body.pan, body.state,
+                 json.dumps(meta_patch), current_user.ngo_id),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE ngos
+                SET name = %s, reg_no = %s, fcra_reg = %s, pan = %s, state = %s
+                WHERE id = %s::uuid
+                RETURNING name, reg_no, fcra_reg, pan, state, COALESCE(meta, '{}'::jsonb)
+                """,
+                (body.name, body.reg_no, body.fcra_reg, body.pan, body.state, current_user.ngo_id),
+            )
         row = cur.fetchone()
-        ngo = {"name": row[0], "reg_no": row[1], "fcra_reg": row[2], "pan": row[3], "state": row[4]} if row else body.model_dump()
+        ngo = (
+            {"name": row[0], "reg_no": row[1], "fcra_reg": row[2], "pan": row[3],
+             "state": row[4], "meta": _parse_jsonb(row[5])}
+            if row else {**body.model_dump(), "meta": meta_patch}
+        )
         return {"ok": True, "ngo": ngo, "source": "db"}
+
+
+# ── Onboarding wizard: team invites (Task #12) ───────────────────────────────
+# Persists invites the ED added in the signup wizard so they survive a
+# browser wipe and surface again under Settings → Team. We don't actually
+# send invite emails in MVP — the rows are queued for the future onboarding
+# email worker. Mirrors the DB-first/memory-fallback pattern.
+
+INVITES_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def _invites_table_init(cur) -> None:
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ngo_invites (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            ngo_id UUID NOT NULL,
+            email TEXT NOT NULL,
+            role TEXT NOT NULL,
+            invited_by UUID,
+            invited_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            status TEXT NOT NULL DEFAULT 'pending',
+            UNIQUE (ngo_id, email)
+        )
+        """
+    )
+
+
+@app.get("/onboarding/invites", tags=["Settings"])
+def list_invites(current_user: TokenUser = Depends(get_current_user)):
+    with db_conn() as conn:
+        if conn is None:
+            return {"invites": INVITES_MEM_BY_NGO.get(current_user.ngo_id, []), "source": "memory"}
+        cur = conn.cursor()
+        try:
+            _invites_table_init(cur)
+            cur.execute(
+                """
+                SELECT email, role, status,
+                       to_char(invited_at AT TIME ZONE 'UTC',
+                               'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                FROM ngo_invites
+                WHERE ngo_id = %s::uuid
+                ORDER BY invited_at DESC
+                LIMIT 200
+                """,
+                (current_user.ngo_id,),
+            )
+            return {
+                "invites": [
+                    {"email": r[0], "role": r[1], "status": r[2], "invitedAt": r[3]}
+                    for r in cur.fetchall()
+                ],
+                "source": "db",
+            }
+        except Exception:
+            return {"invites": [], "source": "db"}
+
+
+@app.post("/onboarding/invites", tags=["Settings"])
+def create_invites(body: NgoInviteRequest, current_user: TokenUser = Depends(get_current_user)):
+    cleaned = [
+        {"email": i.email.strip().lower(), "role": (i.role or "").strip()}
+        for i in body.invites
+        if i.email.strip() and i.role.strip()
+    ][:25]
+    if not cleaned:
+        return {"queued": 0, "invites": [], "source": "memory"}
+    with db_conn() as conn:
+        if conn is None:
+            now = datetime.now(timezone.utc).isoformat()
+            existing = INVITES_MEM_BY_NGO.setdefault(current_user.ngo_id, [])
+            existing_emails = {i["email"] for i in existing}
+            queued = []
+            for entry in cleaned:
+                if entry["email"] in existing_emails:
+                    continue
+                rec = {**entry, "status": "pending", "invitedAt": now}
+                existing.insert(0, rec)
+                existing_emails.add(entry["email"])
+                queued.append(rec)
+            return {"queued": len(queued), "invites": queued, "source": "memory"}
+        cur = conn.cursor()
+        _invites_table_init(cur)
+        queued = []
+        for entry in cleaned:
+            cur.execute(
+                """
+                INSERT INTO ngo_invites (ngo_id, email, role, invited_by)
+                VALUES (%s::uuid, %s, %s, %s::uuid)
+                ON CONFLICT (ngo_id, email) DO NOTHING
+                RETURNING email, role, status,
+                          to_char(invited_at AT TIME ZONE 'UTC',
+                                  'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                """,
+                (current_user.ngo_id, entry["email"], entry["role"], current_user.user_id),
+            )
+            row = cur.fetchone()
+            if row:
+                queued.append({"email": row[0], "role": row[1], "status": row[2], "invitedAt": row[3]})
+        return {"queued": len(queued), "invites": queued, "source": "db"}
 
 
 @app.post("/settings/notifications", tags=["Settings"])

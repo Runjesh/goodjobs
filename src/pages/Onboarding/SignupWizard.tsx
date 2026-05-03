@@ -15,6 +15,10 @@ import FirstProgramStep from './wizardSteps/FirstProgramStep';
 import InviteTeamStep from './wizardSteps/InviteTeamStep';
 import ImportBeneficiariesStep from './wizardSteps/ImportBeneficiariesStep';
 import WhatsAppStep from './wizardSteps/WhatsAppStep';
+import {
+  persistOrgProfile, persistFirstProgram, persistInvites,
+  persistBeneficiaries, persistWhatsApp,
+} from './wizardPersist';
 import './SignupWizard.css';
 
 export interface StepProps<K extends keyof WizardData> {
@@ -74,15 +78,19 @@ const SignupWizard: React.FC = () => {
       const title = fp.name.trim();
       // Idempotent: don't double-add if user clicks Continue twice.
       const existing = useStore.getState().campaigns;
-      if (existing.some((c) => c.title === title && c.details?.source === 'signup-wizard')) return;
-      useStore.getState().addCampaign({
-        title,
-        goal: 250000,
-        status: 'draft',
-        image: 'linear-gradient(135deg, #0F766E, #14b8a6)',
-        cause: fp.causeArea,
-        details: { source: 'signup-wizard', startDate: fp.startDate ?? null, geography: fp.geography ?? null },
-      });
+      const dup = existing.some((c) => c.title === title && c.details?.source === 'signup-wizard');
+      if (!dup) {
+        useStore.getState().addCampaign({
+          title,
+          goal: 250000,
+          status: 'draft',
+          image: 'linear-gradient(135deg, #0F766E, #14b8a6)',
+          cause: fp.causeArea,
+          details: { source: 'signup-wizard', startDate: fp.startDate ?? null, geography: fp.geography ?? null },
+        });
+      }
+      // Fire-and-forget backend persistence; toast on failure happens inside.
+      void persistFirstProgram(fp);
       return;
     }
     if (id === 'import-beneficiaries') {
@@ -104,6 +112,7 @@ const SignupWizard: React.FC = () => {
         });
         existingNames.add(name);
       });
+      void persistBeneficiaries(rows);
       return;
     }
     // ── Org Profile / Invite Team / WhatsApp persistence ───────────────────
@@ -123,6 +132,7 @@ const SignupWizard: React.FC = () => {
           ...(op.fcraStatus ? { fcraStatus: op.fcraStatus } : {}),
         },
       });
+      void persistOrgProfile(user?.ngoName ?? '', op);
       return;
     }
     if (id === 'invite-team') {
@@ -138,6 +148,7 @@ const SignupWizard: React.FC = () => {
           .map((i) => ({ email: i.email.trim(), role: i.role, invitedAt: new Date().toISOString() })),
       ];
       updateUser({ pendingInvites: merged });
+      void persistInvites(fresh);
       return;
     }
     if (id === 'connect-whatsapp') {
@@ -146,6 +157,7 @@ const SignupWizard: React.FC = () => {
       updateUser({
         whatsapp: { phone: cw.phone, verified: !!cw.verified, connectedAt: new Date().toISOString() },
       });
+      void persistWhatsApp(user?.ngoName ?? '', cw);
       return;
     }
   }, [updateUser, user]);
