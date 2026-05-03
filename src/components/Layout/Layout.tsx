@@ -30,7 +30,7 @@ import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 import { useStore, type ComplianceDocument, type Donor } from '../../store/useStore';
 import { getPageVariants } from '../../motion/variants';
-import { setLifecycleScope } from '../../utils/donorLifecycle';
+import { setLifecycleScope, hydrateDonorLifecycles } from '../../utils/donorLifecycle';
 import './Layout.css';
 
 // ── Navigation Config ────────────────────────────────────────────────────────
@@ -333,6 +333,13 @@ const Layout: React.FC = () => {
         }
       } catch {
         seedDemoDonorsIfDev();
+      }
+      // Pull persisted donor lifecycle state (touchpoint completions,
+      // lapse-risk acks) so milestones survive browser switches and are
+      // shared across the team. Fire-and-forget — failures fall back to
+      // whatever's already in the local cache.
+      if (!cancelled) {
+        try { await hydrateDonorLifecycles(); } catch { /* non-fatal */ }
       }
     };
     run();

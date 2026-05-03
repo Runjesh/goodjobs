@@ -1,3 +1,5 @@
+import { apiFetch } from '../api/client';
+
 export type LifecycleStage =
   | 'acquisition'
   | 'stewardship'
@@ -37,13 +39,24 @@ export const MILESTONE_DEFS: MilestoneDef[] = [
 ];
 
 // ── Storage scope ────────────────────────────────────────────────────────────
-// Lifecycle state is scoped per tenant (ngoId) so multiple orgs in the same
+// Lifecycle state is now persisted SERVER-SIDE per donor (Task #9). The
+// localStorage layer is kept as a synchronous read-through cache so the
+// existing pure helpers below (`computeStage`, `computeTouchpoints`, etc.)
+// can stay synchronous and the UI can render immediately on first paint.
+//
+// Lifecycle is scoped per tenant (ngoId) so multiple orgs in the same
 // browser can't collide on donor IDs.  Layout calls `setLifecycleScope`
 // whenever the authenticated user changes; if no scope is set we fall back
 // to `_default` so unit-style usage still works.
 let CURRENT_SCOPE: string = '_default';
 export function setLifecycleScope(scope: string | null | undefined): void {
-  CURRENT_SCOPE = scope && String(scope).length > 0 ? String(scope) : '_default';
+  const next = scope && String(scope).length > 0 ? String(scope) : '_default';
+  if (next !== CURRENT_SCOPE) {
+    // Different tenant ⇒ wipe the in-memory cache so donors from one org
+    // can't leak into another's view via the read-through cache.
+    MEM_CACHE.clear();
+  }
+  CURRENT_SCOPE = next;
 }
 const STORAGE_KEY  = (id: string | number) => `goodjobs.${CURRENT_SCOPE}.donor.${id}.v2`;
 const LEGACY_KEY_V1 = (id: string | number) => `goodjobs.donor.${id}.v1`;
@@ -60,6 +73,15 @@ export const STAGE_META: Record<LifecycleStage, { label: string; color: string; 
   unknown:     { label: 'New',         color: '#64748b', bg: '#e2e8f0', description: 'No gift recorded yet.' },
 };
 
+// ── Read-through cache ───────────────────────────────────────────────────────
+// Mem cache lets `loadDonorState` stay synchronous (the compute* helpers in
+// this module + a lot of UI code rely on that). The cache is populated by
+// `hydrateDonorLifecycles()` (Layout calls this once per session) and by
+// every successful mutation. Falls back to localStorage on miss so existing
+// per-donor state still shows up before hydration completes.
+const MEM_CACHE = new Map<string, DonorLifecycleState>();
+const cacheKey = (id: string | number) => `${CURRENT_SCOPE}:${String(id)}`;
+
 function parseDate(raw: unknown): Date | null {
   if (!raw) return null;
   const d = new Date(raw as string);
@@ -72,10 +94,11 @@ export function daysSinceLastGift(lastGift: unknown, now: Date = new Date()): nu
   return Math.floor((now.getTime() - d.getTime()) / 86_400_000);
 }
 
-function safeParseState(raw: string | null): DonorLifecycleState | null {
+function safeParseState(raw: string | null | undefined): DonorLifecycleState | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== 'object') return null;
     return {
       milestones: parsed.milestones && typeof parsed.milestones === 'object' ? parsed.milestones : {},
       skipped:    parsed.skipped    && typeof parsed.skipped    === 'object' ? parsed.skipped    : {},
@@ -87,28 +110,91 @@ function safeParseState(raw: string | null): DonorLifecycleState | null {
   }
 }
 
+function normaliseStateObject(obj: unknown): DonorLifecycleState | null {
+  if (!obj || typeof obj !== 'object') return null;
+  return safeParseState(JSON.stringify(obj));
+}
+
 export function loadDonorState(donorId: string | number): DonorLifecycleState {
+  const key = cacheKey(donorId);
+  const cached = MEM_CACHE.get(key);
+  if (cached) return cached;
   try {
     // Prefer scoped v2 key.
     const scoped = safeParseState(localStorage.getItem(STORAGE_KEY(donorId)));
-    if (scoped) return scoped;
+    if (scoped) { MEM_CACHE.set(key, scoped); return scoped; }
     // One-shot migration: read legacy unscoped v1 key, write into scoped v2.
     // Legacy data is left intact so other tenants on the same browser can
     // still read it during their own first migration.
     const legacy = safeParseState(localStorage.getItem(LEGACY_KEY_V1(donorId)));
     if (legacy) {
       try { localStorage.setItem(STORAGE_KEY(donorId), JSON.stringify(legacy)); } catch { /* ignore */ }
+      MEM_CACHE.set(key, legacy);
       return legacy;
     }
-    return { milestones: {}, skipped: {} };
+    const empty: DonorLifecycleState = { milestones: {}, skipped: {} };
+    MEM_CACHE.set(key, empty);
+    return empty;
   } catch {
     return { milestones: {}, skipped: {} };
   }
 }
 
+/** Write-through to cache + localStorage. The server PUT is fired by the
+ *  mutation helpers (`markMilestoneDone`, etc.) so callers don't have to
+ *  remember to do it. */
 export function saveDonorState(donorId: string | number, state: DonorLifecycleState): void {
+  MEM_CACHE.set(cacheKey(donorId), state);
   try { localStorage.setItem(STORAGE_KEY(donorId), JSON.stringify(state)); } catch { /* ignore */ }
 }
+
+// ── Server sync ──────────────────────────────────────────────────────────────
+
+/** Fire-and-forget PUT to persist the donor's lifecycle state. Failures are
+ *  logged but don't throw — the caller has already updated the cache + LS,
+ *  so the UI stays responsive even if the network is down. The next
+ *  successful hydrate will reconcile. */
+function persistRemote(donorId: string | number, state: DonorLifecycleState): void {
+  try {
+    void apiFetch(`/crm/donors/${encodeURIComponent(String(donorId))}/lifecycle`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state }),
+    }).catch(() => { /* see fn doc */ });
+  } catch {
+    /* apiFetch unavailable (test env) — cache + LS are still consistent. */
+  }
+}
+
+/**
+ * Bulk-hydrate the in-memory cache (and write through to localStorage) from
+ * the server. Called once by Layout after the user is authenticated. After
+ * this resolves, `loadDonorState` returns the same data on every device.
+ *
+ * Resolves quietly on auth/network failure so the UI can still render the
+ * locally-cached state.
+ */
+export async function hydrateDonorLifecycles(): Promise<void> {
+  let res: Response;
+  try {
+    res = await apiFetch('/crm/donors/lifecycle');
+  } catch {
+    return;
+  }
+  if (!res.ok) return;
+  let data: unknown;
+  try { data = await res.json(); } catch { return; }
+  const states = (data as { states?: Record<string, unknown> } | null)?.states;
+  if (!states || typeof states !== 'object') return;
+  for (const [donorId, raw] of Object.entries(states)) {
+    const parsed = normaliseStateObject(raw);
+    if (!parsed) continue;
+    MEM_CACHE.set(cacheKey(donorId), parsed);
+    try { localStorage.setItem(STORAGE_KEY(donorId), JSON.stringify(parsed)); } catch { /* ignore */ }
+  }
+}
+
+// ── Mutations (write to cache+LS, then push to server) ───────────────────────
 
 export function markMilestoneDone(donorId: string | number, mid: MilestoneId, when: Date = new Date()): DonorLifecycleState {
   const state = loadDonorState(donorId);
@@ -118,6 +204,7 @@ export function markMilestoneDone(donorId: string | number, mid: MilestoneId, wh
     const next = { ...state.skipped }; delete next[mid]; state.skipped = next;
   }
   saveDonorState(donorId, state);
+  persistRemote(donorId, state);
   return state;
 }
 
@@ -125,6 +212,7 @@ export function markMilestoneSkipped(donorId: string | number, mid: MilestoneId)
   const state = loadDonorState(donorId);
   state.skipped = { ...state.skipped, [mid]: true };
   saveDonorState(donorId, state);
+  persistRemote(donorId, state);
   return state;
 }
 
@@ -132,6 +220,7 @@ export function ackLapseRisk(donorId: string | number, when: Date = new Date()):
   const state = loadDonorState(donorId);
   state.lapseRiskAckAt = when.toISOString();
   saveDonorState(donorId, state);
+  persistRemote(donorId, state);
   return state;
 }
 

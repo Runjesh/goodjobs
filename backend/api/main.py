@@ -86,6 +86,10 @@ VOLUNTEERS_ROSTER_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 FINANCE_GRANTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 INBOX_STATE_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
 CRM_OUTREACH_LOG_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+# Donor lifecycle state — milestones / skipped / lapseRiskAck per donor.
+# Mirrors the JSONB blob stored in donors.meta.lifecycle when a DB is wired
+# up. Shape: {ngo_id: {donor_id: {state: dict, updated_at: iso}}}.
+DONOR_LIFECYCLE_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Any]]] = {}
 FINANCE_EVENTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 NOTIFICATIONS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -2267,6 +2271,124 @@ def delete_donor(donor_id: str, current_user: TokenUser = Depends(require_role("
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Donor not found")
         return {"status": "deleted", "id": donor_id, "source": "db"}
+
+
+# ── Donor lifecycle (touchpoint completion + lapse-risk ack) ──────────────
+# Persists the per-donor nurture state server-side so milestone history
+# survives browser switches and is shared across teammates. Replaces the
+# previous localStorage-only storage in src/utils/donorLifecycle.ts.
+#
+# State shape (kept loose so the client can evolve it without a migration):
+#   {
+#     "milestones": { "thankyou": "<iso>", "impact": "<iso>", ... },
+#     "skipped":    { "renewal": true, ... },
+#     "lapseRiskAckAt": "<iso>",
+#     "notes": "..."
+#   }
+#
+# Storage:
+#   • DB mode → donors.meta JSONB at key `lifecycle` (column already exists,
+#     no migration required).
+#   • Memory mode → DONOR_LIFECYCLE_MEM_BY_NGO[ngo_id][donor_id].
+
+def _validate_lifecycle_state(state: Any) -> Dict[str, Any]:
+    if not isinstance(state, dict):
+        raise HTTPException(status_code=400, detail="state must be an object")
+    out: Dict[str, Any] = {}
+    ms = state.get("milestones")
+    out["milestones"] = ms if isinstance(ms, dict) else {}
+    sk = state.get("skipped")
+    out["skipped"] = sk if isinstance(sk, dict) else {}
+    if isinstance(state.get("lapseRiskAckAt"), str):
+        out["lapseRiskAckAt"] = state["lapseRiskAckAt"]
+    if isinstance(state.get("notes"), str):
+        out["notes"] = state["notes"]
+    return out
+
+
+@app.get("/crm/donors/lifecycle", tags=["CRM"])
+def list_donor_lifecycle(current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising", "programs"))):
+    """Bulk hydrate — returns {donor_id: state} for every donor with state.
+    Used by Layout on app load so CRM/Today render server-side milestones
+    without a per-donor round-trip."""
+    with db_conn() as conn:
+        if conn is None:
+            store = DONOR_LIFECYCLE_MEM_BY_NGO.get(current_user.ngo_id, {})
+            return {
+                "states": {did: entry.get("state") or {} for did, entry in store.items()},
+                "source": "memory",
+            }
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text, COALESCE(meta, '{}'::jsonb)
+            FROM donors
+            WHERE ngo_id = %s::uuid
+            """,
+            (current_user.ngo_id,),
+        )
+        states: Dict[str, Dict[str, Any]] = {}
+        for r in cur.fetchall():
+            meta = _parse_jsonb(r[1])
+            life = meta.get("lifecycle") if isinstance(meta, dict) else None
+            if isinstance(life, dict) and life:
+                states[r[0]] = life
+        return {"states": states, "source": "db"}
+
+
+@app.get("/crm/donors/{donor_id}/lifecycle", tags=["CRM"])
+def get_donor_lifecycle(donor_id: str, current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising", "programs"))):
+    with db_conn() as conn:
+        if conn is None:
+            entry = DONOR_LIFECYCLE_MEM_BY_NGO.get(current_user.ngo_id, {}).get(str(donor_id))
+            if not entry:
+                return {"state": None, "updated_at": None, "source": "memory"}
+            return {"state": entry.get("state") or {}, "updated_at": entry.get("updated_at"), "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COALESCE(meta, '{}'::jsonb) FROM donors WHERE id = %s::uuid AND ngo_id = %s::uuid",
+            (donor_id, current_user.ngo_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Donor not found")
+        meta = _parse_jsonb(row[0])
+        life = meta.get("lifecycle") if isinstance(meta, dict) else None
+        return {"state": life if isinstance(life, dict) and life else None, "updated_at": None, "source": "db"}
+
+
+@app.put("/crm/donors/{donor_id}/lifecycle", tags=["CRM"])
+def put_donor_lifecycle(
+    donor_id: str,
+    body: Dict[str, Any] = Body(...),
+    current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising")),
+):
+    state = _validate_lifecycle_state(body.get("state") if isinstance(body, dict) else None)
+    ts = datetime.now(timezone.utc).isoformat()
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            donors = DONORS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            if not any(str(d.get("id")) == str(donor_id) for d in donors):
+                raise HTTPException(status_code=404, detail="Donor not found")
+            DONOR_LIFECYCLE_MEM_BY_NGO.setdefault(current_user.ngo_id, {})[str(donor_id)] = {
+                "state": state, "updated_at": ts,
+            }
+            return {"status": "saved", "updated_at": ts, "source": "memory"}
+        cur = conn.cursor()
+        # Merge into donors.meta.lifecycle so we don't clobber sibling keys.
+        cur.execute(
+            """
+            UPDATE donors
+            SET meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('lifecycle', %s::jsonb)
+            WHERE id = %s::uuid AND ngo_id = %s::uuid
+            RETURNING id::text
+            """,
+            (json.dumps(state), donor_id, current_user.ngo_id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Donor not found")
+        return {"status": "saved", "updated_at": ts, "source": "db"}
 
 
 class TransactionCreate(BaseModel):

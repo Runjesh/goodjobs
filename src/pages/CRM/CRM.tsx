@@ -243,9 +243,10 @@ const CRM: React.FC = () => {
       } catch {
         success = false;
       }
-      // DEV fallback: with no backend the API will fail; treat as success in
-      // dev so demo flows still work end-to-end.
-      if (!success && import.meta.env.DEV) success = true;
+      // No DEV fallback: a milestone is only marked done on a real successful
+      // outreach response. This is the contract Task #9 locks in — failures
+      // (network down, backend offline, 4xx/5xx) leave the touchpoint in its
+      // overdue/due state so the team retries instead of seeing a false-green.
 
       if (success) {
         // Only mark the milestone as completed AFTER the outreach actually
