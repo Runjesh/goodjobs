@@ -12,7 +12,7 @@ import { useStore } from '../../store/useStore';
 import { isVisibleToday, type Task } from '../../utils/tasks';
 import { useAuth, defaultPresetForRole } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
-import { computeStage, nextDueMilestone, subscribeLifecycleHydrated } from '../../utils/donorLifecycle';
+import { computeStage, nextDueMilestone, subscribeLifecycleHydrated, ackLapseRisk } from '../../utils/donorLifecycle';
 import { readComplianceReminders } from '../../utils/complianceReminders';
 import toast from 'react-hot-toast';
 import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
@@ -61,7 +61,11 @@ interface PriorityItem {
   ageDays?: number;
   delta?: string;
   deltaDir?: 'up' | 'down' | 'flat';
-  actionType?: 'receipts' | 'whatsapp';
+  actionType?: 'receipts' | 'whatsapp' | 'ack-lapse-risk';
+  // Carries the underlying donor IDs for rollup items (e.g. lapse-risk) so
+  // inline actions like "Acknowledge" can fan out to the lifecycle helpers
+  // without re-deriving the at-risk set from raw donor data.
+  donorIds?: (string | number)[];
 }
 
 interface Win { id: string; text: string; icon: React.ElementType; }
@@ -249,10 +253,12 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
       items.push({
         id: 'donors-lapse-risk',
         text: `${lapseRisk.length} donor${lapseRisk.length > 1 ? 's' : ''} at lapse risk — no response in 14d after renewal touch`,
-        action: 'Open re-engagement queue',
+        action: 'Acknowledge',
         path: '/crm',
         level: 'attention',
         ageDays: 14,
+        actionType: 'ack-lapse-risk',
+        donorIds: lapseRisk.map((d: any) => d.id),
       });
     }
     // Touchpoint due today/overdue across all donors → single rollup item.
@@ -373,6 +379,25 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
       const msg = encodeURIComponent('Hi, following up on behalf of our organisation. How can we support you?');
       window.open(`https://wa.me/?text=${msg}`, '_blank');
       setActionDone(prev => new Set([...prev, item.id]));
+    } else if (item.actionType === 'ack-lapse-risk') {
+      // Mark every at-risk donor as acknowledged so computeStage will
+      // suppress them for the lapse-risk window (14d). Persistence is
+      // handled inside ackLapseRisk (LS + fire-and-forget PUT).
+      const ids = item.donorIds ?? [];
+      setActionBusy(prev => new Set([...prev, item.id]));
+      try {
+        ids.forEach(id => { ackLapseRisk(id); });
+        setActionDone(prev => new Set([...prev, item.id]));
+        // Hide from Today for the same window as the ack itself so the
+        // user sees it leave the list immediately, even before the next
+        // /crm/donors/lifecycle hydrate refreshes computeStage inputs.
+        onSnooze(item.id, 24 * 14);
+        toast.success(`Acknowledged ${ids.length} donor${ids.length === 1 ? '' : 's'} — back in 14 days if still at risk`);
+      } catch {
+        toast.error('Could not acknowledge — please try again');
+      } finally {
+        setActionBusy(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+      }
     } else if (item.path) {
       onAction(item.path);
     }
@@ -444,6 +469,21 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
                 <span className="priority-item-done">
                   <CheckCircle2 size={12} /> Done
                 </span>
+              )}
+
+              {/* Lapse-risk: explicit "Snooze 14 days" inline action so leaders
+                  can defer the rollup without opening the generic snooze menu.
+                  Hidden once the item has been acknowledged (it'll disappear
+                  on the next render anyway). */}
+              {item.actionType === 'ack-lapse-risk' && !actionDone.has(item.id) && (
+                <button
+                  className="priority-item-action"
+                  onClick={() => onSnooze(item.id, 24 * 14)}
+                  style={{ color: meta.color }}
+                  title="Hide this for 14 days"
+                >
+                  <BellOff size={11} /> Snooze 14 days
+                </button>
               )}
 
               {level !== 'urgent' && (
