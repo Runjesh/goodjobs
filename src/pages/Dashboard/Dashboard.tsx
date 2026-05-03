@@ -359,6 +359,26 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
   const [actionBusy, setActionBusy] = useState<Set<string>>(new Set());
   const [actionDone, setActionDone] = useState<Set<string>>(new Set());
 
+  // Single helper used by both "Acknowledge" and "Snooze 14 days" on the
+  // lapse-risk rollup. Both flows MUST persist through `ackLapseRisk` so
+  // the suppression survives across devices via the lifecycle endpoint
+  // — the local `onSnooze` call is only kept for immediate UX hiding.
+  const ackLapseRiskItem = (item: PriorityItem, mode: 'ack' | 'snooze') => {
+    const ids = item.donorIds ?? [];
+    setActionBusy(prev => new Set([...prev, item.id]));
+    try {
+      ids.forEach(id => { ackLapseRisk(id); });
+      setActionDone(prev => new Set([...prev, item.id]));
+      onSnooze(item.id, 24 * 14);
+      const verb = mode === 'ack' ? 'Acknowledged' : 'Snoozed';
+      toast.success(`${verb} ${ids.length} donor${ids.length === 1 ? '' : 's'} — back in 14 days if still at risk`);
+    } catch {
+      toast.error('Could not update — please try again');
+    } finally {
+      setActionBusy(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+    }
+  };
+
   const handleItemAction = async (item: PriorityItem) => {
     if (item.actionType === 'receipts') {
       setActionBusy(prev => new Set([...prev, item.id]));
@@ -380,24 +400,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
       window.open(`https://wa.me/?text=${msg}`, '_blank');
       setActionDone(prev => new Set([...prev, item.id]));
     } else if (item.actionType === 'ack-lapse-risk') {
-      // Mark every at-risk donor as acknowledged so computeStage will
-      // suppress them for the lapse-risk window (14d). Persistence is
-      // handled inside ackLapseRisk (LS + fire-and-forget PUT).
-      const ids = item.donorIds ?? [];
-      setActionBusy(prev => new Set([...prev, item.id]));
-      try {
-        ids.forEach(id => { ackLapseRisk(id); });
-        setActionDone(prev => new Set([...prev, item.id]));
-        // Hide from Today for the same window as the ack itself so the
-        // user sees it leave the list immediately, even before the next
-        // /crm/donors/lifecycle hydrate refreshes computeStage inputs.
-        onSnooze(item.id, 24 * 14);
-        toast.success(`Acknowledged ${ids.length} donor${ids.length === 1 ? '' : 's'} — back in 14 days if still at risk`);
-      } catch {
-        toast.error('Could not acknowledge — please try again');
-      } finally {
-        setActionBusy(prev => { const n = new Set(prev); n.delete(item.id); return n; });
-      }
+      ackLapseRiskItem(item, 'ack');
     } else if (item.path) {
       onAction(item.path);
     }
@@ -478,9 +481,10 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
               {item.actionType === 'ack-lapse-risk' && !actionDone.has(item.id) && (
                 <button
                   className="priority-item-action"
-                  onClick={() => onSnooze(item.id, 24 * 14)}
+                  onClick={() => ackLapseRiskItem(item, 'snooze')}
                   style={{ color: meta.color }}
                   title="Hide this for 14 days"
+                  disabled={actionBusy.has(item.id)}
                 >
                   <BellOff size={11} /> Snooze 14 days
                 </button>
