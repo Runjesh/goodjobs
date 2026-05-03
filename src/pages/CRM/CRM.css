@@ -611,11 +611,5 @@
   color: #7f1d1d;
 }
 
-/* Focus-flash highlight (used by useFocusFromUrl deep-links) */
-.focus-flash {
-  animation: focus-flash 1.6s ease-out;
-}
-@keyframes focus-flash {
-  0%   { background-color: rgba(124, 58, 237, 0.18); box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.35); }
-  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
-}
+/* (.focus-flash moved to src/index.css so deep-link highlighting works
+   on all pages, not just CRM.) */

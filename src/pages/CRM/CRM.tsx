@@ -489,15 +489,22 @@ const CRM: React.FC = () => {
             }),
           });
         } catch {
-          setEmailNotConnected(true);
+          // Network / fetch threw — this is a transient outage, not a
+          // missing-endpoint signal. Keep the composer state intact and
+          // surface a retryable error rather than collapsing into the
+          // "backend not connected" fallback (which would push users to
+          // WhatsApp on every flaky connection).
+          toast.error('Email send failed — network error. Please retry.');
           return;
         }
         if (res.status === 404 || res.status === 405 || res.status === 501) {
+          // Endpoint genuinely not implemented — fall through to the
+          // "Email backend not connected" banner + WhatsApp switch.
           setEmailNotConnected(true);
           return;
         }
         if (!res.ok) {
-          toast.error('Email send failed.');
+          toast.error(`Email send failed (${res.status}).`);
           return;
         }
         // Per-recipient feedback: parse {results:[{donor_id, ok, error?}]} when

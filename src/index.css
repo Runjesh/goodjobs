@@ -880,3 +880,13 @@ select.input-field {
     animation: none;
   }
 }
+
+/* Focus-flash highlight (used by useFocusFromUrl deep-links across all
+   list pages — Programs, CSR, Volunteers, Fundraising, Reports, CRM). */
+.focus-flash {
+  animation: focus-flash 1.6s ease-out;
+}
+@keyframes focus-flash {
+  0%   { background-color: rgba(124, 58, 237, 0.18); box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.35); }
+  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+}
