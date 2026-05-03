@@ -1001,12 +1001,11 @@ const CRM: React.FC = () => {
                   {/* Suggested next action — derived from propensity band when available. */}
                   {(() => {
                     const na = deriveNextAction(activeDonor, propensity?.score);
-                    const channel = na.templateId === 'reactivate' || na.templateId === 'thank' ? 'whatsapp' : 'whatsapp';
                     return (
                       <button
                         type="button"
                         className={`donor-next-action-cta donor-next-action-cta--${na.band}`}
-                        onClick={() => openSingleCompose(channel as 'whatsapp', na.templateId)}
+                        onClick={() => openSingleCompose('whatsapp', na.templateId)}
                       >
                         <Zap size={13} />
                         <span><strong>Suggested next action:</strong> {na.label}</span>
