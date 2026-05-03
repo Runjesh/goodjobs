@@ -43,18 +43,25 @@ vi.mock('../../../context/AuthContext', () => ({
 }));
 
 import GrantDetail from '../GrantDetail';
-import { useStore } from '../../../store/useStore';
+import { useStore, type CSRCard } from '../../../store/useStore';
 
 const CARD_ID = '5';
 
-const seedActiveCard = () => {
-  useStore.setState({
-    csrCards: [{
-      id: CARD_ID, company: 'Mahindra Finance', amount: 4_500_000,
-      project: 'Farmer Support Init', tags: ['Agriculture'], agent: 'RS',
-      col: 'live', date: 'Report due: Nov 30', win_probability: 80,
-    }] as any,
-  });
+const makeCard = (overrides: Partial<CSRCard> = {}): CSRCard => ({
+  id: CARD_ID,
+  company: 'Mahindra Finance',
+  amount: 4_500_000,
+  project: 'Farmer Support Init',
+  tags: ['Agriculture'],
+  agent: 'RS',
+  col: 'live',
+  date: 'Report due: Nov 30',
+  win_probability: 80,
+  ...overrides,
+});
+
+const seedActiveCard = (overrides: Partial<CSRCard> = {}) => {
+  useStore.setState({ csrCards: [makeCard(overrides)] });
 };
 
 const renderGrantDetail = () =>
@@ -135,7 +142,7 @@ describe('Grant closure gate', () => {
     expect(persisted.closingMode).toBe(false);
 
     // Store mutation also fires (column → 'closed').
-    const cards = useStore.getState().csrCards as any[];
+    const cards = useStore.getState().csrCards;
     expect(cards.find(c => String(c.id) === CARD_ID)?.col).toBe('closed');
   });
 
@@ -144,14 +151,7 @@ describe('Grant closure gate', () => {
     // future bug that calls updateCSRCard with col:'closed') must NOT make
     // the close button appear when the checklist is incomplete. The gate is
     // anchored to closureChecklist + isClosed, never to the column alone.
-    useStore.setState({
-      csrCards: [{
-        id: CARD_ID, company: 'Mahindra Finance', amount: 4_500_000,
-        project: 'Farmer Support Init', tags: ['Agriculture'], agent: 'RS',
-        col: 'closed',  // ← bypass attempt
-        date: '', win_probability: 80,
-      }] as any,
-    });
+    seedActiveCard({ col: 'closed', date: '' }); // ← bypass attempt
     // Empty checklist, isClosed false.
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
       closingMode: false, closureChecklist: {}, isClosed: false,

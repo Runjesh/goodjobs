@@ -5,10 +5,19 @@
  * completing all six checklist items, and the closed state must survive a
  * full page reload (i.e. it's truly persisted, not just a transient UI flag).
  *
+ * Walks the real user flow:
+ *   1. Open an Active grant.
+ *   2. Click "Begin Closure" (the only legitimate entry point into the
+ *      checklist — this is the user-facing transition we don't want to be
+ *      bypassable).
+ *   3. Confirm the close button is absent until all 6 boxes are ticked.
+ *   4. Tick all 6 in order, click "Mark grant Closed".
+ *   5. Reload the page — assert the Closed pill is shown and the close
+ *      button is no longer offered (i.e. real persisted Closed UI state,
+ *      not just a flag in localStorage).
+ *
  * The active demo seed card with `col: 'live'` is id 5 (Mahindra Finance —
- * see Layout.tsx seedDemoCsrIfDev + backend _seed_memory_csr). We log in as
- * ED (RBAC: ed has full CSR + grant permissions) so we can both view the
- * grant and click the closure button.
+ * see Layout.tsx seedDemoCsrIfDev + backend _seed_memory_csr).
  */
 import { expect, test, type Page } from '@playwright/test';
 
@@ -24,23 +33,23 @@ async function loginAsEd(page: Page) {
 }
 
 test.describe('Grant closure gate', () => {
-  test('cannot close until all 6 checklist items are ticked; closed state survives reload', async ({ page }) => {
-    // Pre-seed grant state so the page lands directly in closing-mode (with
-    // an empty checklist) — that lets us focus the test on the gate itself
-    // rather than the multi-stage Begin Closure UX.
-    await page.addInitScript(([key]) => {
-      window.localStorage.setItem(key, JSON.stringify({
-        closingMode: true, closureChecklist: {}, isClosed: false,
-      }));
-    }, [STORAGE_KEY]);
-
+  test('Active → Begin Closure → cannot close until all 6 ticked; Closed UI persists across reload', async ({ page }) => {
     await loginAsEd(page);
     await page.goto(`/grants/${CARD_ID}`);
 
-    // Closure checklist is rendered.
-    await expect(page.getByText(/Grant Closure Checklist/i)).toBeVisible({ timeout: 15_000 });
+    // We're on an Active grant — header shows the "Begin Closure" CTA.
+    const beginBtn = page.getByRole('button', { name: /Begin Closure/i });
+    await expect(beginBtn).toBeVisible({ timeout: 15_000 });
+    // The closure checklist must NOT be visible yet — proves the gate is
+    // entered through the Begin Closure transition, not by URL/state alone.
+    await expect(page.getByText(/Grant Closure Checklist/i)).toHaveCount(0);
 
-    // The Close button must be absent while the checklist is incomplete.
+    // Enter closure mode via the real user action.
+    await beginBtn.click();
+    await expect(page.getByText(/Grant Closure Checklist/i)).toBeVisible();
+
+    // While the checklist is empty, the close button must be absent and the
+    // locked-summary message must be visible to the user.
     await expect(page.getByRole('button', { name: /Mark grant Closed/i })).toHaveCount(0);
     await expect(page.getByText(/Complete the checklist to release this summary/i)).toBeVisible();
 
@@ -52,7 +61,7 @@ test.describe('Grant closure gate', () => {
       await boxes.nth(i).check();
     }
 
-    // Now the close button appears; click it.
+    // The close button now appears; click it.
     const closeBtn = page.getByRole('button', { name: /Mark grant Closed/i });
     await expect(closeBtn).toBeVisible();
     await closeBtn.click();
@@ -66,13 +75,14 @@ test.describe('Grant closure gate', () => {
       }, STORAGE_KEY);
     }, { timeout: 5_000 }).toBe(true);
 
-    // Reload — the checklist should still show all 6 ticked and the page
-    // should not regress back to Active.
+    // Reload — the page should render the Closed UI:
+    //   • the "Closed" pill is shown in the header
+    //   • the "Begin Closure" CTA is gone
+    //   • the close button is no longer offered (already closed)
     await page.reload();
     await expect(page.getByText(/Grant Closure Checklist/i)).toBeVisible({ timeout: 15_000 });
-    const boxesAfter = page.locator('.grant-closure-list').getByRole('checkbox');
-    for (let i = 0; i < 6; i++) {
-      await expect(boxesAfter.nth(i)).toBeChecked();
-    }
+    await expect(page.locator('.grant-closed-pill')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Begin Closure/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Mark grant Closed/i })).toHaveCount(0);
   });
 });
