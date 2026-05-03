@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import { useStore } from '../../store/useStore';
 import './GrantDetail.css';
 import GrantTrancheCard from '../../components/Grants/GrantTrancheCard';
+import GrantProgramsPanel from '../../components/Grants/GrantProgramsPanel';
 import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 
 type LifecycleStage = 'pipeline' | 'applied' | 'awarded' | 'active' | 'closed';
@@ -359,6 +360,11 @@ const GrantDetail: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Programme ↔ grant live link — surfaces every programme this
+          grant funds with live beneficiary count, service-log count
+          for the period, and report-readiness. */}
+      <GrantProgramsPanel grantId={String(card.id)} />
 
       {/* ── Stage panels ────────────────────────────── */}
 

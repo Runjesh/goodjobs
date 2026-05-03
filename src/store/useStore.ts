@@ -4,6 +4,7 @@ import type { BeneficiaryOutcome } from '../utils/outcomes';
 import type { GrantTranche } from '../utils/grantLifecycle';
 import type { VolunteerAssignment } from '../utils/volunteerProgram';
 import type { ComplianceGrantLink } from '../utils/complianceGrant';
+import type { ProgramGrantLink } from '../utils/programGrantLink';
 import { programIdFromName } from '../utils/programFinance';
 
 /**
@@ -155,6 +156,8 @@ interface AppState {
   // complianceGrantLinks: which compliance doc(s) gate which grant
   volunteerAssignments:  VolunteerAssignment[];
   complianceGrantLinks:  ComplianceGrantLink[];
+  /** Many-to-many programme ↔ grant edges (Session 3). */
+  programGrantLinks:     ProgramGrantLink[];
 
   // Custom programme names defined by the org (in addition to those
   // derived from existing beneficiaries). Persisted to localStorage so
@@ -177,6 +180,8 @@ interface AppState {
   removeVolunteerAssignment: (id: string) => void;
   addComplianceGrantLink:    (l: ComplianceGrantLink) => void;
   removeComplianceGrantLink: (id: string) => void;
+  addProgramGrantLink:       (l: ProgramGrantLink) => void;
+  removeProgramGrantLink:    (id: string) => void;
 
   setDonors: (donors: Donor[]) => void;
   setComplianceDocs: (docs: ComplianceDocument[]) => void;
@@ -276,6 +281,7 @@ const LS_TRANCHES  = 'goodjobs.grantTranches.v1';
 const LS_MIS       = 'goodjobs.misReviewIntents.v1';
 const LS_VOL_ASSIGN = 'goodjobs.volunteerAssignments.v1';
 const LS_COMP_LINKS = 'goodjobs.complianceGrantLinks.v1';
+const LS_PROG_GRANT_LINKS = 'goodjobs.programGrantLinks.v1';
 const LS_CUSTOM_PROGRAMS = 'goodjobs.customPrograms.v1';
 
 function loadLS<T>(key: string, fallback: T): T {
@@ -341,6 +347,15 @@ const seedComplianceLinks: ComplianceGrantLink[] = SEED_DEMO_CONNECTIONS ? [
   { id: 'cl-6-csr1', grantId: '6', complianceDocId: 'doc-4', reason: 'CSR-1 mandatory for funder' },
 ] : [];
 
+const seedProgramGrantLinks: ProgramGrantLink[] = SEED_DEMO_CONNECTIONS ? [
+  // HDFC Bank CSR (id 3) primarily funds Women Livelihood Center
+  { id: 'pgl-3-wlc', programId: programIdFromName('Women Livelihood Center'), grantId: '3', role: 'primary',   allocationPct: 80, createdAt: new Date(Date.now() - 60 * 86_400_000).toISOString() },
+  // TCS (id 2) primarily funds Digital Literacy 2026
+  { id: 'pgl-2-dl',  programId: programIdFromName('Digital Literacy 2026'),   grantId: '2', role: 'primary',   allocationPct: 90, createdAt: new Date(Date.now() - 45 * 86_400_000).toISOString() },
+  // HDFC also co-funds Digital Literacy 2026 to demonstrate co-funding
+  { id: 'pgl-3-dl',  programId: programIdFromName('Digital Literacy 2026'),   grantId: '3', role: 'co-funder', allocationPct: 10, createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString() },
+] : [];
+
 const seedTranches: GrantTranche[] = SEED_DEMO_CONNECTIONS ? [
   { id: 'tr-3-1', grantId: '3', number: 1, amount: 4_000_000, expectedDate: new Date(Date.now() - 60*86_400_000).toISOString().slice(0,10), status: 'released', releasedAt: new Date(Date.now() - 60*86_400_000).toISOString() },
   { id: 'tr-3-2', grantId: '3', number: 2, amount: 4_000_000, expectedDate: new Date(Date.now() + 10*86_400_000).toISOString().slice(0,10), status: 'awaiting_utilization' },
@@ -364,6 +379,7 @@ export const useStore = create<AppState>((set) => ({
   misReviewIntents:    loadLS<MisReviewIntent[]>(LS_MIS, []),
   volunteerAssignments: loadLS<VolunteerAssignment[]>(LS_VOL_ASSIGN, seedVolAssignments),
   complianceGrantLinks: loadLS<ComplianceGrantLink[]>(LS_COMP_LINKS, seedComplianceLinks),
+  programGrantLinks:    loadLS<ProgramGrantLink[]>(LS_PROG_GRANT_LINKS, seedProgramGrantLinks),
   customPrograms:       loadLS<string[]>(LS_CUSTOM_PROGRAMS, []),
 
   addCustomProgram: (name) => set((state) => {
@@ -456,6 +472,21 @@ export const useStore = create<AppState>((set) => ({
     const next = state.complianceGrantLinks.filter(l => l.id !== id);
     saveLS(LS_COMP_LINKS, next);
     return { complianceGrantLinks: next };
+  }),
+  addProgramGrantLink: (l) => set((state) => {
+    if (state.programGrantLinks.some(x =>
+      x.programId === l.programId && String(x.grantId) === String(l.grantId)
+    )) {
+      return {};
+    }
+    const next = [{ ...l, createdAt: l.createdAt ?? new Date().toISOString() }, ...state.programGrantLinks];
+    saveLS(LS_PROG_GRANT_LINKS, next);
+    return { programGrantLinks: next };
+  }),
+  removeProgramGrantLink: (id) => set((state) => {
+    const next = state.programGrantLinks.filter(l => l.id !== id);
+    saveLS(LS_PROG_GRANT_LINKS, next);
+    return { programGrantLinks: next };
   }),
 
   setDonors: (donors) => set(() => ({ donors })),
