@@ -1559,6 +1559,136 @@ def put_csr_card_grant_state(
         return {"status": "saved", "updated_at": _ts_iso(row[0]), "source": "db"}
 
 
+# ── Grant Parser extraction (Task #7) ─────────────────────────────────────
+# Replaces the hard-coded 14-row "preview" with a real extraction pipeline
+# over the card's uploaded MoU/contract. POST re-runs the extractor; GET
+# returns the cached result so reopening the page is instant. Both routes
+# are NGO-scoped via the standard role guard.
+
+CSR_PARSER_EXTRACTION_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+
+def _load_card_documents(ngo_id: str, card_id: str) -> List[Dict[str, Any]]:
+    """Pull the card's document list from DB or the in-memory store, in the
+    same shape `list_csr_card_documents` returns. Used by the extractor."""
+    with db_conn() as conn:
+        if conn is None:
+            return list(CSR_CARD_DOCS_MEM_BY_NGO.get(ngo_id, {}).get(str(card_id), []))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, name, doc_type, size_bytes, s3_key, created_at
+            FROM csr_card_documents
+            WHERE ngo_id = %s AND card_id = %s
+            ORDER BY created_at DESC
+            LIMIT 50
+            """,
+            (ngo_id, str(card_id)),
+        )
+        return [
+            {"id": r[0], "name": r[1], "doc_type": r[2],
+             "size_bytes": int(r[3] or 0), "s3_key": r[4], "created_at": _ts_iso(r[5])}
+            for r in cur.fetchall()
+        ]
+
+
+def _load_card_meta(ngo_id: str, card_id: str) -> Optional[Dict[str, Any]]:
+    """Return {id, company, project, amount, tags} for a card or None."""
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_csr(ngo_id)
+            for c in CSR_CARDS_MEM_BY_NGO.get(ngo_id, []):
+                if str(c.get("id")) == str(card_id):
+                    return dict(c)
+            return None
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text, company, COALESCE(project, ''), amount::float,
+                   COALESCE(tags, '{}')
+            FROM csr_pipeline_cards
+            WHERE ngo_id = %s AND id = %s
+            """,
+            (ngo_id, str(card_id)),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {"id": row[0], "company": row[1], "project": row[2],
+                "amount": float(row[3] or 0), "tags": list(row[4] or [])}
+
+
+def _save_parser_extraction(ngo_id: str, card_id: str, payload: Dict[str, Any]) -> None:
+    with db_conn() as conn:
+        if conn is None:
+            CSR_PARSER_EXTRACTION_MEM_BY_NGO.setdefault(ngo_id, {})[str(card_id)] = payload
+            return
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE csr_pipeline_cards
+            SET parser_extraction = %s::jsonb, updated_at = CURRENT_TIMESTAMP
+            WHERE ngo_id = %s AND id = %s
+            """,
+            (json.dumps(payload), ngo_id, str(card_id)),
+        )
+
+
+@app.get("/csr/cards/{card_id}/parser-rows", tags=["CSR"])
+def get_csr_card_parser_rows(card_id: str, current_user: TokenUser = Depends(require_role("ed", "csr", "programs", "board"))):
+    """Return the cached extraction for this card, or null if never run."""
+    with db_conn() as conn:
+        if conn is None:
+            cached = CSR_PARSER_EXTRACTION_MEM_BY_NGO.get(current_user.ngo_id, {}).get(str(card_id))
+            if not cached:
+                return {"extraction": None, "source": "memory"}
+            return {"extraction": cached, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT parser_extraction
+            FROM csr_pipeline_cards
+            WHERE ngo_id = %s AND id = %s
+            """,
+            (current_user.ngo_id, str(card_id)),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="CSR card not found.")
+        cached = _parse_jsonb(row[0])
+        return {"extraction": cached if cached else None, "source": "db"}
+
+
+@app.post("/csr/cards/{card_id}/parser-rows", tags=["CSR"])
+def post_csr_card_parser_rows(card_id: str, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
+    """Re-run the parser over the card's most recent MoU/contract document.
+
+    The extractor itself decides whether to call the LLM (only when an API
+    key is present and the doc text is reachable) or return its deterministic
+    heuristic output. Either way, the response shape is identical so the
+    frontend doesn't branch."""
+    from backend.agents.grant_parser_extractor import extract_parser_rows, pick_primary_doc
+
+    card_meta = _load_card_meta(current_user.ngo_id, card_id)
+    if card_meta is None:
+        raise HTTPException(status_code=404, detail="CSR card not found.")
+
+    docs = _load_card_documents(current_user.ngo_id, card_id)
+    primary = pick_primary_doc(docs)
+
+    # We don't currently fetch + parse PDF text from S3 — that's a separate
+    # follow-up. The heuristic path uses the card+doc metadata; the LLM path
+    # bails when doc_text is empty, which is the safe behaviour.
+    result = extract_parser_rows(card_meta, primary, doc_text="")
+    payload = {
+        **result,
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "doc_count": len(docs),
+    }
+    _save_parser_extraction(current_user.ngo_id, card_id, payload)
+    return {"extraction": payload, "status": "extracted"}
+
+
 @app.get("/csr/cards/{card_id}/documents", tags=["CSR"])
 def list_csr_card_documents(card_id: str, current_user: TokenUser = Depends(require_role("ed", "csr", "programs"))):
     with db_conn() as conn:

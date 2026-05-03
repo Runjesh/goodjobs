@@ -289,6 +289,46 @@ const HANDLERS: Handler[] = [
     handle: () => jsonResponse({ ok: true, transaction_id: rid('trx') }),
   },
 
+  // ── Grant Parser extraction (Task #7) ──────────────────────────────────────
+  // GET returns null until POST has been called once, then echoes the same
+  // deterministic-mock payload. Frontend-only deploys exercise the same
+  // shape the real backend returns.
+  {
+    test: (p, m) => m === 'GET' && /^\/csr\/cards\/[^/]+\/parser-rows$/.test(p),
+    handle: () => jsonResponse({ extraction: null, source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'POST' && /^\/csr\/cards\/[^/]+\/parser-rows$/.test(p),
+    handle: (p) => {
+      const cardId = p.split('/')[3] || '0';
+      const seed = String(cardId).split('').reduce((s, c) => s + c.charCodeAt(0), 0);
+      const cohort = 100 + (seed * 9301) % 400;
+      const rows = [
+        { id: 'pl1', type: 'deadline',    label: 'Final UC submission',        detail: 'Within 30 days of project completion', confidence: 0.94 },
+        { id: 'pl2', type: 'deadline',    label: 'Quarterly progress reports', detail: 'Q1 Jan, Q2 Apr, Q3 Jul, Q4 Oct (15th)', confidence: 0.90 },
+        { id: 'pl3', type: 'deadline',    label: 'Mid-line evaluation',        detail: 'At month 6 of project', confidence: 0.74 },
+        { id: 'dv1', type: 'deliverable', label: `Train ${cohort} direct beneficiaries`, detail: 'Programme cohort, geo-tagged attendance', confidence: 0.92 },
+        { id: 'dv2', type: 'deliverable', label: 'Field documentation',        detail: '5 case studies + photo essay per quarter', confidence: 0.85 },
+        { id: 'dv3', type: 'deliverable', label: 'Independent assessment',     detail: 'Third-party endline survey', confidence: 0.71 },
+        { id: 'bg1', type: 'budget',      label: 'Programme delivery',         detail: '₹12.0L · 60%', confidence: 0.96 },
+        { id: 'bg2', type: 'budget',      label: 'Capacity building',          detail: '₹3.0L · 15%', confidence: 0.92 },
+        { id: 'bg3', type: 'budget',      label: 'M&E + reporting',            detail: '₹2.0L · 10%', confidence: 0.88 },
+        { id: 'bg4', type: 'budget',      label: 'Admin overhead',             detail: '₹3.0L · 15% (cap 15%)', confidence: 0.80 },
+        { id: 'cd1', type: 'condition',   label: 'No-diversion clause',        detail: 'Funds usable only for Schedule VII purpose', confidence: 0.95 },
+        { id: 'cd2', type: 'condition',   label: 'Auditor sign-off',           detail: 'Independent CA sign-off required on UC', confidence: 0.93 },
+        { id: 'cd3', type: 'condition',   label: 'Branding & visibility',      detail: 'Funder logo on all collaterals', confidence: 0.86 },
+        { id: 'cd4', type: 'condition',   label: 'Repayment of unspent funds', detail: 'Within 60 days of project closure', confidence: 0.78 },
+      ];
+      return jsonResponse({
+        extraction: {
+          rows, source: 'mock', doc_id: null, doc_name: null,
+          extracted_at: new Date().toISOString(), doc_count: 0,
+        },
+        status: 'extracted',
+      });
+    },
+  },
+
   // ── Per-card grant lifecycle state (Task #6) ───────────────────────────────
   // GET returns `state: null` so the client falls back to its deterministic
   // mock; PUT just acks. Real persistence happens against the backend; this

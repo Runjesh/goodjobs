@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -16,6 +16,11 @@ import { selectGrantUtilisation } from '../../utils/grantBudgetHeads';
 import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 import { apiFetch } from '../../api/client';
 import { mergeGrantState, sanitiseGrantStateForServer } from '../../utils/grantState';
+import {
+  projectParserRowsIntoState,
+  type ParserExtraction,
+  type ParserRow,
+} from '../../utils/grantParserProjection';
 import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
 
 type LifecycleStage = 'pipeline' | 'applied' | 'awarded' | 'active' | 'closed';
@@ -50,14 +55,6 @@ function stageToCol(stage: LifecycleStage, current: string): string {
     case 'active':   return 'live';
     case 'closed':   return 'closed';
   }
-}
-
-interface ParserRow {
-  id: string;
-  type: 'deadline' | 'deliverable' | 'budget' | 'condition';
-  label: string;
-  detail: string;
-  confidence: number;
 }
 
 interface GrantState {
@@ -284,7 +281,126 @@ const GrantDetail: React.FC = () => {
     return () => window.clearTimeout(handle);
   }, [state, card, hydratedForId, serverHydratedFor]);
 
-  const parserRows = useMemo(() => buildParserRows(card), [card]);
+  // Server-extracted parser rows + cache state. We start with the local
+  // mock so the UI is never blank, then replace once the server responds.
+  // `extractionMeta` powers the small "AI / Heuristic / Mock — re-run" chip.
+  const [extractionMeta, setExtractionMeta] = useState<{
+    source: ParserExtraction['source'];
+    docName?: string | null;
+    extractedAt?: string;
+  } | null>(null);
+  const [parserRows, setParserRows] = useState<ParserRow[]>(() =>
+    buildParserRows(card) as ParserRow[]
+  );
+  const [extracting, setExtracting] = useState(false);
+  // null until the GET (and any auto-POST) settles for this card. Projection
+  // is gated on this so the previous card's parser rows can never be written
+  // into the new card's deliverables/budget/reports during navigation.
+  const [parserHydratedFor, setParserHydratedFor] = useState<string | null>(null);
+
+  // Fetch the cached extraction on mount; if the server has nothing yet,
+  // POST once to generate the heuristic/LLM rows so the user sees a real
+  // extraction (not the static frontend mock) on first awarded view.
+  useEffect(() => {
+    if (!card) return;
+    const cardKey = String(card.id);
+    if (parserHydratedFor === cardKey) return;
+    // Reset to the per-card local mock immediately on card change so the
+    // previous grant's rows can't be projected into this one if the fetch
+    // fails or arrives late. Clear the meta chip too so it doesn't lie.
+    setParserRows(buildParserRows(card) as ParserRow[]);
+    setExtractionMeta(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(`/csr/cards/${encodeURIComponent(cardKey)}/parser-rows`);
+        if (cancelled) return;
+        let extraction: ParserExtraction | null = null;
+        if (res.ok) {
+          const data = await res.json();
+          extraction = (data?.extraction as ParserExtraction | null) ?? null;
+        }
+        if (!extraction && !cancelled) {
+          // First view of this card — kick off an initial extraction so the
+          // panel shows server-derived rows instead of the local mock.
+          const post = await apiFetch(`/csr/cards/${encodeURIComponent(cardKey)}/parser-rows`, { method: 'POST' });
+          if (post.ok && !cancelled) {
+            const posted = await post.json();
+            extraction = (posted?.extraction as ParserExtraction | null) ?? null;
+          }
+        }
+        if (cancelled) return;
+        if (extraction && Array.isArray(extraction.rows)) {
+          setParserRows(extraction.rows);
+          setExtractionMeta({
+            source: extraction.source,
+            docName: extraction.doc_name,
+            extractedAt: extraction.extracted_at,
+          });
+        }
+      } catch { /* offline — keep per-card local mock */ }
+      finally {
+        // Open the projection gate even on failure so offline users still
+        // see approved-row mirroring against the local mock.
+        if (!cancelled) setParserHydratedFor(cardKey);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [card, parserHydratedFor]);
+
+  // User-initiated re-extraction (e.g. after uploading a fresh contract).
+  const reRunExtraction = useCallback(async () => {
+    if (!card || extracting) return;
+    setExtracting(true);
+    try {
+      const res = await apiFetch(`/csr/cards/${encodeURIComponent(String(card.id))}/parser-rows`, { method: 'POST' });
+      if (!res.ok) throw new Error('extract_failed');
+      const data = await res.json();
+      const extraction = data?.extraction as ParserExtraction | null;
+      if (extraction && Array.isArray(extraction.rows)) {
+        setParserRows(extraction.rows);
+        setExtractionMeta({
+          source: extraction.source,
+          docName: extraction.doc_name,
+          extractedAt: extraction.extracted_at,
+        });
+        toast.success('Re-extracted parser rows from latest contract.', { icon: '🔁' });
+      }
+    } catch {
+      toast.error("Couldn't re-run extraction. Try again in a moment.");
+    } finally {
+      setExtracting(false);
+    }
+  }, [card, extracting]);
+
+  // Whenever the parser decisions/edits change OR a fresh extraction lands,
+  // mirror the approved/edited rows into the active-stage tabs so users
+  // don't have to manually re-enter deliverables/budget/reports.
+  useEffect(() => {
+    if (!card) return;
+    const cardKey = String(card.id);
+    // Both gates are required: state must be hydrated for this card, AND
+    // the parser fetch must have settled for this card. Otherwise we could
+    // mirror the previous card's rows into this card's tabs.
+    if (hydratedForId !== cardKey) return;
+    if (parserHydratedFor !== cardKey) return;
+    setState(prev => {
+      const next = projectParserRowsIntoState(parserRows, prev.parserDecisions, prev.parserEdits, prev);
+      // Avoid a no-op state churn that would re-trigger the debounced PUT.
+      if (
+        next.deliverables === prev.deliverables &&
+        next.budget === prev.budget &&
+        next.reports === prev.reports
+      ) return prev;
+      // Cheap deep-equal: if all three arrays serialize to the same JSON,
+      // skip the update (projection produces new array refs every call).
+      const sameDel = JSON.stringify(next.deliverables) === JSON.stringify(prev.deliverables);
+      const sameBud = JSON.stringify(next.budget) === JSON.stringify(prev.budget);
+      const sameRep = JSON.stringify(next.reports) === JSON.stringify(prev.reports);
+      if (sameDel && sameBud && sameRep) return prev;
+      return next;
+    });
+  }, [parserRows, state.parserDecisions, state.parserEdits, card, hydratedForId, parserHydratedFor]);
 
   if (!card) {
     return (
@@ -541,6 +657,28 @@ const GrantDetail: React.FC = () => {
               </p>
             </div>
             <span className="grant-parser-progress">{reviewedCount} of {parserRows.length} reviewed</span>
+          </div>
+
+          {/* Source + re-run controls. Tiny chip lets the user see whether
+              the rows came from the LLM, the heuristic fallback, or the
+              local mock (offline), and re-run after uploading a contract. */}
+          <div className="grant-parser-meta">
+            <span className={`grant-parser-source grant-parser-source--${extractionMeta?.source ?? 'local'}`}>
+              {extractionMeta?.source === 'llm'       && 'AI extraction'}
+              {extractionMeta?.source === 'heuristic' && 'Heuristic extraction'}
+              {extractionMeta?.source === 'mock'      && 'Demo extraction'}
+              {!extractionMeta                         && 'Local preview'}
+              {extractionMeta?.docName && <> · from <strong>{extractionMeta.docName}</strong></>}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary grant-parser-rerun"
+              onClick={reRunExtraction}
+              disabled={extracting}
+              title="Re-run extraction over the latest uploaded MoU/contract"
+            >
+              {extracting ? <><Clock size={12} /> Extracting…</> : <><Sparkles size={12} /> Re-run extraction</>}
+            </button>
           </div>
 
           {(['deadline', 'deliverable', 'budget', 'condition'] as const).map(group => {

@@ -96,6 +96,36 @@
 .grant-sync-chip--ok  { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
 .grant-sync-chip--err { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
 
+/* Grant Parser source + re-run row (Task #7) */
+.grant-parser-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+  background: #f8fafc;
+  border: 1px dashed #e2e8f0;
+  border-radius: 8px;
+}
+.grant-parser-source {
+  font-size: 0.78rem;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.grant-parser-source--llm       { color: #6d28d9; }
+.grant-parser-source--heuristic { color: #0f766e; }
+.grant-parser-source--mock      { color: #b45309; }
+.grant-parser-rerun {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 /* ── Stage stepper ──────────────────────────────────────────────── */
 .grant-stepper {
   display: flex;

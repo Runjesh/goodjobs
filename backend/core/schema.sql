@@ -128,6 +128,11 @@ ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS details JSONB NOT NULL D
 -- JSONB blob so the shape can evolve without migrations.
 ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS grant_state JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS grant_state_updated_at TIMESTAMP WITH TIME ZONE;
+-- Last result of the Grant Parser extraction over the card's MoU/contract.
+-- Stored as one JSONB blob: {rows: [...], source: 'llm'|'heuristic', doc_id,
+-- doc_name, extracted_at}. Read by GET and overwritten by POST on
+-- /csr/cards/{id}/parser-rows. Re-runs are user-initiated.
+ALTER TABLE csr_pipeline_cards ADD COLUMN IF NOT EXISTS parser_extraction JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_csr_pipeline_ngo ON csr_pipeline_cards(ngo_id);
 
