@@ -16,6 +16,7 @@ import { selectGrantUtilisation } from '../../utils/grantBudgetHeads';
 import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 import { apiFetch } from '../../api/client';
 import { mergeGrantState, sanitiseGrantStateForServer } from '../../utils/grantState';
+import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
 
 type LifecycleStage = 'pipeline' | 'applied' | 'awarded' | 'active' | 'closed';
 
@@ -448,6 +449,16 @@ const GrantDetail: React.FC = () => {
           grant funds with live beneficiary count, service-log count
           for the period, and report-readiness. */}
       <GrantProgramsPanel grantId={String(card.id)} />
+
+      {/* Open tasks for this grant — drives the same Complete / Snooze /
+          Dismiss controls as the Tasks page, scoped to this record. */}
+      <div style={{ marginTop: '0.75rem' }}>
+        <RecordTasksPanel
+          entityType="grant"
+          entityId={String(card.id)}
+          entityLabel={card.project || card.company}
+        />
+      </div>
 
       {/* ── Stage panels ────────────────────────────── */}
 

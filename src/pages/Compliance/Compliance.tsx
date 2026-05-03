@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ShieldCheck, Upload, Calendar, Users, X, CheckCircle2, AlertTriangle, Download, Plus, Shield, Trash2, RefreshCw } from 'lucide-react';
+import { ShieldCheck, Upload, Calendar, Users, X, CheckCircle2, AlertTriangle, Download, Plus, Shield, Trash2, RefreshCw, CheckSquare } from 'lucide-react';
 import { useStore, type ComplianceDocument } from '../../store/useStore';
+import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
+import { isVisibleToday } from '../../utils/tasks';
 import toast from 'react-hot-toast';
 import DPDPModule from './DPDPModule';
 import './Compliance.css';
@@ -47,6 +49,8 @@ const Compliance: React.FC = () => {
   const [boardForm, setBoardForm] = useState({ name: '', role: 'Trustee', din: '', tenure: '' });
   const [filings, setFilings] = useState<Filing[]>([]);
   const [filingsLoading, setFilingsLoading] = useState(false);
+  const [tasksDoc, setTasksDoc] = useState<ComplianceDocument | null>(null);
+  const allTasks = useStore(s => s.tasks);
 
   const regDocScrollRef = useRef<HTMLDivElement>(null);
   const regDocVirtualizer = useVirtualizer({
@@ -523,7 +527,24 @@ const Compliance: React.FC = () => {
                         </span>
                       </span>
                       <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>{doc.expiry}</span>
-                      <span>
+                      <span style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        {(() => {
+                          const openTaskCount = allTasks.filter(t =>
+                            t.relatedEntityType === 'compliance' &&
+                            String(t.relatedEntityId) === String(doc.id) &&
+                            isVisibleToday(t)
+                          ).length;
+                          return (
+                            <button
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.72rem' }}
+                              onClick={() => setTasksDoc(doc)}
+                              title="Open tasks for this document"
+                            >
+                              <CheckSquare size={12} /> Tasks{openTaskCount ? ` (${openTaskCount})` : ''}
+                            </button>
+                          );
+                        })()}
                         <button
                           className="btn btn-secondary"
                           style={{ padding: '0.25rem 0.5rem', fontSize: '0.72rem' }}
@@ -813,6 +834,41 @@ const Compliance: React.FC = () => {
         </ModalOverlay>
       )}
       </>}
+
+      {tasksDoc && (
+        <ModalOverlay onBackdropClick={() => setTasksDoc(null)}>
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comp-tasks-title"
+            style={{ maxWidth: '560px' }}
+          >
+            <button
+              type="button"
+              onClick={() => setTasksDoc(null)}
+              aria-label="Close"
+              className="action-btn"
+              style={{ position: 'absolute', right: '1rem', top: '1rem' }}
+            >
+              <X size={20} />
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', paddingRight: '2.5rem' }}>
+              <CheckSquare size={18} color="var(--color-primary)" />
+              <h2 id="comp-tasks-title" style={{ margin: 0, fontSize: '1.05rem' }}>Tasks · {tasksDoc.name}</h2>
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--color-text-tertiary)', marginBottom: '0.75rem' }}>
+              {tasksDoc.type} · expires {tasksDoc.expiry || '—'}
+            </div>
+            <RecordTasksPanel
+              entityType="compliance"
+              entityId={String(tasksDoc.id)}
+              entityLabel={tasksDoc.name}
+            />
+          </div>
+        </ModalOverlay>
+      )}
     </div>
   );
 };

@@ -16,6 +16,7 @@ import { apiFetch } from '../../api/client';
 import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import EnrollBeneficiaryModal, { computeBeneficiaryCompleteness, type EnrollFormData } from './EnrollBeneficiaryModal';
+import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
 import ProgramBudgetBar from '../../components/Programs/ProgramBudgetBar';
 import ProgramEffortSummary from '../../components/Programs/ProgramEffortSummary';
 import OutcomeForm from '../../components/Programs/OutcomeForm';
@@ -1192,6 +1193,13 @@ const Programs: React.FC = () => {
           >
             <button type="button" onClick={() => setShowEditBen(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
             <h2 id="prog-edit-ben-title" style={{ marginBottom: '1rem', paddingRight: '2.5rem' }}>Edit Beneficiary</h2>
+            <div style={{ marginBottom: '1rem' }}>
+              <RecordTasksPanel
+                entityType="beneficiary"
+                entityId={String(editBen.id)}
+                entityLabel={editBen.name}
+              />
+            </div>
             <form onSubmit={handleEditBenSubmit} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>

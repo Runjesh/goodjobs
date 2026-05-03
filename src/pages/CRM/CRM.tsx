@@ -16,6 +16,7 @@ import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import StageBadge from '../../components/Donor/StageBadge';
 import TouchpointTimeline from '../../components/Donor/TouchpointTimeline';
 import DonorImpactPanel from '../../components/Donor/DonorImpactPanel';
+import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
 import {
   computeStage,
   nextDueMilestone,
@@ -1085,6 +1086,14 @@ const CRM: React.FC = () => {
               {/* Donor → campaign(s) → programme(s) → outcomes trail.
                   This is the funder-pitch panel from the Session 2 audit. */}
               <DonorImpactPanel donor={activeDonor} />
+
+              <div style={{ marginTop: '1rem' }}>
+                <RecordTasksPanel
+                  entityType="donor"
+                  entityId={String(activeDonor.id)}
+                  entityLabel={activeDonor.name}
+                />
+              </div>
 
               <div className="timeline-section">
                 <div style={{ marginBottom: '1.25rem' }}>
