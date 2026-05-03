@@ -23,10 +23,15 @@ const TABS = [
 
 const Settings: React.FC = () => {
   const { user, login, updateUser } = useAuth();
-  // Honor ?tab=plans (or any other tab) so contextual upgrade prompts can deep-link.
+  // Honor ?tab=plans (or any other tab) so contextual upgrade prompts can
+  // deep-link. We accept "billing" as an alias for "plans" because the
+  // expired-trial banner and the day-28 upgrade modal historically link to
+  // /settings?tab=billing — without this alias the tab silently falls back
+  // to Profile and the upgrade CTA becomes a dead end.
   const initialTab = (() => {
     if (typeof window === 'undefined') return 'profile';
-    const t = new URL(window.location.href).searchParams.get('tab');
+    const raw = new URL(window.location.href).searchParams.get('tab');
+    const t = raw === 'billing' ? 'plans' : raw;
     return t && TABS.some(x => x.id === t) ? t : 'profile';
   })();
   const [activeTab, setActiveTab] = useState(initialTab);

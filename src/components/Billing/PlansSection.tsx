@@ -248,6 +248,36 @@ const PlansSection: React.FC = () => {
         </div>
       )}
 
+      {/* Invoice history (placeholder until the Razorpay webhook lands).
+          We surface the last paid checkout from billing.razorpayPaymentId so
+          finance teams have something to reconcile against; older invoices
+          will appear here once the server-side ledger is wired up. */}
+      <div className="plans-invoice-history" data-testid="plans-invoice-history">
+        <div className="plans-invoice-history-head">
+          <FileText size={14} /> <strong>Invoice history</strong>
+        </div>
+        {billing?.razorpayPaymentId ? (
+          <div className="plans-invoice-row">
+            <div>
+              <div className="plans-invoice-row-id">{billing.razorpayPaymentId}</div>
+              <div className="plans-invoice-row-meta">
+                {billing.billingCycle === 'annual' ? 'Annual' : 'Monthly'} ·
+                {' '}{currentPlan?.name ?? tier}
+              </div>
+            </div>
+            <div className="plans-invoice-row-amount">
+              {billing.lastAmountPaise
+                ? formatINR(Math.round(billing.lastAmountPaise / 100))
+                : '—'}
+            </div>
+          </div>
+        ) : (
+          <div className="plans-invoice-empty">
+            No paid invoices yet. Receipts will appear here after your first checkout.
+          </div>
+        )}
+      </div>
+
       <PlansComparison
         open={modalOpen}
         onClose={() => setModalOpen(false)}

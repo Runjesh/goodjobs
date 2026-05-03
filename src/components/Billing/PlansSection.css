@@ -170,3 +170,33 @@
   font-size: 0.72rem; font-weight: 600;
 }
 .plans-dev-tools-actions button:hover { background: #fff7ed; }
+
+/* ── Invoice history (Task #13) ─────────────────────────────────────────── */
+.plans-invoice-history {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: var(--color-bg-card, #fff);
+  border: 1px solid var(--color-border-light, #e5e7eb);
+}
+.plans-invoice-history-head {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.78rem; color: var(--color-text-secondary);
+  margin-bottom: 0.5rem;
+}
+.plans-invoice-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.55rem 0; gap: 1rem;
+}
+.plans-invoice-row-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem; font-weight: 600;
+}
+.plans-invoice-row-meta {
+  font-size: 0.7rem; color: var(--color-text-tertiary);
+}
+.plans-invoice-row-amount { font-weight: 700; }
+.plans-invoice-empty {
+  font-size: 0.78rem; color: var(--color-text-tertiary);
+  padding: 0.4rem 0;
+}
