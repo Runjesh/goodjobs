@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import './Volunteers.css';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
+import { findShiftConflict } from '../../utils/shiftConflict';
 
 type Shift = { id: number; title: string; date: string; location: string; filled: number; total: number; role: string };
 type Signup = { id: string; shiftId: number; volunteerName: string; createdAt?: string; details?: Record<string, unknown> };
@@ -288,27 +289,19 @@ const Volunteers: React.FC = () => {
     setShowSignupModal(true);
   };
 
-  // Detect overlapping commitments before POST. Two shifts conflict when the same
-  // volunteer is on both AND their date strings normalise to the same calendar day.
+  // Detect overlapping commitments before POST. Two shifts conflict when the
+  // same volunteer is on both, they fall on the same calendar day, AND their
+  // time intervals actually intersect. When time info is missing on either
+  // side we fall back to same-day match (better to over-warn than double-book).
   const detectShiftConflict = (name: string, target: Shift): Shift | null => {
-    const norm = (s: string) => s.trim().toLowerCase();
-    const candidateName = norm(name);
-    const targetDay = (target.date || '').trim().toLowerCase();
-    if (!targetDay) return null;
+    const candidateName = name.trim().toLowerCase();
+    const others: Shift[] = [];
     for (const su of signups) {
-      if (norm(su.volunteerName) !== candidateName) continue;
+      if (su.volunteerName.trim().toLowerCase() !== candidateName) continue;
       const other = shifts.find(s => s.id === su.shiftId);
-      if (!other || other.id === target.id) continue;
-      const otherDay = (other.date || '').trim().toLowerCase();
-      if (!otherDay) continue;
-      // Compare full string and a coarse day-only token match (handles "Sat 14 Dec • 9–11am").
-      const targetToken = targetDay.split(/[•|@]/)[0].trim();
-      const otherToken = otherDay.split(/[•|@]/)[0].trim();
-      if (otherDay === targetDay || (targetToken && otherToken === targetToken)) {
-        return other;
-      }
+      if (other) others.push(other);
     }
-    return null;
+    return findShiftConflict(target, others);
   };
 
   const submitSignup = async () => {

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { computeBeneficiaryCompleteness } from '../Programs/EnrollBeneficiaryModal';
+import { readToCForProgram } from '../../utils/tocStorage';
 import toast from 'react-hot-toast';
 import './Insights.css';
 
@@ -225,6 +226,29 @@ const Insights: React.FC = () => {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const navigate = useNavigate();
   const { donors, transactions, campaigns, beneficiaries, complianceDocs } = useStore();
+
+  // Per-program Theory-of-Change snapshot. Reads the same localStorage buckets
+  // that TheoryOfChangeBuilder writes to, so Insights stays in lockstep with
+  // whatever outcomes the program lead authored — no separate data source.
+  const tocByProgram = useMemo(() => {
+    const programs = Array.from(new Set(beneficiaries.map((b: any) => String(b.program || '')).filter(Boolean)));
+    const list: { program: string; outcomes: string[] }[] = [];
+    const seen = new Set<string>();
+    const consider = (p: string) => {
+      const key = p || 'General';
+      if (seen.has(key)) return;
+      seen.add(key);
+      const nodes = readToCForProgram(p);
+      const outcomes = nodes
+        .filter(n => n.type === 'outcome' || n.type === 'impact')
+        .map(n => n.content)
+        .filter(Boolean);
+      if (outcomes.length) list.push({ program: key, outcomes });
+    };
+    for (const p of programs) consider(p);
+    consider('General');
+    return list;
+  }, [beneficiaries]);
 
   const setPeriod = (p: Period) => {
     setSearchParams(params => { params.set('period', p); return params; }, { replace: true });
@@ -640,6 +664,37 @@ const Insights: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* ── Theory of Change snapshot ───────────────────────────────── */}
+      {tocByProgram.length > 0 && (
+        <div className="insights-card" style={{ marginTop: '1.5rem' }}>
+          <div className="insights-card-header">
+            <div>
+              <div className="insights-card-title">
+                <Target size={18} style={{ display: 'inline', marginRight: 6, verticalAlign: '-3px' }} />
+                Theory of Change — outcomes by program
+              </div>
+              <div className="insights-card-sub">Authored in Programs → Theory of Change. Use these to align reports with intended impact.</div>
+            </div>
+            <button className="insights-card-link" onClick={() => navigate('/programs?tab=toc')}>
+              Edit ToC <ChevronRight size={14} />
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.875rem', marginTop: '0.75rem' }}>
+            {tocByProgram.map(({ program, outcomes }) => (
+              <div key={program} style={{ border: '1px solid var(--color-border-light)', borderRadius: 8, padding: '0.75rem 0.875rem' }}>
+                <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 6 }}>{program}</div>
+                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
+                  {outcomes.slice(0, 4).map((o, i) => (<li key={i} style={{ marginBottom: 2 }}>{o}</li>))}
+                </ul>
+                {outcomes.length > 4 && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: 4 }}>+{outcomes.length - 4} more</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Impact Summary ────────────────────────────────────────── */}
       <div className="insights-impact-row">

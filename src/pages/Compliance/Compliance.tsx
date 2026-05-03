@@ -319,6 +319,22 @@ const Compliance: React.FC = () => {
     }
   }, [filings, boardMembers, filingsLoading, boardLoading]);
 
+  // Honour deep-links from the Today inbox: /compliance#filings or #board
+  // scrolls and briefly highlights the relevant section. We re-run after
+  // filings/board load so the target element actually exists in the DOM.
+  useEffect(() => {
+    if (pageTab !== 'vault') return;
+    const hash = (window.location.hash || '').replace(/^#/, '');
+    if (hash !== 'filings' && hash !== 'board') return;
+    const el = document.getElementById(hash);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.style.transition = 'box-shadow 0.4s ease';
+    el.style.boxShadow = '0 0 0 3px var(--color-primary-light)';
+    const t = window.setTimeout(() => { el.style.boxShadow = ''; }, 1800);
+    return () => window.clearTimeout(t);
+  }, [pageTab, filings.length, boardMembers.length]);
+
   return (
     <div className="compliance-container">
       <div className="page-header">
@@ -622,7 +638,7 @@ const Compliance: React.FC = () => {
 
       {/* Filing Calendar + Board */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-        <div className="card">
+        <div className="card" id="filings">
           <div className="card-header">
             <h3 className="card-title flex items-center gap-2"><Calendar size={18} /> Upcoming Filings</h3>
           </div>
@@ -641,7 +657,7 @@ const Compliance: React.FC = () => {
           </div>
         </div>
 
-        <div className="card">
+        <div className="card" id="board">
           <div className="card-header">
             <h3 className="card-title flex items-center gap-2"><Users size={18} /> Board of Trustees</h3>
           </div>

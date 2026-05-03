@@ -2,13 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, ArrowRight, Save, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './TheoryOfChange.css';
-
-interface ToCNode {
-  id: string;
-  type: 'input' | 'activity' | 'output' | 'outcome' | 'impact';
-  content: string;
-  metric?: string;
-}
+import {
+  type ToCNode,
+  tocProgramKey as programKey,
+  tocStorageKey as storageKeyFor,
+  TOC_GENERAL_KEY as GENERAL_KEY,
+  TOC_LEGACY_KEY as LEGACY_KEY,
+} from '../../utils/tocStorage';
 
 const INITIAL_NODES: ToCNode[] = [
   { id: '1', type: 'input', content: '₹5L Funding & 10 Trainers' },
@@ -17,12 +17,6 @@ const INITIAL_NODES: ToCNode[] = [
   { id: '4', type: 'outcome', content: '80% Gain Employment', metric: 'MIS: Post-training Survey' },
   { id: '5', type: 'impact', content: 'Increased Household Income & Financial Independence' },
 ];
-
-const GENERAL_KEY = '__general__';
-const LEGACY_KEY = 'goodjobs.toc.v1';
-
-const programKey = (p: string) => (p && p.trim() ? p.trim() : GENERAL_KEY);
-const storageKeyFor = (p: string) => `goodjobs.toc.${programKey(p)}.v2`;
 
 function loadNodes(program: string): ToCNode[] {
   try {
