@@ -93,6 +93,36 @@ const WhatsAppPortal: React.FC = () => {
         land in the supervisor review queue (Copilot → Field reports awaiting review) before counting in dashboards.
       </p>
 
+      {/* Wizard-connected number banner.
+          The signup wizard stores the verified phone on the org (ngo.meta.whatsapp);
+          Layout hydrates user.whatsapp from /settings on every login, so this banner
+          reflects the backend state on a fresh device — no localStorage required. */}
+      {user?.whatsapp?.phone && (
+        <div
+          data-testid="whatsapp-connected-banner"
+          style={{
+            padding: '0.6rem 0.85rem',
+            background: '#ecfdf5',
+            border: '1px solid #a7f3d0',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex', alignItems: 'center', gap: 10,
+            marginBottom: '1rem',
+            fontSize: '0.82rem',
+          }}
+        >
+          <CheckCircle2 size={16} style={{ color: '#15803d', flexShrink: 0 }} />
+          <div>
+            <strong>Connected number:</strong> {user.whatsapp.phone}
+            {user.whatsapp.verified ? ' · verified' : ' · pending verification'}
+            {user.whatsapp.connectedAt && (
+              <span style={{ color: 'var(--color-text-tertiary)' }}>
+                {' '}· since {String(user.whatsapp.connectedAt).slice(0, 10)}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       <div
         style={{
           padding: '0.75rem 1rem',

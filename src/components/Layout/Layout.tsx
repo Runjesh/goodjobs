@@ -467,13 +467,12 @@ const Layout: React.FC = () => {
     return () => { cancelled = true; };
   }, [can, setBeneficiaries]);
 
-  // Hydrate customPrograms from ngos.meta.programs so the Programs page
-  // shows the wizard's first program after a fresh login on a new device.
-  // The Zustand store persists customPrograms in localStorage, but on a
-  // fresh device localStorage is empty — this is the only path that brings
-  // the wizard's program back without relying on browser state.
+  // Hydrate ngos.meta on login: pulls programs (so /programs shows the
+  // wizard's first program after a fresh login) and the verified WhatsApp
+  // number (so Settings → WhatsApp Portal can show "Connected: …" without
+  // depending on localStorage). One /settings call covers both.
   useEffect(() => {
-    if (!can('programs', 'canView')) return;
+    if (!user?.token) return;
     let cancelled = false;
     const run = async () => {
       try {
@@ -481,17 +480,32 @@ const Layout: React.FC = () => {
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
-        const progs = data?.ngo?.meta?.programs;
-        if (!Array.isArray(progs) || !progs.length) return;
-        const add = useStore.getState().addCustomProgram;
-        for (const p of progs) if (typeof p === 'string' && p.trim()) add(p.trim());
+        const meta = data?.ngo?.meta ?? {};
+        const progs = meta.programs;
+        if (Array.isArray(progs) && progs.length && can('programs', 'canView')) {
+          const add = useStore.getState().addCustomProgram;
+          for (const p of progs) if (typeof p === 'string' && p.trim()) add(p.trim());
+        }
+        const wa = meta.whatsapp;
+        // Only mirror server → client when the server actually has values
+        // and the local user record is missing them. Don't downgrade a
+        // freshly-verified local state by overwriting it with stale data.
+        if (wa && typeof wa === 'object' && wa.phone && !user.whatsapp?.phone) {
+          updateUser({
+            whatsapp: {
+              phone: String(wa.phone),
+              verified: !!wa.verified,
+              connectedAt: wa.connected_at ? String(wa.connected_at) : undefined,
+            },
+          });
+        }
       } catch {
         /* keep store */
       }
     };
     run();
     return () => { cancelled = true; };
-  }, [can]);
+  }, [user?.token, user?.whatsapp?.phone, can, updateUser]);
 
   useEffect(() => {
     if (!can('compliance', 'canView')) return;
