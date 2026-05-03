@@ -11,6 +11,8 @@ import { useStore } from '../../store/useStore';
 import './GrantDetail.css';
 import GrantTrancheCard from '../../components/Grants/GrantTrancheCard';
 import GrantProgramsPanel from '../../components/Grants/GrantProgramsPanel';
+import GrantBudgetHeadsPanel from '../../components/Grants/GrantBudgetHeadsPanel';
+import { selectGrantUtilisation } from '../../utils/grantBudgetHeads';
 import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 
 type LifecycleStage = 'pipeline' | 'applied' | 'awarded' | 'active' | 'closed';
@@ -178,6 +180,9 @@ const GrantDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { csrCards, updateCSRCard } = useStore();
+  const grantBudgetHeads    = useStore(s => s.grantBudgetHeads);
+  const transactions        = useStore(s => s.transactions);
+  const transactionGrantTags = useStore(s => s.transactionGrantTags);
 
   const card = useMemo(() => csrCards.find(c => String(c.id) === String(id)), [csrCards, id]);
 
@@ -520,6 +525,7 @@ const GrantDetail: React.FC = () => {
       {stage === 'active' && (
         <motion.div className="grant-panel" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>
           <GrantTrancheCard grantId={String(card.id)} />
+          <GrantBudgetHeadsPanel grantId={String(card.id)} grantTotal={Number(card.amount) || 0} />
           <div className="grant-subtabs" role="tablist">
             <button role="tab" className={`grant-subtab ${activeActiveTab === 'deliverables' ? 'active' : ''}`} onClick={() => setActiveActiveTab('deliverables')}>
               <Target size={13} /> Deliverables
@@ -578,8 +584,20 @@ const GrantDetail: React.FC = () => {
           )}
 
           {activeActiveTab === 'budget' && (() => {
-            const totalAlloc = state.budget.reduce((s, b) => s + b.allocated, 0);
-            const totalSpent = state.budget.reduce((s, b) => s + b.spent, 0);
+            // Source-of-truth: real budget heads + tagged Finance transactions.
+            // Falls back to the deterministic mock only when the user hasn't
+            // configured any heads for this grant yet (so demo + early-onboarding
+            // grants still show something).
+            const live = selectGrantUtilisation(
+              String(card.id),
+              grantBudgetHeads,
+              transactions,
+              transactionGrantTags,
+            );
+            const useLive = live.rows.length > 0;
+            const totalAlloc = useLive ? live.totalAllocated : state.budget.reduce((s, b) => s + b.allocated, 0);
+            const totalSpent = useLive ? live.totalSpent      : state.budget.reduce((s, b) => s + b.spent, 0);
+            const utilPct    = totalAlloc > 0 ? Math.round((totalSpent/totalAlloc)*100) : 0;
             return (
               <div className="grant-budget">
                 <div className="grant-budget-summary">
@@ -588,26 +606,37 @@ const GrantDetail: React.FC = () => {
                     <span className="grant-summary-value">{fmtINR(totalAlloc)}</span>
                   </span>
                   <span className="grant-budget-summary-cell">
-                    <span className="grant-summary-key">Spent</span>
+                    <span className="grant-summary-key">Spent {useLive ? '(tagged)' : '(mock)'}</span>
                     <span className="grant-summary-value">{fmtINR(totalSpent)}</span>
                   </span>
                   <span className="grant-budget-summary-cell">
                     <span className="grant-summary-key">Utilisation</span>
-                    <span className="grant-summary-value">{totalAlloc > 0 ? Math.round((totalSpent/totalAlloc)*100) : 0}%</span>
+                    <span className="grant-summary-value">{utilPct}%</span>
                   </span>
-                  <button className="btn btn-secondary" onClick={() => navigate('/finance')}>Open in Finance →</button>
+                  <button className="btn btn-secondary" onClick={() => navigate('/finance')}>
+                    {useLive ? 'Tag more in Finance →' : 'Open in Finance →'}
+                  </button>
                 </div>
-                {state.budget.map(b => {
-                  const pct = b.allocated > 0 ? Math.round((b.spent / b.allocated) * 100) : 0;
+                {!useLive && (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-tertiary)', marginBottom: '0.5rem' }}>
+                    Showing the mock budget breakdown. Add real budget heads above and tag transactions in Finance to see live utilisation.
+                  </div>
+                )}
+                {(useLive ? live.rows : state.budget.map(b => ({
+                  headId: b.id, label: b.head, allocated: b.allocated, spent: b.spent,
+                  utilisationPct: b.allocated > 0 ? Math.round((b.spent / b.allocated) * 100) : 0,
+                  remaining: b.allocated - b.spent,
+                }))).map(r => {
+                  const pct = r.utilisationPct;
                   const tone = pct >= 95 ? 'crit' : pct >= 80 ? 'warn' : 'ok';
                   return (
-                    <div key={b.id} className="grant-budget-row">
-                      <div className="grant-budget-head">{b.head}</div>
+                    <div key={r.headId} className="grant-budget-row">
+                      <div className="grant-budget-head">{r.label}</div>
                       <div className={`grant-progress-track grant-progress-track--${tone}`}>
                         <div className="grant-progress-fill" style={{ width: `${Math.min(100, pct)}%` }} />
                       </div>
                       <div className="grant-budget-num">
-                        {fmtINR(b.spent)} / {fmtINR(b.allocated)} · {pct}%
+                        {fmtINR(r.spent)} / {fmtINR(r.allocated)} · {pct}%
                       </div>
                     </div>
                   );

@@ -1,12 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe } from 'lucide-react';
+import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe, Tag } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './Finance.css';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
+import { useStore } from '../../store/useStore';
 
 const Finance: React.FC = () => {
+  const grantBudgetHeads     = useStore(s => s.grantBudgetHeads);
+  const storeTransactions    = useStore(s => s.transactions);
+  const transactionGrantTags = useStore(s => s.transactionGrantTags);
+  const setTxGrantTag        = useStore(s => s.setTransactionGrantTag);
+  const csrCards             = useStore(s => s.csrCards);
   const [grants, setGrants] = useState<any[]>([]);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showGrantModal, setShowGrantModal] = useState(false);
@@ -340,6 +346,93 @@ const Finance: React.FC = () => {
     toast.success('Grant utilization report exported!');
   };
 
+  // ── Session 4: per-grant + per-budget-head expense tagging ──────────────
+  // Index helpers for the tagging UI + CSV export.
+  const cardLabel = (cid: string | number) => {
+    const c = csrCards.find(x => String(x.id) === String(cid));
+    return c ? `${c.company} — ${c.project}` : `Grant ${cid}`;
+  };
+  const headLabel = (hid: string) =>
+    grantBudgetHeads.find(h => h.id === hid)?.label ?? hid;
+
+  // Combine the two streams (server stream + store-resident demo tx) into one
+  // de-duped list of `{ id, amount, label, date }` for tagging.
+  const taggableTx = useMemo(() => {
+    const map = new Map<string, { id: string; amount: number; label: string; date: string }>();
+    for (const t of storeTransactions) {
+      map.set(String(t.id), {
+        id: String(t.id),
+        amount: Math.abs(Number(t.amount) || 0),
+        label: `${t.donorName || 'Donor'} → ${t.campaignTitle || 'Campaign'}`,
+        date: t.date || '',
+      });
+    }
+    for (const t of classifiedStream) {
+      const id = String(t.id ?? '');
+      if (!id || map.has(id)) continue;
+      map.set(id, {
+        id,
+        amount: Math.abs(Number(t.amount) || 0),
+        label: `${t.donorName || 'Donor'} → ${t.campaignTitle || t.agent_category || 'Tx'}`,
+        date: t.date || '',
+      });
+    }
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
+  }, [storeTransactions, classifiedStream]);
+
+  // ≥ ₹1k untagged — these are what the audit calls out as "no idea which
+  // grant they belong to". Surface them prominently for clean-up.
+  const untaggedSignificant = useMemo(
+    () => taggableTx.filter(t => t.amount >= 1000 && !transactionGrantTags[t.id]),
+    [taggableTx, transactionGrantTags],
+  );
+  const untaggedTotal = untaggedSignificant.reduce((s, t) => s + t.amount, 0);
+
+  // Per-row inline picker state.
+  const [tagDraft, setTagDraft] = useState<Record<string, { grantId: string; budgetHeadId: string }>>({});
+  const [showTagSection, setShowTagSection] = useState(true);
+
+  const handleTagSave = (txId: string) => {
+    const draft = tagDraft[txId];
+    if (!draft || !draft.grantId || !draft.budgetHeadId) {
+      toast.error('Pick a grant and a budget head first.');
+      return;
+    }
+    setTxGrantTag(txId, draft);
+    setTagDraft(prev => {
+      const n = { ...prev };
+      delete n[txId];
+      return n;
+    });
+    toast.success('Expense tagged.');
+  };
+
+  const handleExportByGrant = () => {
+    const rows = ['Tx ID,Date,Amount,Description,Grant,Budget Head'];
+    for (const t of taggableTx) {
+      const tag = transactionGrantTags[t.id];
+      if (!tag) continue;
+      const safe = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+      rows.push([
+        t.id,
+        t.date,
+        t.amount,
+        safe(t.label),
+        safe(cardLabel(tag.grantId)),
+        safe(headLabel(tag.budgetHeadId)),
+      ].join(','));
+    }
+    if (rows.length === 1) {
+      toast.error('No tagged expenses to export yet.');
+      return;
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `expenses_by_grant_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    toast.success(`Exported ${rows.length - 1} tagged expenses.`);
+  };
+
   const handleGenerateUC = () => {
     const run = async () => {
       try {
@@ -420,6 +513,9 @@ const Finance: React.FC = () => {
           </button>
           <button className="btn btn-secondary" onClick={handleGenerateUC}>
             <FileText size={16} /> Generate UC (CSR-1)
+          </button>
+          <button className="btn btn-secondary" onClick={handleExportByGrant} title="Export every tagged expense with its grant + budget head">
+            <Download size={16} /> Expenses by grant
           </button>
           <button className="btn btn-primary" onClick={() => setShowEntryModal(true)}>
             <Plus size={16} /> New Journal Entry
@@ -984,6 +1080,141 @@ const Finance: React.FC = () => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Tag expenses to grant budget heads */}
+      <div className="card" style={{ marginTop: '1rem' }}>
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Tag size={18} color="var(--color-primary)" />
+            <h3 className="card-title" style={{ margin: 0 }}>Tag expenses to grants</h3>
+            {untaggedSignificant.length > 0 && (
+              <span style={{
+                background: '#FEE2E2', color: '#B91C1C', borderRadius: 99,
+                padding: '2px 10px', fontSize: '0.72rem', fontWeight: 700,
+              }}>
+                {untaggedSignificant.length} need tagging
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ padding: '0.3rem 0.7rem', fontSize: '0.78rem' }}
+            onClick={() => setShowTagSection(v => !v)}
+          >
+            {showTagSection ? 'Hide' : 'Show'}
+          </button>
+        </div>
+
+        {showTagSection && (
+          <div style={{ padding: '0.75rem 0' }}>
+            {untaggedSignificant.length > 0 ? (
+              <div style={{
+                background: '#FEF3C7', border: '1px solid #FCD34D',
+                borderRadius: 'var(--radius-md)', padding: '0.6rem 0.8rem',
+                fontSize: '0.82rem', color: '#92400E', marginBottom: '0.75rem',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <AlertCircle size={14} />
+                <span>
+                  <strong>{untaggedSignificant.length}</strong> expenses ≥ ₹1,000
+                  totalling <strong>₹{Math.round(untaggedTotal).toLocaleString('en-IN')}</strong>
+                  {' '}aren't yet tagged to a grant — tag them so utilisation reports stay accurate.
+                </span>
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.82rem', color: 'var(--color-text-tertiary)', marginBottom: '0.75rem' }}>
+                All significant expenses are tagged. Use this list to re-tag or correct any entry.
+              </div>
+            )}
+
+            {csrCards.length === 0 ? (
+              <div style={{ fontSize: '0.82rem', color: 'var(--color-text-tertiary)' }}>Add a grant first.</div>
+            ) : grantBudgetHeads.length === 0 ? (
+              <div style={{ fontSize: '0.82rem', color: 'var(--color-text-tertiary)' }}>
+                No budget heads configured yet. Open a grant in <em>Grants → [grant] → Active</em> and add heads first.
+              </div>
+            ) : (
+              <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--color-bg-main)', position: 'sticky', top: 0 }}>
+                      <th style={{ textAlign: 'left', padding: '0.5rem 0.6rem' }}>Description</th>
+                      <th style={{ textAlign: 'right', padding: '0.5rem 0.6rem' }}>Amount</th>
+                      <th style={{ textAlign: 'left', padding: '0.5rem 0.6rem' }}>Grant</th>
+                      <th style={{ textAlign: 'left', padding: '0.5rem 0.6rem' }}>Budget head</th>
+                      <th style={{ padding: '0.5rem 0.6rem' }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(untaggedSignificant.length > 0 ? untaggedSignificant : taggableTx.slice(0, 25)).map(t => {
+                      const existing = transactionGrantTags[t.id];
+                      const draft    = tagDraft[t.id] ?? { grantId: existing?.grantId ?? '', budgetHeadId: existing?.budgetHeadId ?? '' };
+                      const headsForGrant = grantBudgetHeads.filter(h => String(h.grantId) === String(draft.grantId));
+                      return (
+                        <tr key={t.id} style={{ borderTop: '1px solid var(--color-border-light)' }}>
+                          <td style={{ padding: '0.4rem 0.6rem', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.label}>
+                            {t.label}
+                            {existing && <span style={{ marginLeft: 6, color: '#16A34A', fontSize: '0.7rem' }}>· tagged</span>}
+                          </td>
+                          <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', fontWeight: 600 }}>
+                            ₹{Math.round(t.amount).toLocaleString('en-IN')}
+                          </td>
+                          <td style={{ padding: '0.4rem 0.6rem' }}>
+                            <select
+                              className="input-field"
+                              style={{ padding: '0.25rem 0.4rem', fontSize: '0.78rem' }}
+                              value={draft.grantId}
+                              onChange={e => setTagDraft(prev => ({ ...prev, [t.id]: { grantId: e.target.value, budgetHeadId: '' } }))}
+                            >
+                              <option value="">Select grant…</option>
+                              {csrCards.map(c => (
+                                <option key={c.id} value={String(c.id)}>{c.company} — {c.project}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td style={{ padding: '0.4rem 0.6rem' }}>
+                            <select
+                              className="input-field"
+                              style={{ padding: '0.25rem 0.4rem', fontSize: '0.78rem' }}
+                              disabled={!draft.grantId}
+                              value={draft.budgetHeadId}
+                              onChange={e => setTagDraft(prev => ({ ...prev, [t.id]: { ...(prev[t.id] ?? draft), budgetHeadId: e.target.value } }))}
+                            >
+                              <option value="">{headsForGrant.length === 0 ? 'No heads on this grant' : 'Select head…'}</option>
+                              {headsForGrant.map(h => (
+                                <option key={h.id} value={h.id}>{h.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                              onClick={() => handleTagSave(t.id)}
+                            >Save</button>
+                            {existing && (
+                              <button
+                                type="button"
+                                onClick={() => { setTxGrantTag(t.id, undefined); toast.success('Tag cleared.'); }}
+                                title="Clear tag"
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', marginLeft: 4, color: 'var(--color-text-tertiary)' }}
+                              >
+                                <X size={12} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {showEntryModal && (

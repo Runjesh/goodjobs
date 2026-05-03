@@ -5,6 +5,7 @@ import type { GrantTranche } from '../utils/grantLifecycle';
 import type { VolunteerAssignment } from '../utils/volunteerProgram';
 import type { ComplianceGrantLink } from '../utils/complianceGrant';
 import type { ProgramGrantLink } from '../utils/programGrantLink';
+import type { GrantBudgetHead, GrantTag } from '../utils/grantBudgetHeads';
 import { programIdFromName } from '../utils/programFinance';
 
 /**
@@ -78,6 +79,10 @@ export interface Transaction {
   campaignTitle: string;
   date: string;
   timestamp: number;
+  /** Optional grant + budget-head tag (Session 4). Source-of-truth lives in
+   *  the `transactionGrantTags` map below; this field is here for type-completeness
+   *  when a caller materialises a Transaction with its tag inline. */
+  grantTag?: GrantTag;
 }
 
 export interface CSRCard {
@@ -159,6 +164,13 @@ interface AppState {
   /** Many-to-many programme ↔ grant edges (Session 3). */
   programGrantLinks:     ProgramGrantLink[];
 
+  // ── Cross-module connective state (Session 4) ──────────────────────────
+  // grantBudgetHeads     : per-grant editable budget heads
+  // transactionGrantTags : tx-id → { grantId, budgetHeadId } map (source of truth
+  //                        for tagging both store-resident and server-fetched tx)
+  grantBudgetHeads:      GrantBudgetHead[];
+  transactionGrantTags:  Record<string, GrantTag>;
+
   // Custom programme names defined by the org (in addition to those
   // derived from existing beneficiaries). Persisted to localStorage so
   // a freshly-created programme survives a refresh even before any
@@ -182,6 +194,9 @@ interface AppState {
   removeComplianceGrantLink: (id: string) => void;
   addProgramGrantLink:       (l: ProgramGrantLink) => void;
   removeProgramGrantLink:    (id: string) => void;
+  upsertGrantBudgetHead:     (h: GrantBudgetHead) => void;
+  removeGrantBudgetHead:     (id: string) => void;
+  setTransactionGrantTag:    (txId: string, tag: GrantTag | null) => void;
 
   setDonors: (donors: Donor[]) => void;
   setComplianceDocs: (docs: ComplianceDocument[]) => void;
@@ -283,13 +298,22 @@ const LS_VOL_ASSIGN = 'goodjobs.volunteerAssignments.v1';
 const LS_COMP_LINKS = 'goodjobs.complianceGrantLinks.v1';
 const LS_PROG_GRANT_LINKS = 'goodjobs.programGrantLinks.v1';
 const LS_CUSTOM_PROGRAMS = 'goodjobs.customPrograms.v1';
+const LS_BUDGET_HEADS    = 'goodjobs.grantBudgetHeads.v1';
+const LS_TX_GRANT_TAGS   = 'goodjobs.transactionGrantTags.v1';
 
 function loadLS<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as unknown as T) : fallback;
+    if (Array.isArray(fallback)) {
+      return Array.isArray(parsed) ? (parsed as unknown as T) : fallback;
+    }
+    if (fallback && typeof fallback === 'object') {
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as T) : fallback;
+    }
+    return parsed as T;
   } catch { return fallback; }
 }
 
@@ -356,6 +380,30 @@ const seedProgramGrantLinks: ProgramGrantLink[] = SEED_DEMO_CONNECTIONS ? [
   { id: 'pgl-3-dl',  programId: programIdFromName('Digital Literacy 2026'),   grantId: '3', role: 'co-funder', allocationPct: 10, createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString() },
 ] : [];
 
+// Demo budget heads — give a couple of grants a real 4-head budget so the
+// new "Budget heads" panel on GrantDetail isn't empty in dev.
+const seedGrantBudgetHeads: GrantBudgetHead[] = SEED_DEMO_CONNECTIONS ? [
+  // HDFC Bank Women Livelihood (grant id 3 — total ₹80L)
+  { id: 'gbh-3-prog',  grantId: '3', label: 'Programme delivery',     allocatedAmount: 4_800_000, sortOrder: 1 },
+  { id: 'gbh-3-me',    grantId: '3', label: 'M&E + reporting',         allocatedAmount:   800_000, sortOrder: 2 },
+  { id: 'gbh-3-cap',   grantId: '3', label: 'Capacity building',       allocatedAmount: 1_200_000, sortOrder: 3 },
+  { id: 'gbh-3-admin', grantId: '3', label: 'Admin (cap 15%)',         allocatedAmount: 1_200_000, sortOrder: 4 },
+  // TCS Digital Literacy 2026 (grant id 2 — total ₹25L)
+  { id: 'gbh-2-prog',  grantId: '2', label: 'Programme delivery',     allocatedAmount: 1_500_000, sortOrder: 1 },
+  { id: 'gbh-2-me',    grantId: '2', label: 'M&E + reporting',         allocatedAmount:   250_000, sortOrder: 2 },
+  { id: 'gbh-2-cap',   grantId: '2', label: 'Devices & connectivity',  allocatedAmount:   500_000, sortOrder: 3 },
+  { id: 'gbh-2-admin', grantId: '2', label: 'Admin (cap 10%)',         allocatedAmount:   250_000, sortOrder: 4 },
+] : [];
+
+// A handful of seeded tags so the utilisation panel shows non-zero spend
+// even before the user tags anything. Keys are seed transaction ids.
+const seedTransactionGrantTags: Record<string, GrantTag> = SEED_DEMO_CONNECTIONS ? {
+  'TRX-1089': { grantId: '3', budgetHeadId: 'gbh-3-prog'  }, // ₹50k Infosys → HDFC programme
+  'TRX-1091': { grantId: '2', budgetHeadId: 'gbh-2-prog'  }, // ₹15k Priya → TCS programme
+  'TRX-1090': { grantId: '2', budgetHeadId: 'gbh-2-cap'   }, // ₹2.5k → TCS devices
+  'TRX-1092': { grantId: '3', budgetHeadId: 'gbh-3-me'    }, // ₹5k → HDFC M&E
+} : {};
+
 const seedTranches: GrantTranche[] = SEED_DEMO_CONNECTIONS ? [
   { id: 'tr-3-1', grantId: '3', number: 1, amount: 4_000_000, expectedDate: new Date(Date.now() - 60*86_400_000).toISOString().slice(0,10), status: 'released', releasedAt: new Date(Date.now() - 60*86_400_000).toISOString() },
   { id: 'tr-3-2', grantId: '3', number: 2, amount: 4_000_000, expectedDate: new Date(Date.now() + 10*86_400_000).toISOString().slice(0,10), status: 'awaiting_utilization' },
@@ -381,6 +429,8 @@ export const useStore = create<AppState>((set) => ({
   complianceGrantLinks: loadLS<ComplianceGrantLink[]>(LS_COMP_LINKS, seedComplianceLinks),
   programGrantLinks:    loadLS<ProgramGrantLink[]>(LS_PROG_GRANT_LINKS, seedProgramGrantLinks),
   customPrograms:       loadLS<string[]>(LS_CUSTOM_PROGRAMS, []),
+  grantBudgetHeads:     loadLS<GrantBudgetHead[]>(LS_BUDGET_HEADS, seedGrantBudgetHeads),
+  transactionGrantTags: loadLS<Record<string, GrantTag>>(LS_TX_GRANT_TAGS, seedTransactionGrantTags),
 
   addCustomProgram: (name) => set((state) => {
     const trimmed = name.trim();
@@ -487,6 +537,31 @@ export const useStore = create<AppState>((set) => ({
     const next = state.programGrantLinks.filter(l => l.id !== id);
     saveLS(LS_PROG_GRANT_LINKS, next);
     return { programGrantLinks: next };
+  }),
+  upsertGrantBudgetHead: (h) => set((state) => {
+    const next = state.grantBudgetHeads.some(x => x.id === h.id)
+      ? state.grantBudgetHeads.map(x => x.id === h.id ? { ...x, ...h } : x)
+      : [...state.grantBudgetHeads, h];
+    saveLS(LS_BUDGET_HEADS, next);
+    return { grantBudgetHeads: next };
+  }),
+  removeGrantBudgetHead: (id) => set((state) => {
+    const next = state.grantBudgetHeads.filter(h => h.id !== id);
+    saveLS(LS_BUDGET_HEADS, next);
+    // Note: tags pointing at this head become "orphan spend" surfaced by
+    // selectGrantUtilisation — we don't auto-clear them so the spend is
+    // visible until the user re-tags the affected transactions.
+    return { grantBudgetHeads: next };
+  }),
+  setTransactionGrantTag: (txId, tag) => set((state) => {
+    const next = { ...state.transactionGrantTags };
+    if (tag) {
+      next[txId] = tag;
+    } else {
+      delete next[txId];
+    }
+    saveLS(LS_TX_GRANT_TAGS, next);
+    return { transactionGrantTags: next };
   }),
 
   setDonors: (donors) => set(() => ({ donors })),
