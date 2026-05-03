@@ -40,6 +40,7 @@ const Finance: React.FC = () => {
   // Inline FCRA reclassification — per-row pending category selection + busy lock.
   const [exPending, setExPending] = useState<Record<string, string>>({});
   const [exBusy, setExBusy] = useState<Record<string, boolean>>({});
+  const [exSentToBk, setExSentToBk] = useState<Record<string, boolean>>({});
 
   const FCRA_CATEGORIES = ['FCRA', 'Domestic', 'CSR', 'Grant', 'Donation', 'Other'];
 
@@ -187,6 +188,47 @@ const Finance: React.FC = () => {
         return n;
       });
       toast.success(`Classified as ${category}.`);
+    } finally {
+      setExBusy(prev => {
+        const n = { ...prev };
+        delete n[id];
+        return n;
+      });
+    }
+  };
+
+  // Send a low-confidence row to the bookkeeper instead of approving inline.
+  // Posts a journal-entry-style memo so the action shows up in the audit log,
+  // marks the row as "Sent" (greys it out) but leaves it in the queue so the
+  // operator can still approve once the bookkeeper replies.
+  const sendExceptionToBookkeeper = async (t: any) => {
+    const id = String(t.id ?? '');
+    if (!id) return;
+    const proposed = exPending[id] || t.agent_category || 'Domestic';
+    setExBusy(prev => ({ ...prev, [id]: true }));
+    try {
+      let ok = false;
+      try {
+        const r = await apiFetch('/finance/journal-entry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: `Bookkeeper review requested — TX ${id}: ${t.donorName || 'Donor'} (proposed ${proposed})`,
+            amount: Number(t.amount) || 0,
+            entry_type: 'Bookkeeper Review',
+            fund: proposed,
+          }),
+        });
+        ok = r.ok;
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        toast.error('Could not notify bookkeeper. Try again.');
+        return;
+      }
+      setExSentToBk(prev => ({ ...prev, [id]: true }));
+      toast.success(`Sent to bookkeeper for review (proposed ${proposed}).`);
     } finally {
       setExBusy(prev => {
         const n = { ...prev };
@@ -506,7 +548,7 @@ const Finance: React.FC = () => {
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(80px,0.9fr) minmax(64px,0.7fr) minmax(110px,1.1fr) minmax(70px,0.9fr) 52px minmax(110px,1fr) 88px',
+                    gridTemplateColumns: 'minmax(80px,0.9fr) minmax(64px,0.7fr) minmax(110px,1.1fr) minmax(70px,0.9fr) 52px minmax(110px,1fr) 88px 110px',
                     gap: '0.5rem',
                     padding: '0.6rem 0.75rem',
                     fontSize: '0.7rem',
@@ -527,7 +569,8 @@ const Finance: React.FC = () => {
                   <span>Agent</span>
                   <span>Conf.</span>
                   <span>Reclassify</span>
-                  <span>Action</span>
+                  <span>Approve</span>
+                  <span>Bookkeeper</span>
                 </div>
                 <div style={{ height: exVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
                   {exVirtualizer.getVirtualItems().map(vr => {
@@ -548,12 +591,13 @@ const Finance: React.FC = () => {
                         <div
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: 'minmax(80px,0.9fr) minmax(64px,0.7fr) minmax(110px,1.1fr) minmax(70px,0.9fr) 52px minmax(110px,1fr) 88px',
+                            gridTemplateColumns: 'minmax(80px,0.9fr) minmax(64px,0.7fr) minmax(110px,1.1fr) minmax(70px,0.9fr) 52px minmax(110px,1fr) 88px 110px',
                             gap: '0.5rem',
                             padding: '0.5rem 0.75rem',
                             alignItems: 'center',
                             fontSize: '0.82rem',
                             borderBottom: '1px solid var(--color-border-light)',
+                            opacity: exSentToBk[String(t.id)] ? 0.65 : 1,
                           }}
                         >
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.donorName || '—'}</span>
@@ -579,6 +623,16 @@ const Finance: React.FC = () => {
                             disabled={!!exBusy[String(t.id)]}
                           >
                             {exBusy[String(t.id)] ? '…' : 'Approve'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem' }}
+                            onClick={() => sendExceptionToBookkeeper(t)}
+                            disabled={!!exBusy[String(t.id)] || !!exSentToBk[String(t.id)]}
+                            title="Send this row to the bookkeeper for a second look"
+                          >
+                            {exSentToBk[String(t.id)] ? 'Sent ✓' : exBusy[String(t.id)] ? '…' : 'Send to BK'}
                           </button>
                         </div>
                       </div>

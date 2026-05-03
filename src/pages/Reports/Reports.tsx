@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 import { useTier } from '../../hooks/useTier';
 import { recordReportDraft } from '../../utils/trial';
 import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
+import { readToCForProgram } from '../../utils/tocStorage';
 import './Reports.css';
 
 type ReportType = 'funder' | 'impact' | 'donor' | 'board';
@@ -113,6 +114,38 @@ const Reports: React.FC = () => {
   const { donors, transactions, campaigns, beneficiaries } = useStore();
   const { tier, limits, usage, openUpgrade } = useTier();
   const [reportUpgradeOpen, setReportUpgradeOpen] = useState(false);
+
+  // Pull per-program Theory-of-Change outcomes so impact/funder narratives
+  // can be anchored to the same statements the program lead authored.
+  const tocSnapshots = React.useMemo(() => {
+    const programs = Array.from(new Set(beneficiaries.map((b: any) => String(b.program || '')).filter(Boolean)));
+    const list: { program: string; outcomes: string[] }[] = [];
+    const seen = new Set<string>();
+    const consider = (p: string) => {
+      const key = p || 'General';
+      if (seen.has(key)) return;
+      seen.add(key);
+      const nodes = readToCForProgram(p);
+      const outcomes = nodes
+        .filter(n => n.type === 'outcome' || n.type === 'impact')
+        .map(n => n.content)
+        .filter(Boolean);
+      if (outcomes.length) list.push({ program: key, outcomes });
+    };
+    for (const p of programs) consider(p);
+    consider('General');
+    return list;
+  }, [beneficiaries]);
+
+  const copyOutcomesForProgram = async (program: string, outcomes: string[]) => {
+    const text = `Theory of Change — ${program}\n\n` + outcomes.map(o => `• ${o}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${program} outcomes copied — paste into your draft.`);
+    } catch {
+      toast.error('Copy failed — please select and copy manually.');
+    }
+  };
 
   const handleDraftReport = async (type: ReportType) => {
     if (!can('reports', 'canEdit')) {
@@ -216,6 +249,45 @@ const Reports: React.FC = () => {
                 />
                 {draftingReport === rt.id ? '…' : rt.label}
               </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Theory of Change anchor — per-program outcomes for narrative ── */}
+      {tocSnapshots.length > 0 && (
+        <div className="reports-toc-anchor">
+          <div className="reports-toc-anchor-header">
+            <div>
+              <div className="reports-toc-anchor-title">
+                <Sparkles size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: '-2px' }} />
+                Anchor narratives to your Theory of Change
+              </div>
+              <div className="reports-toc-anchor-sub">
+                Funders expect outcomes language to match what you committed to. Copy the relevant program's outcomes into impact / funder reports.
+              </div>
+            </div>
+            <button className="reports-btn-secondary" onClick={() => navigate('/programs?tab=toc')}>
+              Edit ToC <ArrowRight size={13} />
+            </button>
+          </div>
+          <div className="reports-toc-anchor-grid">
+            {tocSnapshots.map(({ program, outcomes }) => (
+              <div key={program} className="reports-toc-anchor-card">
+                <div className="reports-toc-anchor-card-title">{program}</div>
+                <ul className="reports-toc-anchor-list">
+                  {outcomes.slice(0, 3).map((o, i) => (<li key={i}>{o}</li>))}
+                </ul>
+                {outcomes.length > 3 && (
+                  <div className="reports-toc-anchor-more">+{outcomes.length - 3} more</div>
+                )}
+                <button
+                  className="reports-toc-anchor-copy"
+                  onClick={() => copyOutcomesForProgram(program, outcomes)}
+                >
+                  Copy outcomes
+                </button>
+              </div>
             ))}
           </div>
         </div>

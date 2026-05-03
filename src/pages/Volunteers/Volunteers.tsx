@@ -791,21 +791,31 @@ const Volunteers: React.FC = () => {
               >
                 <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 2 }}>Shift conflict</div>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>Overlapping shift detected</div>
                   <div>{signupError.message}</div>
                   {signupError.conflictShift && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ marginTop: '0.5rem', fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
-                      onClick={() => {
-                        const c = signupError.conflictShift!;
-                        setSignupShift(c);
-                        setSignupError(null);
-                      }}
-                    >
-                      Open conflicting shift
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
+                        onClick={() => {
+                          const c = signupError.conflictShift!;
+                          setSignupShift(c);
+                          setSignupError(null);
+                        }}
+                      >
+                        View conflicting shift
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
+                        onClick={() => setSignupError(null)}
+                      >
+                        Choose another volunteer
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

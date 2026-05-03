@@ -506,3 +506,87 @@
   .reports-kanban { grid-template-columns: 1fr; }
   .reports-header-right { flex-direction: column; align-items: flex-end; gap: 0.25rem; }
 }
+
+/* ── Theory of Change anchor panel ───────────────────────────────── */
+.reports-toc-anchor {
+  background: #faf5ff;
+  border: 1px solid #e9d5ff;
+  border-radius: var(--radius-lg, 12px);
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem;
+}
+.reports-toc-anchor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.reports-toc-anchor-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #6d28d9;
+}
+.reports-toc-anchor-sub {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin-top: 0.2rem;
+  max-width: 60ch;
+}
+.reports-toc-anchor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+.reports-toc-anchor-card {
+  background: #fff;
+  border: 1px solid #e9d5ff;
+  border-radius: var(--radius-md, 8px);
+  padding: 0.7rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+}
+.reports-toc-anchor-card-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+  color: var(--color-text-primary);
+}
+.reports-toc-anchor-list {
+  margin: 0 0 0.5rem 0;
+  padding-left: 1.05rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+.reports-toc-anchor-list li { margin-bottom: 2px; }
+.reports-toc-anchor-more {
+  font-size: 0.72rem;
+  color: var(--color-text-tertiary);
+  margin-bottom: 0.4rem;
+}
+.reports-toc-anchor-copy {
+  align-self: flex-start;
+  margin-top: auto;
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  font-size: 0.72rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.reports-toc-anchor-copy:hover { background: #6d28d9; }
+.reports-btn-secondary {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: 0.78rem;
+  padding: 0.32rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.reports-btn-secondary:hover { background: var(--color-bg-soft, #f9fafb); }
