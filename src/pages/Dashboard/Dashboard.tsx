@@ -490,7 +490,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
                 </button>
               )}
 
-              {level !== 'urgent' && (
+              {level !== 'urgent' && item.actionType !== 'ack-lapse-risk' && (
                 <div className="snooze-wrap" ref={snoozeMenuId === item.id ? menuRef : undefined}>
                   <button
                     className="priority-item-snooze"
@@ -602,7 +602,12 @@ const Dashboard: React.FC = () => {
   const handleSnooze = useCallback((id: string, hours: number) => {
     snoozeItem(id, hours);
     setSnoozed(prev => new Set([...prev, id]));
-    const label = hours === 24 ? 'tomorrow' : hours === 72 ? 'in 3 days' : 'next week';
+    const label =
+      hours === 24  ? 'tomorrow' :
+      hours === 72  ? 'in 3 days' :
+      hours === 168 ? 'next week' :
+      hours % 24 === 0 ? `in ${hours / 24} days` :
+      `for ${hours}h`;
     toast(`Item snoozed — will resurface ${label}`, { icon: '🔕', duration: 2500 });
   }, []);
 
