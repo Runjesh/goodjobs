@@ -62,7 +62,7 @@ export function mergeGrantState(base: GrantState, override: Partial<GrantState> 
       case 'parserEdits':
       case 'closureChecklist':
         // Shallow record merge — override wins on conflicts.
-        (out as Record<string, unknown>)[key] = {
+        (out as unknown as Record<string, unknown>)[key] = {
           ...(base[key] as Record<string, unknown>),
           ...(v as Record<string, unknown>),
         };
@@ -76,7 +76,7 @@ export function mergeGrantState(base: GrantState, override: Partial<GrantState> 
         break;
       }
       default:
-        (out as Record<string, unknown>)[key] = v as unknown;
+        (out as unknown as Record<string, unknown>)[key] = v as unknown;
     }
   }
   return out;

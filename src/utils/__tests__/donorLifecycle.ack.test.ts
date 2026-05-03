@@ -11,13 +11,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ackLapseRisk, loadDonorState, setLifecycleScope } from '../donorLifecycle';
 
 describe('ackLapseRisk', () => {
-  const origFetch = global.fetch;
+  const origFetch = globalThis.fetch;
   beforeEach(() => {
     localStorage.clear();
     setLifecycleScope('test-tenant');
   });
   afterEach(() => {
-    global.fetch = origFetch;
+    globalThis.fetch = origFetch;
     setLifecycleScope(null);
     vi.restoreAllMocks();
   });
@@ -26,7 +26,7 @@ describe('ackLapseRisk', () => {
     const fetchSpy = vi.fn().mockResolvedValue(
       new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
     );
-    global.fetch = fetchSpy;
+    globalThis.fetch = fetchSpy;
 
     const before = Date.now();
     const state = ackLapseRisk('42');
@@ -54,7 +54,7 @@ describe('ackLapseRisk', () => {
 
   it('persists for many donors (covers the lapse-risk fan-out from Today)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-    global.fetch = fetchSpy;
+    globalThis.fetch = fetchSpy;
     ['1', '2', '3'].forEach(id => { ackLapseRisk(id); });
     await Promise.resolve();
     await Promise.resolve();

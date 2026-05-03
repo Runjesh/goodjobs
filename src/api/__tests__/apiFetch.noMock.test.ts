@@ -18,18 +18,18 @@ import { apiFetch } from '../client';
 import { hydrateDonorLifecycles, loadDonorState, setLifecycleScope, subscribeLifecycleHydrated } from '../../utils/donorLifecycle';
 
 describe('apiFetch noMockFallback', () => {
-  const origFetch = global.fetch;
+  const origFetch = globalThis.fetch;
   beforeEach(() => {
     // Mock is enabled by default in the test env (jsdom + DEV).
     localStorage.clear();
   });
   afterEach(() => {
-    global.fetch = origFetch;
+    globalThis.fetch = origFetch;
     vi.restoreAllMocks();
   });
 
   it('falls through to the mock backend on network failure when noMockFallback is omitted (default behaviour preserved)', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
     // /crm/donors is a known mocked path so we can observe the fallback.
     const res = await apiFetch('/crm/donors');
     // The mock backend either returns 200 with a payload or a 503 if
@@ -40,7 +40,7 @@ describe('apiFetch noMockFallback', () => {
   });
 
   it('returns a real 503 (no mock fallback) when noMockFallback:true and fetch rejects', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
     const res = await apiFetch('/crm/outreach', {
       method: 'POST',
       noMockFallback: true,
@@ -55,7 +55,7 @@ describe('apiFetch noMockFallback', () => {
   it('does NOT fall through to the mock when noMockFallback:true and the real response is 404', async () => {
     // Static host returning HTML 404 — the default code path would normally
     // promote this to a mock 200 for known paths.
-    global.fetch = vi.fn().mockResolvedValue(
+    globalThis.fetch = vi.fn().mockResolvedValue(
       new Response('<html>Not Found</html>', {
         status: 404,
         headers: { 'Content-Type': 'text/html' },
@@ -72,7 +72,7 @@ describe('apiFetch noMockFallback', () => {
 
   it('strips the noMockFallback flag from the underlying fetch init', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
-    global.fetch = fetchSpy;
+    globalThis.fetch = fetchSpy;
     await apiFetch('/anything', { method: 'POST', noMockFallback: true });
     const call = fetchSpy.mock.calls[0];
     const passedInit = call[1] as RequestInit & { noMockFallback?: unknown };
@@ -82,19 +82,19 @@ describe('apiFetch noMockFallback', () => {
 });
 
 describe('hydrateDonorLifecycles', () => {
-  const origFetch = global.fetch;
+  const origFetch = globalThis.fetch;
   beforeEach(() => {
     localStorage.clear();
     setLifecycleScope('test-tenant');
   });
   afterEach(() => {
-    global.fetch = origFetch;
+    globalThis.fetch = origFetch;
     setLifecycleScope(null);
     vi.restoreAllMocks();
   });
 
   it('populates the in-memory cache + LS from the bulk endpoint and notifies subscribers (works for any role allowed to read /crm/donors/lifecycle, incl. finance)', async () => {
-    global.fetch = vi.fn().mockResolvedValue(
+    globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         states: {
           '7': { milestones: { thankyou: '2026-01-02T00:00:00Z' }, skipped: {} },
@@ -115,7 +115,7 @@ describe('hydrateDonorLifecycles', () => {
   });
 
   it('resolves quietly (no throw, no notify) on a non-OK response', async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 }));
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 }));
     let notified = 0;
     const off = subscribeLifecycleHydrated(() => { notified += 1; });
     await expect(hydrateDonorLifecycles()).resolves.toBeUndefined();

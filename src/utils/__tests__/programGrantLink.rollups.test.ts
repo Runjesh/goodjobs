@@ -10,14 +10,18 @@ import type { BeneficiaryOutcome } from '../outcomes';
 
 const ben = (id: string, program: string): Beneficiary => ({
   id, name: id, program,
-  status: 'Active' as Beneficiary['status'],
-  enrolled: '2025-01-01',
+  location: '—',
+  aadhaar: false,
+  familySize: 1,
 });
 
 const out = (id: string, beneficiaryId: string, programId: string, daysAgo: number): BeneficiaryOutcome => ({
   id, beneficiaryId, programId,
   metric: 'attendance',
-  value: 1,
+  metricLabel: 'Attendance',
+  baseline: 0,
+  current: 1,
+  higherIsBetter: true,
   measuredAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
 });
 

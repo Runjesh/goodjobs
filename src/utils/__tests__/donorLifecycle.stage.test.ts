@@ -44,7 +44,7 @@ describe('donorLifecycle: computeStage boundaries', () => {
     localStorage.clear();
     setLifecycleScope('test-stage');
     // Silence the fire-and-forget PUTs from mutation helpers.
-    global.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
   });
   afterEach(() => {
     setLifecycleScope(null);
@@ -110,7 +110,7 @@ describe('donorLifecycle: computeTouchpoints', () => {
   beforeEach(() => {
     localStorage.clear();
     setLifecycleScope('test-tp');
-    global.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
   });
   afterEach(() => {
     setLifecycleScope(null);
@@ -176,7 +176,7 @@ describe('donorLifecycle: nextDueMilestone', () => {
   beforeEach(() => {
     localStorage.clear();
     setLifecycleScope('test-next');
-    global.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
   });
   afterEach(() => {
     setLifecycleScope(null);
@@ -216,7 +216,7 @@ describe('donorLifecycle: urgencyScore', () => {
   beforeEach(() => {
     localStorage.clear();
     setLifecycleScope('test-urg');
-    global.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
   });
   afterEach(() => {
     setLifecycleScope(null);
