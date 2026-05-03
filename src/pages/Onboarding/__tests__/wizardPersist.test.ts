@@ -106,12 +106,14 @@ describe('wizard backend persistence', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('persistInvites POSTs /onboarding/invites with cleaned rows', async () => {
+  it('persistInvites POSTs /onboarding/invites with cleaned + format-validated rows', async () => {
     const calls = captureFetch();
     await persistInvites([
       { email: 'a@x.org', role: 'finance' },
       { email: '   ', role: 'programs' },     // dropped — empty email
       { email: 'b@x.org', role: '' },          // dropped — empty role
+      { email: 'not-an-email', role: 'field' },// dropped — bad format
+      { email: 'asha@', role: 'field' },       // dropped — bad format
       { email: 'c@x.org', role: 'field' },
     ]);
     expect(calls).toHaveLength(1);

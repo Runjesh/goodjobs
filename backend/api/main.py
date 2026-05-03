@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 import hashlib
 import json
 import os
+import re
 
 from agents.donor_nurture_agent import donor_nurture_app
 from agents.finance_compliance_agent import finance_agent
@@ -3335,10 +3336,14 @@ def list_invites(current_user: TokenUser = Depends(get_current_user)):
 
 @app.post("/onboarding/invites", tags=["Settings"])
 def create_invites(body: NgoInviteRequest, current_user: TokenUser = Depends(get_current_user)):
+    # Lightweight RFC-5322-ish email check — keeps obvious garbage
+    # ("not-an-email", "asha", "x@" etc.) out of the queue without
+    # taking on a heavyweight validator dependency.
+    _email_re = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
     cleaned = [
         {"email": i.email.strip().lower(), "role": (i.role or "").strip()}
         for i in body.invites
-        if i.email.strip() and i.role.strip()
+        if i.email.strip() and i.role.strip() and _email_re.match(i.email.strip())
     ][:25]
     if not cleaned:
         return {"queued": 0, "invites": [], "source": "memory"}

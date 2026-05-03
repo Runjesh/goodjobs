@@ -76,11 +76,18 @@ export async function persistFirstProgram(
   }
 }
 
+// Mirrors the backend's lightweight RFC-5322-ish check. We don't try to
+// be exhaustive — just enough to keep "not-an-email" / "asha" / "x@" out
+// of the queue. The backend re-validates so this is purely a UX guard.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
 /** Queue invites server-side (rows insert; email send is a future worker). */
 export async function persistInvites(
   invites: NonNullable<WizardData['inviteTeam']>['invites'],
 ): Promise<void> {
-  const cleaned = (invites ?? []).filter((i) => i.email.trim() && i.role);
+  const cleaned = (invites ?? []).filter(
+    (i) => i.email.trim() && i.role && EMAIL_RE.test(i.email.trim()),
+  );
   if (!cleaned.length) return;
   const ok = await postJson('/onboarding/invites', { invites: cleaned });
   if (!ok) toast.error('Invites saved locally — re-send from Settings → Team later.');
