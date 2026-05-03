@@ -189,8 +189,11 @@ const GrantDetail: React.FC = () => {
 
   const [state, setState] = useState<GrantState>(() => loadGrantState(card));
   // Track which card.id our `state` was hydrated for, to avoid a save-before-
-  // load race that would overwrite persisted state with the mock.
-  const [hydratedForId, setHydratedForId] = useState<string | null>(card ? String(card.id) : null);
+  // load race that would overwrite persisted state with the mock. Init to
+  // null (NOT card.id) so the hydration effect runs on first mount even when
+  // the card is already in the store — otherwise the GET never fires and the
+  // PUT gate stays closed forever.
+  const [hydratedForId, setHydratedForId] = useState<string | null>(null);
   // Flips to the card.id after the initial GET settles (success, empty, OR
   // network error). The PUT effect waits for this so we never clobber newer
   // server state with stale localStorage/mock on mount.
