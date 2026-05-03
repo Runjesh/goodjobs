@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck } from 'lucide-react';
+import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck, Plus } from 'lucide-react';
 import { useStore, initialBeneficiaries } from '../../store/useStore';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import { useAuth } from '../../context/AuthContext';
@@ -158,8 +158,13 @@ const Programs: React.FC = () => {
     return false;
   };
 
+  const customPrograms = useStore(s => s.customPrograms);
+  const addCustomProgram = useStore(s => s.addCustomProgram);
   const derivedPrograms = Array.from(new Set(beneficiaries.map(b => b.program).filter(Boolean)));
-  const programs = derivedPrograms.length > 0 ? derivedPrograms : DEFAULT_PROGRAMS;
+  const mergedPrograms = Array.from(new Set([...derivedPrograms, ...customPrograms]));
+  const programs = mergedPrograms.length > 0 ? mergedPrograms : DEFAULT_PROGRAMS;
+  const [showAddProgramModal, setShowAddProgramModal] = useState(false);
+  const [newProgramName, setNewProgramName] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'mis' | 'forms' | 'toc'>('mis');
   const [form, setForm] = useState({ name: '', program: '', location: '', aadhaar: false, familySize: 1 });
@@ -480,6 +485,13 @@ const Programs: React.FC = () => {
           </button>
           <button className="btn btn-secondary" onClick={() => setActiveTab('forms')}>
             <ClipboardList size={16} /> Form Builder
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => { setNewProgramName(''); setShowAddProgramModal(true); }}
+            style={{ border: '1px solid #0F766E', color: '#0F766E' }}
+          >
+            <Plus size={16} /> Add Program
           </button>
           <button
             className="btn btn-primary"
@@ -1001,6 +1013,75 @@ const Programs: React.FC = () => {
       </>)}
 
       {/* Conversational MIS Modal */}
+      {showAddProgramModal && (
+        <ModalOverlay onBackdropClick={() => setShowAddProgramModal(false)}>
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prog-add-title"
+            style={{ maxWidth: '440px' }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowAddProgramModal(false)}
+              style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }}
+              className="action-btn"
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+            <div className="flex items-center gap-2 mb-4" style={{ paddingRight: '2.5rem' }}>
+              <Target size={22} color="#0F766E" />
+              <h2 id="prog-add-title" style={{ fontSize: '1.25rem', margin: 0 }}>Add Program</h2>
+            </div>
+            <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
+              Create a new programme so it appears in the enrolment dropdown,
+              budget setup, and outcome tracking — even before any beneficiary
+              has been added to it.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const trimmed = newProgramName.trim();
+                if (!trimmed) {
+                  toast.error('Please enter a program name');
+                  return;
+                }
+                const exists = programs.some(p => p.toLowerCase() === trimmed.toLowerCase());
+                if (exists) {
+                  toast.error('A program with that name already exists');
+                  return;
+                }
+                addCustomProgram(trimmed);
+                toast.success(`Added "${trimmed}"`);
+                setShowAddProgramModal(false);
+                setNewProgramName('');
+              }}
+              className="flex-col gap-4 flex"
+            >
+              <div className="input-group">
+                <label className="input-label">Program name *</label>
+                <input
+                  className="input-field"
+                  type="text"
+                  autoFocus
+                  required
+                  maxLength={80}
+                  placeholder="e.g. Maternal Health Outreach"
+                  value={newProgramName}
+                  onChange={(e) => setNewProgramName(e.target.value)}
+                />
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
+                <Plus size={16} /> Create Program
+              </button>
+            </form>
+          </div>
+        </ModalOverlay>
+      )}
+
       {showConversationalModal && (
         <ModalOverlay onBackdropClick={() => setShowConversationalModal(false)}>
           <div

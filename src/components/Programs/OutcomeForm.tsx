@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { Activity, X } from 'lucide-react';
-import ModalOverlay from '../ui/ModalOverlay';
+import { ModalOverlay } from '../ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
 import { programIdFromName } from '../../utils/programFinance';
 import { improvementPct, type BeneficiaryOutcome } from '../../utils/outcomes';

@@ -156,6 +156,14 @@ interface AppState {
   volunteerAssignments:  VolunteerAssignment[];
   complianceGrantLinks:  ComplianceGrantLink[];
 
+  // Custom programme names defined by the org (in addition to those
+  // derived from existing beneficiaries). Persisted to localStorage so
+  // a freshly-created programme survives a refresh even before any
+  // beneficiary has been enrolled into it.
+  customPrograms:        string[];
+  addCustomProgram:      (name: string) => void;
+  removeCustomProgram:   (name: string) => void;
+
   setProgramBudgets:      (b: ProgramBudget[]) => void;
   upsertProgramBudget:    (b: ProgramBudget) => void;
   recordProgramSpend:     (programId: string, amount: number) => void;
@@ -268,6 +276,7 @@ const LS_TRANCHES  = 'goodjobs.grantTranches.v1';
 const LS_MIS       = 'goodjobs.misReviewIntents.v1';
 const LS_VOL_ASSIGN = 'goodjobs.volunteerAssignments.v1';
 const LS_COMP_LINKS = 'goodjobs.complianceGrantLinks.v1';
+const LS_CUSTOM_PROGRAMS = 'goodjobs.customPrograms.v1';
 
 function loadLS<T>(key: string, fallback: T): T {
   try {
@@ -355,6 +364,21 @@ export const useStore = create<AppState>((set) => ({
   misReviewIntents:    loadLS<MisReviewIntent[]>(LS_MIS, []),
   volunteerAssignments: loadLS<VolunteerAssignment[]>(LS_VOL_ASSIGN, seedVolAssignments),
   complianceGrantLinks: loadLS<ComplianceGrantLink[]>(LS_COMP_LINKS, seedComplianceLinks),
+  customPrograms:       loadLS<string[]>(LS_CUSTOM_PROGRAMS, []),
+
+  addCustomProgram: (name) => set((state) => {
+    const trimmed = name.trim();
+    if (!trimmed) return {};
+    if (state.customPrograms.some(p => p.toLowerCase() === trimmed.toLowerCase())) return {};
+    const next = [...state.customPrograms, trimmed];
+    saveLS(LS_CUSTOM_PROGRAMS, next);
+    return { customPrograms: next };
+  }),
+  removeCustomProgram: (name) => set((state) => {
+    const next = state.customPrograms.filter(p => p !== name);
+    saveLS(LS_CUSTOM_PROGRAMS, next);
+    return { customPrograms: next };
+  }),
 
   setProgramBudgets: (programBudgets) => { saveLS(LS_BUDGETS, programBudgets); set({ programBudgets }); },
   upsertProgramBudget: (b) => set((state) => {

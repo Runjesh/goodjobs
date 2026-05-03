@@ -158,3 +158,17 @@ Three more cross-module loops shipped (Task #21):
 New helpers: `src/utils/{volunteerProgram,complianceGrant,donorImpact}.ts`. Demo seeds (3 volunteer assignments, 4 compliance-grant links covering HDFC/TCS/Infosys grants) gated on `SEED_DEMO_DATA`. tsc clean, 87/87 unit tests pass (3 new spec files).
 
 Session 3 (deferred): WhatsApp field portal, full SROI module, role-based dashboards.
+
+## Programs: Add Program (May 2026)
+
+The Programs page used to derive its programme list purely from existing
+beneficiaries' `program` field, so creating a brand-new programme was
+impossible without first inventing a beneficiary for it. Added an
+explicit "Add Program" button + modal in the Programs header that calls
+a new `customPrograms` slice in `useStore` (LS-persisted at
+`goodjobs.customPrograms.v1`). The Enrol-Beneficiary dropdown now merges
+derived + custom programmes, so a freshly-created programme is
+immediately selectable. Also fixed a regression in
+`src/components/Programs/OutcomeForm.tsx` (default import of
+`ModalOverlay`, which is a named export) that was breaking the
+/programs route on first render.
