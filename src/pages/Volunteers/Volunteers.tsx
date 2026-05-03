@@ -70,7 +70,6 @@ function unpackVolProfile(profile?: Record<string, unknown> | null): VolProfileF
 }
 
 const Volunteers: React.FC = () => {
-  useFocusFromUrl('focus');
   const { volunteers, addVolunteer, updateVolunteer, deleteVolunteer } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
@@ -115,6 +114,14 @@ const Volunteers: React.FC = () => {
     getScrollElement: () => rosterRef.current,
     estimateSize: () => 68,
     overscan: 10,
+  });
+
+  useFocusFromUrl('focus', {
+    resolveIndex: (id) => {
+      const idx = volunteers.findIndex(v => String(v.id) === String(id));
+      return idx >= 0 ? idx : null;
+    },
+    onScrollToIndex: (idx) => rosterVirtualizer.scrollToIndex(idx, { align: 'center' }),
   });
 
   const refresh = async () => {

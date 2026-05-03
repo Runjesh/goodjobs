@@ -78,6 +78,10 @@ const CRM: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [csvPreview, setCsvPreview] = useState<any[]>([]);
   const [propensity, setPropensity] = useState<{score: number, recommendation: string, insights?: any} | null>(null);
+  /** Map of donor id → propensity score (0-100). Populated lazily from a
+   *  one-shot batch call so row-level "Suggested next action" pills can use
+   *  the real band thresholds instead of falling back to heuristics. */
+  const [propensityScores, setPropensityScores] = useState<Record<string, number>>({});
   const [aiSummary, setAiSummary] = useState<string>('');
   const [sentiment, setSentiment] = useState<{sentiment: string, score: number} | null>(null);
   const [propensityLoading, setPropensityLoading] = useState(false);
@@ -145,6 +149,43 @@ const CRM: React.FC = () => {
     fetchPropensity();
     fetchAiInsights();
   }, [activeDonorId, viewMode]);
+
+  // Side-channel: also keep a per-donor map so row-level Suggested-next-action
+  // pills can use the real propensity band rather than heuristics.
+  useEffect(() => {
+    if (activeDonorId && propensity?.score != null) {
+      setPropensityScores(prev =>
+        prev[String(activeDonorId)] === propensity.score
+          ? prev
+          : { ...prev, [String(activeDonorId)]: propensity.score }
+      );
+    }
+  }, [activeDonorId, propensity?.score]);
+
+  // Pre-warm a row-level propensity map on mount via a best-effort batch
+  // endpoint. Falls back silently if the backend doesn't expose it — rows
+  // then use the heuristic band in deriveNextAction.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (donors.length === 0) return;
+      try {
+        const ids = donors.slice(0, 200).map(d => String(d.id));
+        const res = await apiFetch('/analytics/donor-propensity-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ donor_ids: ids }),
+        });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { scores?: Record<string, number> };
+        if (data?.scores && !cancelled) {
+          setPropensityScores(prev => ({ ...data.scores, ...prev }));
+        }
+      } catch { /* best-effort only */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [donors.length]);
 
   // Lifecycle: stage filter for Nurture Queue + tick to refresh after Approve & Send.
   const [stageFilter, setStageFilter] = useState<LifecycleStage | 'all'>('all');
@@ -475,9 +516,10 @@ const CRM: React.FC = () => {
         const skipped = missingEmail.map(id => donorMap.get(String(id))?.name || String(id));
         setLastSendFailures(failed);
         setLastSendSkipped(skipped);
-        const failedSummary = failed.length ? ` · ${failed.length} failed` : '';
-        const skippedSummary = skipped.length ? ` · ${skipped.length} skipped (no email)` : '';
-        toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}${skippedSummary}`, { icon: '📧', duration: 6000 });
+        const trunc = (names: string[]) => names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3} more` : '');
+        const failedSummary = failed.length ? ` · ${failed.length} failed: ${trunc(failed)}` : '';
+        const skippedSummary = skipped.length ? ` · ${skipped.length} skipped (no email): ${trunc(skipped)}` : '';
+        toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}${skippedSummary}`, { icon: '📧', duration: 8000 });
         // Keep composer open if anything failed/skipped so the user sees the
         // expandable list; close cleanly when everything succeeded.
         if (failed.length === 0 && skipped.length === 0) {
@@ -513,8 +555,9 @@ const CRM: React.FC = () => {
         }
       } catch { /* keep defaults */ }
       setLastSendFailures(failed);
-      const failedSummary = failed.length ? ` · ${failed.length} failed` : '';
-      toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}`, { icon: '📲', duration: 6000 });
+      const trunc = (names: string[]) => names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3} more` : '');
+      const failedSummary = failed.length ? ` · ${failed.length} failed: ${trunc(failed)}` : '';
+      toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}`, { icon: '📲', duration: 8000 });
       if (failed.length === 0) {
         setShowComposer(false);
         setSelectedIds(new Set());
@@ -853,7 +896,7 @@ const CRM: React.FC = () => {
                             <StageBadge stage={donorStages.get(String(donor.id)) ?? 'unknown'} size="xs" />
                           </div>
                           {(() => {
-                            const na = deriveNextAction(donor);
+                            const na = deriveNextAction(donor, propensityScores[String(donor.id)]);
                             return (
                               <button
                                 type="button"

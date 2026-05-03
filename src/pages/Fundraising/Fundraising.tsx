@@ -9,7 +9,6 @@ import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import './Fundraising.css';
 
 const Fundraising: React.FC = () => {
-  useFocusFromUrl('campaign');
   const { campaigns, transactions, addTransaction, donors, deleteCampaign } = useStore();
   const campBreakdownScrollRef = useRef<HTMLDivElement>(null);
   const campBreakdownVirtualizer = useVirtualizer({
@@ -17,6 +16,14 @@ const Fundraising: React.FC = () => {
     getScrollElement: () => campBreakdownScrollRef.current,
     estimateSize: () => 54,
     overscan: 10,
+  });
+
+  useFocusFromUrl('campaign', {
+    resolveIndex: (id) => {
+      const idx = campaigns.findIndex(c => String(c.id) === String(id));
+      return idx >= 0 ? idx : null;
+    },
+    onScrollToIndex: (idx) => campBreakdownVirtualizer.scrollToIndex(idx, { align: 'center' }),
   });
   const txScrollRef = useRef<HTMLDivElement>(null);
   const txVirtualizer = useVirtualizer({

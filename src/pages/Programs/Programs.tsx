@@ -122,7 +122,6 @@ const DEFAULT_PROGRAMS = [
 ];
 
 const Programs: React.FC = () => {
-  useFocusFromUrl('beneficiary');
   const { beneficiaries, addBeneficiary, updateBeneficiary, deleteBeneficiary } = useStore();
   const { user } = useAuth();
   const { tier: effectiveTierVal, openUpgrade, inTrial } = useTier();
@@ -439,6 +438,17 @@ const Programs: React.FC = () => {
     getScrollElement: () => benScrollRef.current,
     estimateSize: () => 108,
     overscan: 10,
+  });
+
+  // Virtualizer-aware deep-link: resolves ?beneficiary=ID to a row index and
+  // scrolls the virtualizer to it so the row mounts before the focus hook
+  // runs the DOM lookup + highlight.
+  useFocusFromUrl('beneficiary', {
+    resolveIndex: (id) => {
+      const idx = sortedBeneficiaries.findIndex(b => String(b.id) === String(id));
+      return idx >= 0 ? idx : null;
+    },
+    onScrollToIndex: (idx) => benVirtualizer.scrollToIndex(idx, { align: 'center' }),
   });
 
   return (
