@@ -467,6 +467,32 @@ const Layout: React.FC = () => {
     return () => { cancelled = true; };
   }, [can, setBeneficiaries]);
 
+  // Hydrate customPrograms from ngos.meta.programs so the Programs page
+  // shows the wizard's first program after a fresh login on a new device.
+  // The Zustand store persists customPrograms in localStorage, but on a
+  // fresh device localStorage is empty — this is the only path that brings
+  // the wizard's program back without relying on browser state.
+  useEffect(() => {
+    if (!can('programs', 'canView')) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const res = await apiFetch('/settings');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const progs = data?.ngo?.meta?.programs;
+        if (!Array.isArray(progs) || !progs.length) return;
+        const add = useStore.getState().addCustomProgram;
+        for (const p of progs) if (typeof p === 'string' && p.trim()) add(p.trim());
+      } catch {
+        /* keep store */
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [can]);
+
   useEffect(() => {
     if (!can('compliance', 'canView')) return;
     let cancelled = false;

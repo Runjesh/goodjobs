@@ -2879,7 +2879,10 @@ class UpdateProfileRequest(BaseModel):
 
 
 class UpdateNgoRequest(BaseModel):
-    name: str
+    # All fields optional so partial wizard saves don't clobber values that
+    # the user filled in on a previous step. Settings page sends the full
+    # core block; wizard helpers only send what the active step changed.
+    name: Optional[str] = None
     reg_no: Optional[str] = None
     fcra_reg: Optional[str] = None
     pan: Optional[str] = None
@@ -2893,6 +2896,9 @@ class UpdateNgoRequest(BaseModel):
     whatsapp_phone: Optional[str] = None
     whatsapp_verified: Optional[bool] = None
     whatsapp_connected_at: Optional[str] = None
+    # Append-only program name list (powers /programs hydration after a
+    # fresh login). Backend de-dupes case-insensitively.
+    program_name: Optional[str] = None
 
 
 class NgoInviteEntry(BaseModel):
@@ -3202,14 +3208,23 @@ def post_settings_ngo(body: UpdateNgoRequest, current_user: TokenUser = Depends(
     with db_conn() as conn:
         if conn is None:
             s = _settings_mem(current_user)
-            # Keep core fields on s["ngo"] and stash wizard extras separately
-            # under s["ngo_meta"] so the GET shape mirrors the DB version.
+            # Only overwrite a core field when the caller actually sent a
+            # value. Wizard helpers send tightly scoped payloads (e.g. the
+            # WhatsApp step only sends whatsapp_*); previously, the missing
+            # name/reg_no/etc were nulling earlier wizard steps.
             core = {k: v for k, v in body.model_dump().items()
                     if k in ("name", "reg_no", "fcra_reg", "pan", "state") and v is not None}
             s["ngo"] = {**s["ngo"], **core}
-            if meta_patch:
-                s["ngo_meta"] = {**s.get("ngo_meta", {}), **meta_patch}
-            return {"ok": True, "ngo": {**s["ngo"], "meta": s.get("ngo_meta", {})}, "source": "memory"}
+            ngo_meta = dict(s.get("ngo_meta", {}))
+            ngo_meta.update(meta_patch)
+            if body.program_name and body.program_name.strip():
+                progs = list(ngo_meta.get("programs", []))
+                pname = body.program_name.strip()
+                if not any(p.lower() == pname.lower() for p in progs):
+                    progs.append(pname)
+                ngo_meta["programs"] = progs
+            s["ngo_meta"] = ngo_meta
+            return {"ok": True, "ngo": {**s["ngo"], "meta": ngo_meta}, "source": "memory"}
         cur = conn.cursor()
         # Lazy-add the meta column so older DBs upgrade themselves on first
         # wizard run. Same pattern as user_notification_prefs above.
@@ -3217,32 +3232,45 @@ def post_settings_ngo(body: UpdateNgoRequest, current_user: TokenUser = Depends(
             cur.execute("ALTER TABLE ngos ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb")
         except Exception:
             pass
-        if meta_patch:
-            cur.execute(
-                """
-                UPDATE ngos
-                SET name = %s, reg_no = %s, fcra_reg = %s, pan = %s, state = %s,
-                    meta = COALESCE(meta, '{}'::jsonb) || %s::jsonb
-                WHERE id = %s::uuid
-                RETURNING name, reg_no, fcra_reg, pan, state, COALESCE(meta, '{}'::jsonb)
-                """,
-                (body.name, body.reg_no, body.fcra_reg, body.pan, body.state,
-                 json.dumps(meta_patch), current_user.ngo_id),
-            )
-        else:
-            cur.execute(
-                """
-                UPDATE ngos
-                SET name = %s, reg_no = %s, fcra_reg = %s, pan = %s, state = %s
-                WHERE id = %s::uuid
-                RETURNING name, reg_no, fcra_reg, pan, state, COALESCE(meta, '{}'::jsonb)
-                """,
-                (body.name, body.reg_no, body.fcra_reg, body.pan, body.state, current_user.ngo_id),
-            )
+        # COALESCE preserves any column the caller didn't send. This is what
+        # makes a 4-step wizard safe — step 5 (WhatsApp) does not blank the
+        # registration number step 1 just wrote.
+        cur.execute(
+            """
+            UPDATE ngos
+            SET name = COALESCE(%s, name),
+                reg_no = COALESCE(%s, reg_no),
+                fcra_reg = COALESCE(%s, fcra_reg),
+                pan = COALESCE(%s, pan),
+                state = COALESCE(%s, state),
+                meta = COALESCE(meta, '{}'::jsonb) || %s::jsonb
+            WHERE id = %s::uuid
+            RETURNING name, reg_no, fcra_reg, pan, state, COALESCE(meta, '{}'::jsonb)
+            """,
+            (body.name, body.reg_no, body.fcra_reg, body.pan, body.state,
+             json.dumps(meta_patch) if meta_patch else "{}", current_user.ngo_id),
+        )
         row = cur.fetchone()
+        ngo_meta = _parse_jsonb(row[5]) if row else {}
+        # Append-only program name list lives separately so it can grow
+        # across wizard runs without callers having to read-modify-write.
+        if row and body.program_name and body.program_name.strip():
+            pname = body.program_name.strip()
+            progs = list(ngo_meta.get("programs", []))
+            if not any(str(p).lower() == pname.lower() for p in progs):
+                progs.append(pname)
+                ngo_meta["programs"] = progs
+                cur.execute(
+                    """
+                    UPDATE ngos
+                    SET meta = jsonb_set(COALESCE(meta, '{}'::jsonb), '{programs}', %s::jsonb)
+                    WHERE id = %s::uuid
+                    """,
+                    (json.dumps(progs), current_user.ngo_id),
+                )
         ngo = (
             {"name": row[0], "reg_no": row[1], "fcra_reg": row[2], "pan": row[3],
-             "state": row[4], "meta": _parse_jsonb(row[5])}
+             "state": row[4], "meta": ngo_meta}
             if row else {**body.model_dump(), "meta": meta_patch}
         )
         return {"ok": True, "ngo": ngo, "source": "db"}

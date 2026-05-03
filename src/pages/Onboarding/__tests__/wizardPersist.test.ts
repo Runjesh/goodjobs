@@ -55,9 +55,22 @@ describe('wizard backend persistence', () => {
       fcra_status: 'pending',
       logo_data_url: 'data:image/png;base64,xyz',
     });
+    // Critical: must NOT send keys for fields the user left empty —
+    // backend uses COALESCE so absent keys keep their prior value, but
+    // explicitly sending null would still null core columns.
+    expect(body).not.toHaveProperty('reg_no_other');
+    expect(Object.keys(body)).not.toContain('fcra_reg');
+    expect(Object.keys(body)).not.toContain('pan');
+    expect(Object.keys(body)).not.toContain('state');
   });
 
-  it('persistFirstProgram POSTs /fundraising/campaigns with wizard source tag', async () => {
+  it('persistOrgProfile is a no-op when the user filled nothing', async () => {
+    const calls = captureFetch();
+    await persistOrgProfile('', {});
+    expect(calls).toHaveLength(0);
+  });
+
+  it('persistFirstProgram POSTs both /fundraising/campaigns AND /settings/ngo', async () => {
     const calls = captureFetch();
     await persistFirstProgram({
       name: 'Digital Literacy',
@@ -65,17 +78,24 @@ describe('wizard backend persistence', () => {
       geography: 'Nashik',
       startDate: '2026-01-01',
     });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0].url).toMatch(/\/fundraising\/campaigns$/);
-    const body = bodyOf(calls[0]);
-    expect(body).toMatchObject({
+    const body0 = bodyOf(calls[0]);
+    expect(body0).toMatchObject({
       title: 'Digital Literacy',
       cause: 'Education',
       status: 'draft',
     });
-    expect((body as { details: { source: string; geography: string } }).details).toMatchObject({
+    expect((body0 as { details: { source: string; geography: string } }).details).toMatchObject({
       source: 'signup-wizard',
       geography: 'Nashik',
+    });
+    // The second write is what makes the program visible in /programs after
+    // a fresh login (Layout hydrates customPrograms from ngo.meta.programs).
+    expect(calls[1].url).toMatch(/\/settings\/ngo$/);
+    expect(bodyOf(calls[1])).toMatchObject({
+      program_name: 'Digital Literacy',
+      cause_area: 'Education',
     });
   });
 
@@ -124,18 +144,26 @@ describe('wizard backend persistence', () => {
     expect(body.beneficiaries[1]).toMatchObject({ name: 'Ravi', program: 'General',   familySize: 1 });
   });
 
-  it('persistWhatsApp POSTs /settings/ngo with the verified phone payload', async () => {
+  it('persistWhatsApp POSTs ONLY whatsapp_* fields (must not blank reg_no/name)', async () => {
     const calls = captureFetch();
     await persistWhatsApp('Asha Foundation', { phone: '+91 98200 12345', verified: true });
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toMatch(/\/settings\/ngo$/);
     const body = bodyOf(calls[0]);
     expect(body).toMatchObject({
-      name: 'Asha Foundation',
       whatsapp_phone: '+91 98200 12345',
       whatsapp_verified: true,
     });
     expect(typeof (body as { whatsapp_connected_at: string }).whatsapp_connected_at).toBe('string');
+    // Regression guard for the original code-review reject: payload must
+    // NOT carry name/reg_no/etc. or the backend's COALESCE-protected
+    // UPDATE will accept them and overwrite earlier wizard step writes.
+    const keys = Object.keys(body);
+    expect(keys).not.toContain('name');
+    expect(keys).not.toContain('reg_no');
+    expect(keys).not.toContain('fcra_reg');
+    expect(keys).not.toContain('pan');
+    expect(keys).not.toContain('state');
   });
 
   it('persistWhatsApp skips when no phone has been entered', async () => {

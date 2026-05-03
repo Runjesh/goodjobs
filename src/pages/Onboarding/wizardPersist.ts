@@ -27,31 +27,36 @@ async function postJson(path: string, body: unknown): Promise<boolean> {
   }
 }
 
-/** Save org-profile fields (registration #, 80G, FCRA, logo) onto the ngo. */
+/** Save org-profile fields (registration #, 80G, FCRA, logo) onto the ngo.
+ *  Sends only the fields the user actually filled — backend uses COALESCE
+ *  so missing keys never null prior step writes. */
 export async function persistOrgProfile(
   ngoName: string,
   op: NonNullable<WizardData['orgProfile']>,
 ): Promise<void> {
-  const ok = await postJson('/settings/ngo', {
-    name: ngoName,
-    reg_no: op.registrationNumber || null,
-    fcra_reg: null,
-    pan: null,
-    state: null,
-    section_80g: op.section80GNumber || null,
-    fcra_status: op.fcraStatus || null,
-    logo_data_url: op.logoDataUrl || null,
-  });
+  const payload: Record<string, unknown> = {};
+  if (ngoName) payload.name = ngoName;
+  if (op.registrationNumber) payload.reg_no = op.registrationNumber;
+  if (op.section80GNumber) payload.section_80g = op.section80GNumber;
+  if (op.fcraStatus) payload.fcra_status = op.fcraStatus;
+  if (op.logoDataUrl) payload.logo_data_url = op.logoDataUrl;
+  if (Object.keys(payload).length === 0) return;
+  const ok = await postJson('/settings/ngo', payload);
   if (!ok) toast.error('Org profile saved locally — sync from Settings when backend is back.');
 }
 
-/** Create the wizard's first program server-side as a draft campaign. */
+/** Create the wizard's first program server-side.
+ *  Two writes: a draft fundraising campaign (so the program shows up in the
+ *  Fundraising surface) AND an append into ngos.meta.programs (so it shows
+ *  up in /programs after a fresh login on a different device — that's the
+ *  list the Programs page derives from). */
 export async function persistFirstProgram(
   fp: NonNullable<WizardData['firstProgram']>,
 ): Promise<void> {
   if (!fp.name?.trim() || !fp.causeArea) return;
-  const ok = await postJson('/fundraising/campaigns', {
-    title: fp.name.trim(),
+  const title = fp.name.trim();
+  const okCampaign = await postJson('/fundraising/campaigns', {
+    title,
     cause: fp.causeArea,
     goal: 250000,
     status: 'draft',
@@ -62,7 +67,13 @@ export async function persistFirstProgram(
       geography: fp.geography ?? null,
     },
   });
-  if (!ok) toast.error('Program saved locally — it will sync once the backend is reachable.');
+  const okProgram = await postJson('/settings/ngo', {
+    program_name: title,
+    cause_area: fp.causeArea,
+  });
+  if (!okCampaign || !okProgram) {
+    toast.error('Program saved locally — it will sync once the backend is reachable.');
+  }
 }
 
 /** Queue invites server-side (rows insert; email send is a future worker). */
@@ -94,14 +105,15 @@ export async function persistBeneficiaries(
   if (!ok) toast.error('Beneficiaries saved locally — sync from Programs when backend is back.');
 }
 
-/** Save the verified WhatsApp number onto the ngo. */
+/** Save the verified WhatsApp number onto the ngo.
+ *  Sends ONLY the whatsapp_* fields — backend COALESCEs the rest, so the
+ *  registration number / 80G saved in step 1 are not blanked out here. */
 export async function persistWhatsApp(
-  ngoName: string,
+  _ngoName: string,
   cw: NonNullable<WizardData['connectWhatsapp']>,
 ): Promise<void> {
   if (!cw.phone) return;
   const ok = await postJson('/settings/ngo', {
-    name: ngoName,
     whatsapp_phone: cw.phone,
     whatsapp_verified: !!cw.verified,
     whatsapp_connected_at: new Date().toISOString(),
