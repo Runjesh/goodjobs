@@ -6,6 +6,7 @@ import './Finance.css';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
+import { resolvePersistedJournalEntryId } from '../../utils/journalEntryId';
 
 const Finance: React.FC = () => {
   const grantBudgetHeads = useStore(s => s.grantBudgetHeads);
@@ -263,12 +264,12 @@ const Finance: React.FC = () => {
 
   const handleJournalEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Frontend-first OS: persist locally so utilisation reflects the entry
-    // immediately, then best-effort sync to the backend (which may not be up
-    // in dev). The id is the persisted backend id when we get one back, else
-    // a deterministic local id — both flow through the same store action so
-    // the entry is never lost.
-    let backendId: string | null = null;
+    // Frontend-first OS: best-effort POST to the backend; if it returns a
+    // persisted id we tag against THAT id (no synthetic ids in LS). When
+    // the backend isn't available, we fall back to a clearly-local id
+    // (prefixed with `local-`) so the entry isn't lost and the rest of the
+    // app can tell drafts apart from server-resident entries.
+    let payload: unknown = null;
     try {
       const res = await apiFetch('/finance/journal-entry', {
         method: 'POST',
@@ -278,17 +279,18 @@ const Finance: React.FC = () => {
           amount: Number(entry.amount),
           entry_type: entry.type,
           fund: entry.fund,
+          // Forward the tag so the server can store it too — store will
+          // reflect whatever id the server hands back.
+          grant_id: entry.grantId || null,
+          budget_head_id: entry.budgetHeadId || null,
         }),
       });
       if (res.ok) {
-        try {
-          const data = await res.json();
-          if (data?.id) backendId = String(data.id);
-        } catch { /* response without body — fine */ }
+        try { payload = await res.json(); } catch { /* empty body */ }
       }
-    } catch { /* offline/no backend — local persist still happens */ }
+    } catch { /* offline/no backend */ }
 
-    const id = backendId ?? `JE-${Date.now()}`;
+    const { source, id } = resolvePersistedJournalEntryId(payload);
     const tag = entry.grantId && entry.budgetHeadId
       ? { grantId: entry.grantId, budgetHeadId: entry.budgetHeadId }
       : undefined;
@@ -301,7 +303,12 @@ const Finance: React.FC = () => {
       entryType: entry.type,
       grantTag: tag,
     });
-    toast.success(`Journal entry recorded: ₹${Number(entry.amount).toLocaleString()} (${entry.type})${tag ? ' · tagged' : ''}.`);
+    const tagSuffix = tag ? ' · tagged' : '';
+    if (source === 'backend') {
+      toast.success(`Journal entry recorded: ₹${Number(entry.amount).toLocaleString()} (${entry.type})${tagSuffix}.`);
+    } else {
+      toast.success(`Saved locally: ₹${Number(entry.amount).toLocaleString()} (${entry.type})${tagSuffix}. Will sync when the server is reachable.`);
+    }
     setShowEntryModal(false);
     setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '' });
   };
