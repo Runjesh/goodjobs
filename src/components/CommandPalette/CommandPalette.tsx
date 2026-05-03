@@ -85,6 +85,10 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
   const [confirmIntent, setConfirmIntent] = useState<IntentConfirm | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Forward ref so the keydown handler can call the directive runner that
+  // is defined later in this component without hitting the temporal dead
+  // zone or re-binding the listener on every keystroke.
+  const runDirectiveRef = useRef<() => void>(() => {});
   const navigate = useNavigate();
 
   const donors = useStore(s => s.donors);
@@ -146,7 +150,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
       // for free-text commands that happen to match an entity name.
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && query.trim()) {
         e.preventDefault();
-        void runNaturalDirective();
+        runDirectiveRef.current();
         return;
       }
       if (entityResults.length === 0) return;
@@ -170,7 +174,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, confirmDonor, confirmIntent, entityResults, activeIndex, handleEntityNavigate, query, runNaturalDirective]);
+  }, [isOpen, onClose, confirmDonor, confirmIntent, entityResults, activeIndex, handleEntityNavigate, query]);
 
   const hour = new Date().getHours();
   const rhythmHint = useMemo(() => {
@@ -426,6 +430,9 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
       setBusy(false);
     }
   };
+
+  // Keep the keydown ref in sync with the latest closure.
+  runDirectiveRef.current = () => { void runNaturalDirective(); };
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
