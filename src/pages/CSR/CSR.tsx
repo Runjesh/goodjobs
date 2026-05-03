@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
+import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 import toast from 'react-hot-toast';
 import './CSR.css';
 import { apiFetch } from '../../api/client';
@@ -551,6 +552,10 @@ const CSR: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Compliance → grant cascade: surface at-risk grants at the top of
+          the CSR pipeline so reps see expiring docs before opening a card. */}
+      <AtRiskGrantsBanner />
 
       <div className="csr-stats-row">
         <div className="stat-card">
