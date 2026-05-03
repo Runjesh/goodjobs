@@ -42,9 +42,13 @@ export function deriveNextAction(donor: Donor, score?: number): NextAction {
       templateId: 'impact',
     };
   }
+  // Low-band: cold/lapsed donors. Open the composer with the stewardship
+  // ("thank you / check-in") template so the click action matches the label.
+  // We deliberately phrase the label as a messaging touchpoint, not a phone
+  // call, since the CTA opens the WhatsApp composer.
   return {
     band,
-    label: 'Stewardship: schedule call',
+    label: 'Stewardship: send check-in note',
     templateId: 'thank',
   };
 }

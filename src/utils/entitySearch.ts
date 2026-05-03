@@ -1,15 +1,12 @@
 import type { Donor, Beneficiary, CSRCard, Campaign, Volunteer } from '../store/useStore';
+import { REPORTS_CATALOGUE } from '../data/reportsCatalogue';
 
 export type EntityKind = 'donor' | 'beneficiary' | 'csr' | 'grant' | 'campaign' | 'program' | 'report' | 'team';
 
-/** Static catalogue of report types — mirrors the seed list in Reports.tsx. */
-export const REPORT_CATALOGUE: { id: string; title: string; type: string; funder?: string }[] = [
-  { id: '1', title: 'Q2 Progress Report — Tata Trusts', type: 'funder', funder: 'Tata Trusts' },
-  { id: '2', title: 'Annual Impact Report 2025–26', type: 'impact' },
-  { id: '3', title: 'Donor Impact Update — April 2026', type: 'donor' },
-  { id: '4', title: 'Board Brief — Q1 FY 2026–27', type: 'board' },
-  { id: '5', title: 'UC Report — CSR Fund Education', type: 'funder', funder: 'HDFC Bank CSR' },
-];
+/** Re-export so existing import sites continue to compile. The shared
+ *  `REPORTS_CATALOGUE` is the single source of truth — the Reports page
+ *  reads from the same module so palette results never drift. */
+export const REPORT_CATALOGUE = REPORTS_CATALOGUE;
 
 export interface EntityResult {
   kind: EntityKind;

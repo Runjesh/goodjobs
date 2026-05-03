@@ -12,6 +12,7 @@ import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
 import toast from 'react-hot-toast';
 import { useTier } from '../../hooks/useTier';
+import { REPORTS_CATALOGUE, type ReportRecord } from '../../data/reportsCatalogue';
 import { recordReportDraft } from '../../utils/trial';
 import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import { readToCForProgram } from '../../utils/tocStorage';
@@ -61,22 +62,8 @@ const DATA_READINESS: Record<string, number> = {
 
 const REPORTS_READY_FOR_DRAFT = 3; // how many have enough data to auto-draft
 
-interface MockReport {
-  id: string;
-  title: string;
-  type: ReportType;
-  status: 'draft' | 'review' | 'submitted' | 'overdue';
-  date: string;
-  funder?: string;
-}
-
-const MOCK_REPORTS: MockReport[] = [
-  { id: '1', title: 'Q2 Progress Report — Tata Trusts',     type: 'funder', status: 'review',    date: '2026-05-15', funder: 'Tata Trusts'  },
-  { id: '2', title: 'Annual Impact Report 2025–26',          type: 'impact', status: 'draft',     date: '2026-04-30'  },
-  { id: '3', title: 'Donor Impact Update — April 2026',      type: 'donor',  status: 'submitted', date: '2026-04-10'  },
-  { id: '4', title: 'Board Brief — Q1 FY 2026–27',           type: 'board',  status: 'submitted', date: '2026-04-01'  },
-  { id: '5', title: 'UC Report — CSR Fund Education',         type: 'funder', status: 'overdue',   date: '2026-03-31', funder: 'HDFC Bank CSR' },
-];
+type MockReport = ReportRecord;
+const MOCK_REPORTS: readonly MockReport[] = REPORTS_CATALOGUE;
 
 const STATUS_META = {
   draft:     { label: 'Draft',     color: '#7C3AED', bg: '#F5F3FF' },
