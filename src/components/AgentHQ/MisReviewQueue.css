@@ -1,0 +1,92 @@
+.mis-review-queue {
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.05), transparent);
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+}
+.mis-review-queue-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #0F766E;
+  font-weight: 700;
+}
+.mis-review-queue-header h3 { font-size: 0.9rem; margin: 0; }
+.mis-review-queue-count {
+  margin-left: auto;
+  background: #0F766E;
+  color: #fff;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.mis-review-queue-help {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #6b7280);
+  margin: 0.4rem 0 0.75rem;
+}
+.mis-review-queue-list { display: flex; flex-direction: column; gap: 0.6rem; }
+
+.mis-review-row {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+}
+.mis-review-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.mis-review-row-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0F766E;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.mis-review-row-time {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+.mis-review-row-narrative {
+  font-style: italic;
+  color: var(--color-text, #111827);
+  font-size: 0.85rem;
+  margin: 0 0 0.6rem;
+  line-height: 1.4;
+}
+.mis-review-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.4rem 0.75rem;
+  margin-bottom: 0.6rem;
+}
+.mis-review-row-grid > div { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.mis-review-row-grid span {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary, #6b7280);
+  font-weight: 600;
+}
+.mis-review-row-grid strong {
+  font-size: 0.85rem;
+  color: var(--color-text, #111827);
+  font-weight: 600;
+}
+.mis-review-row-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}

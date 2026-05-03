@@ -134,3 +134,18 @@ Design tokens live in `src/index.css` (`:root`) and are the single source of tru
 - Backend uses `localhost:8000` (separate workflow if needed)
 - Backend falls back to in-memory demo stores when no `DATABASE_URL` is set
 - Demo login available via quick-access role buttons on the login screen
+
+## Session 1: Cross-module audit (May 2026)
+
+Closed the highest-leverage loops the audit flagged so the modules feel like one OS:
+
+- **Programs ↔ Finance** — `ProgramBudgetBar` per programme (planned vs spent, on-track / underspending / over-budget classification, restricted-grant clawback alert). Set/edit budget inline.
+- **Beneficiary → Outcomes** — Violet Activity icon on each beneficiary row opens `OutcomeForm` (5 metric presets, baseline/current with "higher-is-better" awareness, live improvement preview).
+- **Outcomes aggregate** — `OutcomesAggregateCard` on Insights shows beneficiaries measured, output→outcome ratio, and a simple SROI score per programme.
+- **Grant lifecycle** — `GrantTrancheCard` on each active grant; release is gated by `canReleaseTranche` (prior tranche released + utilization report attached).
+- **MIS → Supervisor review** — Conversational MIS submissions now route to a HITL `MisReviewQueue` in Agent HQ. Field data does **not** count in dashboards until a supervisor approves / edits / dismisses.
+- **Notification → Action** — `NotificationCenter` now supports `action_route` deep-links plus per-row Snooze (1h / 4h / Tomorrow) and Dismiss controls.
+
+State lives in `useStore` (`programBudgets`, `beneficiaryOutcomes`, `grantTranches`, `misReviewIntents`) and is persisted to `localStorage` keys `goodjobs.*.v1`. Helpers in `src/utils/programFinance.ts`, `outcomes.ts`, `grantLifecycle.ts`. Demo seeds gated on `SEED_DEMO_DATA`.
+
+Sessions 2 & 3 (deferred): Volunteer↔Program, Compliance→Grant cascade, Donor→Impact trail, contextual agent triggers, WhatsApp portal, full SROI module, role-based dashboards.

@@ -1,4 +1,39 @@
 import { create } from 'zustand';
+import type { ProgramBudget } from '../utils/programFinance';
+import type { BeneficiaryOutcome } from '../utils/outcomes';
+import type { GrantTranche } from '../utils/grantLifecycle';
+
+/**
+ * Cross-module connective state (Session 1 of the audit).
+ *
+ *  - programBudgets         : Programs ↔ Finance loop
+ *  - beneficiaryOutcomes    : Beneficiary ↔ Outcomes loop
+ *  - grantTranches          : Grant lifecycle (release-gated by utilization)
+ *  - misReviewIntents       : MIS submissions awaiting supervisor approval
+ *
+ * Everything is persisted to localStorage so a refresh keeps the demo state
+ * coherent without a backend round-trip.
+ */
+
+export interface MisReviewIntent {
+  id: string;
+  /** Raw narrative the field officer typed. */
+  narrative: string;
+  /** Programmatically extracted fields the supervisor will approve / edit. */
+  extracted: {
+    beneficiary?: string;
+    location?: string;
+    metric?: string;
+    value?: string;
+    program?: string;
+  };
+  reporterId: string;
+  reportDate: string;
+  createdAt: string;
+  status: 'pending' | 'approved' | 'edited' | 'dismissed';
+  /** Set on approve/edit/dismiss. */
+  decidedAt?: string;
+}
 
 export interface Donor {
   id: string;
@@ -106,6 +141,22 @@ interface AppState {
   volunteers: Volunteer[];
   complianceDocs: ComplianceDocument[];
 
+  // ── Cross-module connective state (Session 1) ──────────────────────────
+  programBudgets:        ProgramBudget[];
+  beneficiaryOutcomes:   BeneficiaryOutcome[];
+  grantTranches:         GrantTranche[];
+  misReviewIntents:      MisReviewIntent[];
+
+  setProgramBudgets:      (b: ProgramBudget[]) => void;
+  upsertProgramBudget:    (b: ProgramBudget) => void;
+  recordProgramSpend:     (programId: string, amount: number) => void;
+  upsertBeneficiaryOutcome: (o: BeneficiaryOutcome) => void;
+  setGrantTranches:       (t: GrantTranche[]) => void;
+  upsertGrantTranche:     (t: GrantTranche) => void;
+  releaseGrantTranche:    (id: string) => void;
+  addMisReviewIntent:     (i: MisReviewIntent) => void;
+  decideMisReviewIntent:  (id: string, decision: 'approved' | 'edited' | 'dismissed', patch?: Partial<MisReviewIntent['extracted']>) => void;
+
   setDonors: (donors: Donor[]) => void;
   setComplianceDocs: (docs: ComplianceDocument[]) => void;
   setTransactions: (txs: Transaction[]) => void;
@@ -197,6 +248,38 @@ const initialComplianceDocs: ComplianceDocument[] = [
   { id: 'doc-4', name: 'CSR-1 Filing', type: 'CSR Eligibility', status: 'Valid', expiry: '2027-03-31', uploadedAt: '2024-04-10' },
 ];
 
+// ── Local-storage persistence for cross-module state ───────────────────────
+const LS_BUDGETS   = 'goodjobs.programBudgets.v1';
+const LS_OUTCOMES  = 'goodjobs.beneficiaryOutcomes.v1';
+const LS_TRANCHES  = 'goodjobs.grantTranches.v1';
+const LS_MIS       = 'goodjobs.misReviewIntents.v1';
+
+function loadLS<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as unknown as T) : fallback;
+  } catch { return fallback; }
+}
+
+function saveLS(key: string, value: unknown): void {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+const SEED_DEMO_CONNECTIONS = SEED_DEMO_DATA;
+const seedBudgets: ProgramBudget[] = SEED_DEMO_CONNECTIONS ? [
+  { programId: 'women-livelihood-center', label: 'Women Livelihood Center', planned: 1_500_000, spent: 420_000, grantId: '3', windowEnd: new Date(Date.now() + 35 * 86_400_000).toISOString().slice(0, 10), restricted: true },
+  { programId: 'digital-literacy-2026',   label: 'Digital Literacy 2026',   planned:   800_000, spent: 610_000, grantId: '2', windowEnd: new Date(Date.now() + 50 * 86_400_000).toISOString().slice(0, 10), restricted: true },
+  { programId: 'healthcare-camp',         label: 'Healthcare Camp',         planned:   300_000, spent:  80_000 },
+] : [];
+
+const seedTranches: GrantTranche[] = SEED_DEMO_CONNECTIONS ? [
+  { id: 'tr-3-1', grantId: '3', number: 1, amount: 4_000_000, expectedDate: new Date(Date.now() - 60*86_400_000).toISOString().slice(0,10), status: 'released', releasedAt: new Date(Date.now() - 60*86_400_000).toISOString() },
+  { id: 'tr-3-2', grantId: '3', number: 2, amount: 4_000_000, expectedDate: new Date(Date.now() + 10*86_400_000).toISOString().slice(0,10), status: 'awaiting_utilization' },
+  { id: 'tr-2-1', grantId: '2', number: 1, amount: 2_500_000, expectedDate: new Date(Date.now() - 30*86_400_000).toISOString().slice(0,10), status: 'released', releasedAt: new Date(Date.now() - 30*86_400_000).toISOString() },
+] : [];
+
 export const useStore = create<AppState>((set) => ({
   // Start empty; hydrate from backend on app load.
   donors: [],
@@ -206,6 +289,65 @@ export const useStore = create<AppState>((set) => ({
   beneficiaries: [],
   volunteers: [],
   complianceDocs: [],
+
+  // Cross-module state — hydrated from localStorage so demo edits persist.
+  programBudgets:      loadLS<ProgramBudget[]>(LS_BUDGETS, seedBudgets),
+  beneficiaryOutcomes: loadLS<BeneficiaryOutcome[]>(LS_OUTCOMES, []),
+  grantTranches:       loadLS<GrantTranche[]>(LS_TRANCHES, seedTranches),
+  misReviewIntents:    loadLS<MisReviewIntent[]>(LS_MIS, []),
+
+  setProgramBudgets: (programBudgets) => { saveLS(LS_BUDGETS, programBudgets); set({ programBudgets }); },
+  upsertProgramBudget: (b) => set((state) => {
+    const next = state.programBudgets.some(x => x.programId === b.programId)
+      ? state.programBudgets.map(x => x.programId === b.programId ? { ...x, ...b } : x)
+      : [...state.programBudgets, b];
+    saveLS(LS_BUDGETS, next);
+    return { programBudgets: next };
+  }),
+  recordProgramSpend: (programId, amount) => set((state) => {
+    const next = state.programBudgets.map(b =>
+      b.programId === programId ? { ...b, spent: b.spent + amount } : b
+    );
+    saveLS(LS_BUDGETS, next);
+    return { programBudgets: next };
+  }),
+  upsertBeneficiaryOutcome: (o) => set((state) => {
+    const next = state.beneficiaryOutcomes.some(x => x.id === o.id)
+      ? state.beneficiaryOutcomes.map(x => x.id === o.id ? o : x)
+      : [o, ...state.beneficiaryOutcomes];
+    saveLS(LS_OUTCOMES, next);
+    return { beneficiaryOutcomes: next };
+  }),
+  setGrantTranches: (grantTranches) => { saveLS(LS_TRANCHES, grantTranches); set({ grantTranches }); },
+  upsertGrantTranche: (t) => set((state) => {
+    const next = state.grantTranches.some(x => x.id === t.id)
+      ? state.grantTranches.map(x => x.id === t.id ? { ...x, ...t } : x)
+      : [...state.grantTranches, t];
+    saveLS(LS_TRANCHES, next);
+    return { grantTranches: next };
+  }),
+  releaseGrantTranche: (id) => set((state) => {
+    const next = state.grantTranches.map(t =>
+      t.id === id ? { ...t, status: 'released' as const, releasedAt: new Date().toISOString() } : t
+    );
+    saveLS(LS_TRANCHES, next);
+    return { grantTranches: next };
+  }),
+  addMisReviewIntent: (i) => set((state) => {
+    const next = [i, ...state.misReviewIntents];
+    saveLS(LS_MIS, next);
+    return { misReviewIntents: next };
+  }),
+  decideMisReviewIntent: (id, decision, patch) => set((state) => {
+    const next = state.misReviewIntents.map(i =>
+      i.id === id
+        ? { ...i, status: decision, decidedAt: new Date().toISOString(),
+            extracted: patch ? { ...i.extracted, ...patch } : i.extracted }
+        : i
+    );
+    saveLS(LS_MIS, next);
+    return { misReviewIntents: next };
+  }),
 
   setDonors: (donors) => set(() => ({ donors })),
   setComplianceDocs: (complianceDocs) => set(() => ({ complianceDocs })),

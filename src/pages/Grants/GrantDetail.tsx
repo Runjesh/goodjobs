@@ -9,6 +9,7 @@ import {
 import toast from 'react-hot-toast';
 import { useStore } from '../../store/useStore';
 import './GrantDetail.css';
+import GrantTrancheCard from '../../components/Grants/GrantTrancheCard';
 
 type LifecycleStage = 'pipeline' | 'applied' | 'awarded' | 'active' | 'closed';
 
@@ -505,6 +506,7 @@ const GrantDetail: React.FC = () => {
 
       {stage === 'active' && (
         <motion.div className="grant-panel" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>
+          <GrantTrancheCard grantId={String(card.id)} />
           <div className="grant-subtabs" role="tablist">
             <button role="tab" className={`grant-subtab ${activeActiveTab === 'deliverables' ? 'active' : ''}`} onClick={() => setActiveActiveTab('deliverables')}>
               <Target size={13} /> Deliverables

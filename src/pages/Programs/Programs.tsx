@@ -16,8 +16,15 @@ import { apiFetch } from '../../api/client';
 import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import EnrollBeneficiaryModal, { computeBeneficiaryCompleteness, type EnrollFormData } from './EnrollBeneficiaryModal';
+import ProgramBudgetBar from '../../components/Programs/ProgramBudgetBar';
+import OutcomeForm from '../../components/Programs/OutcomeForm';
 
 const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize,phone,email,gender,dob,referral_source,referral_detail,vulnerability,id_doc_type,id_doc_ref,notes\nSita Devi,Health,"Pune, MH",false,4,+9198***01,,female,1992-03-01,shg,Block 4 AWC,"woman_headed,pwd",aadhaar_masked,****8212,\nRavi K,Education,Delhi,true,3,,,male,,camp,,,election_id,ABC1234567,\n';
+
+function extractFirstMatch(text: string, re: RegExp): string | undefined {
+  const m = text.match(re);
+  return m && m[1] ? m[1].trim() : undefined;
+}
 
 function parseBoolCell(v: string): boolean {
   const s = (v || '').trim().toLowerCase();
@@ -123,6 +130,8 @@ const DEFAULT_PROGRAMS = [
 
 const Programs: React.FC = () => {
   const { beneficiaries, addBeneficiary, updateBeneficiary, deleteBeneficiary } = useStore();
+  const addMisReviewIntent = useStore(s => s.addMisReviewIntent);
+  const [outcomeFor, setOutcomeFor] = useState<{ id: string; name: string; program: string } | null>(null);
   const { user } = useAuth();
   const { tier: effectiveTierVal, openUpgrade, inTrial } = useTier();
   const [upgradePromptOpen, setUpgradePromptOpen] = useState(false);
@@ -649,6 +658,15 @@ const Programs: React.FC = () => {
                               <button className="btn-icon-only" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => { setBenToDelete(ben); setShowDeleteBenConfirm(true); }}>
                                 <Trash2 size={14} color="var(--color-danger)" />
                               </button>
+                              <button
+                                className="btn-icon-only"
+                                title="Record outcome"
+                                aria-label={`Record outcome for ${ben.name}`}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                onClick={() => setOutcomeFor({ id: ben.id, name: ben.name, program: ben.program || 'General' })}
+                              >
+                                <Activity size={14} color="#7C3AED" />
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -659,6 +677,28 @@ const Programs: React.FC = () => {
               )}
             </div>
           </div>
+
+          {/* Programme budgets — surfaces the Programs ↔ Finance link
+              the audit asked for. Staff can see at a glance whether each
+              programme is on track, under-spending (clawback risk), or
+              over budget, without leaving Programs. */}
+          {derivedPrograms.length > 0 && (
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <div className="card-header">
+                <h3 className="card-title flex items-center gap-2">
+                  <Activity size={18} color="var(--color-primary)" /> Programme budgets vs spend
+                </h3>
+              </div>
+              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                {derivedPrograms.map(p => (
+                  <div key={p}>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 2 }}>{p}</div>
+                    <ProgramBudgetBar programName={p} allowEdit />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="card">
             <div className="card-header">
@@ -694,6 +734,15 @@ const Programs: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {outcomeFor && (
+        <OutcomeForm
+          beneficiaryId={outcomeFor.id}
+          beneficiaryName={outcomeFor.name}
+          programName={outcomeFor.program}
+          onClose={() => setOutcomeFor(null)}
+        />
+      )}
 
       {activeTab === 'mis' && showModal && (
         <EnrollBeneficiaryModal
@@ -999,13 +1048,38 @@ const Programs: React.FC = () => {
                       report_date: new Date().toISOString().slice(0, 10),
                     }),
                   });
-                  if (res.ok) {
-                    toast.success("Submitted to MIS Agent. Processing in background.", { icon: '🤖' });
-                    setShowConversationalModal(false);
-                    setConversationalInput('');
-                  } else {
-                    toast.error("Failed to submit to MIS Agent.");
-                  }
+                  // Always push the submission into the supervisor review
+                  // queue (Agent HQ) — the audit found that field data was
+                  // counted in dashboards without any review step. Now an
+                  // approver must act before it shows up in metrics.
+                  let extracted: { beneficiary?: string; location?: string; metric?: string; value?: string; program?: string } = { program: form.program };
+                  try {
+                    if (res.ok) {
+                      const data = await res.json().catch(() => ({}));
+                      const ex = (data && data.extracted) || data || {};
+                      extracted = {
+                        beneficiary: ex.beneficiary || extractFirstMatch(conversationalInput, /(?:visited|met|spoke with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/),
+                        location:    ex.location    || extractFirstMatch(conversationalInput, /village\s+([A-Z][a-zA-Z]+)/i),
+                        metric:      ex.metric      || (/weight/i.test(conversationalInput) ? 'weight_kg' : undefined),
+                        value:       ex.value       || extractFirstMatch(conversationalInput, /(\d+(?:\.\d+)?)\s*kg/i),
+                        program:     ex.program     || form.program,
+                      };
+                    }
+                  } catch { /* ignore parse — fall back to local heuristics */ }
+
+                  addMisReviewIntent({
+                    id: `mis-${Date.now()}`,
+                    narrative: conversationalInput,
+                    extracted,
+                    reporterId: 'field_staff_001',
+                    reportDate: new Date().toISOString().slice(0, 10),
+                    createdAt: new Date().toISOString(),
+                    status: 'pending',
+                  });
+
+                  toast.success("Submitted. Routed to Supervisor review queue in Agent HQ.", { icon: '✅', duration: 4500 });
+                  setShowConversationalModal(false);
+                  setConversationalInput('');
                 } catch {
                   toast.error("Failed to submit (backend not reachable).");
                 } finally {

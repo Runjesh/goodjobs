@@ -12,6 +12,7 @@ import { computeBeneficiaryCompleteness } from '../Programs/EnrollBeneficiaryMod
 import { readToCForProgram } from '../../utils/tocStorage';
 import toast from 'react-hot-toast';
 import './Insights.css';
+import OutcomesAggregateCard from '../../components/Insights/OutcomesAggregateCard';
 
 type Period = '7d' | '30d' | '90d' | 'year';
 
@@ -354,6 +355,9 @@ const Insights: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Programme outcomes — outcome→output loop closing the audit gap. */}
+      <OutcomesAggregateCard />
 
       {/* ── KPI Row ───────────────────────────────────────────────── */}
       <div className="insights-kpi-row">

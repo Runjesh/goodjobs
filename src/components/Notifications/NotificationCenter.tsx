@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Check, Trash2, X, Settings, Zap, ShieldAlert } from 'lucide-react';
+import { Bell, Check, Trash2, X, Settings, Zap, ShieldAlert, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './NotificationCenter.css';
 import { apiFetch } from '../../api/client';
@@ -9,12 +9,23 @@ import { notificationTasksHref } from '../../utils/inboxLinks';
 interface Notification {
   id: string;
   tasks_path?: string | null;
+  /** Typed deep-link the notification points at — preferred over tasks_path. */
+  action_route?: string | null;
   type: 'urgent' | 'info' | 'agent';
   title: string;
   message: string;
   time: string;
   read: boolean;
+  /** Epoch ms; while in the future the row is hidden from the panel. */
+  snoozed_until?: number;
 }
+
+/** Hour buckets the user can snooze a row by. */
+const SNOOZE_OPTIONS = [
+  { label: '1 hour',  ms:        60 * 60 * 1000 },
+  { label: '4 hours', ms:    4 * 60 * 60 * 1000 },
+  { label: 'Tomorrow', ms:  24 * 60 * 60 * 1000 },
+];
 
 interface Props {
   isOpen: boolean;
@@ -42,7 +53,21 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const now = Date.now();
+  const visibleNotifications = notifications.filter(n => !n.snoozed_until || n.snoozed_until <= now);
+  const unreadCount = visibleNotifications.filter(n => !n.read).length;
+
+  const resolveRoute = (n: Notification): string =>
+    n.action_route || notificationTasksHref(n);
+
+  const snooze = (id: string, ms: number) => {
+    setNotifications(prev => prev.map(x => x.id === id ? { ...x, snoozed_until: Date.now() + ms } : x));
+    toast(`Snoozed for ${SNOOZE_OPTIONS.find(o => o.ms === ms)?.label ?? 'a while'}.`, { icon: '⏰' });
+  };
+
+  const dismiss = (id: string) => {
+    setNotifications(prev => prev.filter(x => x.id !== id));
+  };
 
   const markAllRead = async () => {
     try {
@@ -106,10 +131,10 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
         </div>
 
         <div className="notif-list">
-          {notifications.length === 0 ? (
+          {visibleNotifications.length === 0 ? (
             <div className="notif-empty">You're all caught up!</div>
           ) : (
-            notifications.map(n => (
+            visibleNotifications.map(n => (
               <div
                 key={n.id}
                 role="button"
@@ -117,13 +142,13 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
                 className={`notif-item ${n.read ? 'read' : 'unread'}`}
                 style={{ cursor: 'pointer' }}
                 onClick={() => {
-                  navigate(notificationTasksHref(n));
+                  navigate(resolveRoute(n));
                   onClose();
                 }}
                 onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    navigate(notificationTasksHref(n));
+                    navigate(resolveRoute(n));
                     onClose();
                   }
                 }}
@@ -135,6 +160,33 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
                     <span className="notif-time">{n.time}</span>
                   </div>
                   <p>{n.message}</p>
+                  <div
+                    className="notif-item-actions"
+                    style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {SNOOZE_OPTIONS.map(o => (
+                      <button
+                        key={o.label}
+                        className="action-btn-small"
+                        type="button"
+                        title={`Snooze ${o.label}`}
+                        onClick={() => snooze(n.id, o.ms)}
+                        style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                      >
+                        <Clock size={10} /> {o.label}
+                      </button>
+                    ))}
+                    <button
+                      className="action-btn-small"
+                      type="button"
+                      title="Dismiss"
+                      onClick={() => dismiss(n.id)}
+                      style={{ fontSize: '0.65rem', padding: '0.2rem 0.45rem' }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
                 </div>
                 {!n.read && <div className="notif-dot" />}
               </div>
