@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Search, Filter, MessageCircle, Mail, Phone, MapPin,
@@ -37,22 +37,12 @@ const CSV_TEMPLATE = 'name,type,pan,location,email,phone,employer\nAnita Sharma,
 
 const CRM: React.FC = () => {
   const { donors, transactions, addDonor, updateDonor, deleteDonor } = useStore();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const focusFromUrl = searchParams.get('focus') || '';
-  const [activeDonorId, setActiveDonorId] = useState<string>(focusFromUrl || String(donors[0]?.id || ''));
-
-  // Sync from ?focus=ID — when arriving via Command Palette deep link.
-  useEffect(() => {
-    if (!focusFromUrl) return;
-    if (donors.some(d => String(d.id) === focusFromUrl)) {
-      setActiveDonorId(focusFromUrl);
-      setViewMode('list');
-      // Strip the param so subsequent navigation isn't sticky.
-      const next = new URLSearchParams(searchParams);
-      next.delete('focus');
-      setSearchParams(next, { replace: true });
-    }
-  }, [focusFromUrl, donors, searchParams, setSearchParams]);
+  // Unified deep-link focus via useFocusFromUrl (initial read, virtualizer
+  // wiring is below once the virtualizer has been declared).
+  const initialFocus = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('focus') || ''
+    : '';
+  const [activeDonorId, setActiveDonorId] = useState<string>(initialFocus || String(donors[0]?.id || ''));
   const [viewMode, setViewMode] = useState<'list' | 'heatmap'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
@@ -313,6 +303,24 @@ const CRM: React.FC = () => {
   useEffect(() => {
     scrollDonorListTop();
   }, [searchQuery, activeFilter, scrollDonorListTop]);
+
+  // Virtualizer-aware deep-link focus: scrolls the matching donor row into
+  // view, applies .focus-flash, then strips the param. Also syncs the
+  // detail panel's active donor / view mode.
+  const focusFromUrl = useFocusFromUrl('focus', {
+    resolveIndex: (id) => {
+      const idx = filteredDonors.findIndex(d => String(d.id) === String(id));
+      return idx >= 0 ? idx : null;
+    },
+    onScrollToIndex: (idx) => donorVirtualizer.scrollToIndex(idx, { align: 'center' }),
+  });
+  useEffect(() => {
+    if (!focusFromUrl) return;
+    if (donors.some(d => String(d.id) === focusFromUrl)) {
+      setActiveDonorId(focusFromUrl);
+      setViewMode('list');
+    }
+  }, [focusFromUrl, donors]);
 
   const donorTxTimelineRef = useRef<HTMLDivElement>(null);
   const donorTxVirtualizer = useVirtualizer({
@@ -875,6 +883,7 @@ const CRM: React.FC = () => {
                     <div
                       key={donor.id}
                       data-index={vi.index}
+                      data-focus-id={String(donor.id)}
                       ref={donorVirtualizer.measureElement}
                       style={{
                         position: 'absolute',
