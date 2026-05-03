@@ -12,7 +12,7 @@ import { useStore } from '../../store/useStore';
 import { isVisibleToday, type Task } from '../../utils/tasks';
 import { useAuth, defaultPresetForRole } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
-import { computeStage, nextDueMilestone } from '../../utils/donorLifecycle';
+import { computeStage, nextDueMilestone, subscribeLifecycleHydrated } from '../../utils/donorLifecycle';
 import { readComplianceReminders } from '../../utils/complianceReminders';
 import toast from 'react-hot-toast';
 import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
@@ -631,11 +631,21 @@ const Dashboard: React.FC = () => {
       }));
   }, [sliceTasks]);
 
+  // Bump when /crm/donors/lifecycle finishes hydrating so the lapse-risk +
+  // touchpoints-due rollups recompute off server data instead of the cold
+  // local cache.
+  const [lifecycleTick, setLifecycleTick] = useState(0);
+  useEffect(() => {
+    const off = subscribeLifecycleHydrated(() => setLifecycleTick(t => t + 1));
+    return off;
+  }, []);
+
   const allItems = useMemo(() => {
+    void lifecycleTick;
     const store = deriveFromStore(layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards);
     const combined = [...taskItems, ...briefItems, ...store];
     return combined.length === 0 ? getStaticFallback(layoutRole) : combined;
-  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards]);
+  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, lifecycleTick]);
 
   const isSnoozedFn = useCallback((id: string) => !woken.has(id) && isSnoozed(id, snoozed), [snoozed, woken]);
 

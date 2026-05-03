@@ -20,6 +20,7 @@ import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
 import {
   computeStage,
   nextDueMilestone,
+  subscribeLifecycleHydrated,
   urgencyScore,
   markMilestoneDone,
   STAGE_FILTER_OPTIONS,
@@ -182,6 +183,15 @@ const CRM: React.FC = () => {
   // Lifecycle: stage filter for Nurture Queue + tick to refresh after Approve & Send.
   const [stageFilter, setStageFilter] = useState<LifecycleStage | 'all'>('all');
   const [lifecycleTick, setLifecycleTick] = useState(0);
+
+  // Recompute the nurture queue / stage map as soon as Layout's bulk
+  // hydrate of /crm/donors/lifecycle finishes — without this the page
+  // would render off the cold cache until something else (e.g. a focus
+  // event) bumped lifecycleTick. See subscribeLifecycleHydrated docs.
+  useEffect(() => {
+    const off = subscribeLifecycleHydrated(() => setLifecycleTick(t => t + 1));
+    return off;
+  }, []);
 
   const donorStages = useMemo(() => {
     void lifecycleTick;

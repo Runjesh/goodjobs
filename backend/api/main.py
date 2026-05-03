@@ -2307,7 +2307,7 @@ def _validate_lifecycle_state(state: Any) -> Dict[str, Any]:
 
 
 @app.get("/crm/donors/lifecycle", tags=["CRM"])
-def list_donor_lifecycle(current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising", "programs"))):
+def list_donor_lifecycle(current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising", "finance", "programs"))):
     """Bulk hydrate — returns {donor_id: state} for every donor with state.
     Used by Layout on app load so CRM/Today render server-side milestones
     without a per-donor round-trip."""
@@ -2337,7 +2337,7 @@ def list_donor_lifecycle(current_user: TokenUser = Depends(require_role("ed", "c
 
 
 @app.get("/crm/donors/{donor_id}/lifecycle", tags=["CRM"])
-def get_donor_lifecycle(donor_id: str, current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising", "programs"))):
+def get_donor_lifecycle(donor_id: str, current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising", "finance", "programs"))):
     with db_conn() as conn:
         if conn is None:
             entry = DONOR_LIFECYCLE_MEM_BY_NGO.get(current_user.ngo_id, {}).get(str(donor_id))

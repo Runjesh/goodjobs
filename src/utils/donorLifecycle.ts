@@ -171,10 +171,27 @@ function persistRemote(donorId: string | number, state: DonorLifecycleState): vo
   }
 }
 
+// ── Hydrate listeners ────────────────────────────────────────────────────────
+// Pages render synchronously off `loadDonorState`, so when the bulk hydrate
+// finishes we need a way to nudge them to recompute. A tiny pub-sub here
+// keeps every consumer in sync (CRM nurture queue, Dashboard lapse-risk
+// counts, the Today rail) without making them all import the apiFetch path.
+type HydrateListener = () => void;
+const HYDRATE_LISTENERS = new Set<HydrateListener>();
+
+/** Subscribe to "donor lifecycle data was just hydrated from the server".
+ *  Returns an unsubscribe fn. Use inside a `useEffect` and bump a local
+ *  re-render tick from the callback. */
+export function subscribeLifecycleHydrated(cb: HydrateListener): () => void {
+  HYDRATE_LISTENERS.add(cb);
+  return () => { HYDRATE_LISTENERS.delete(cb); };
+}
+
 /**
  * Bulk-hydrate the in-memory cache (and write through to localStorage) from
  * the server. Called once by Layout after the user is authenticated. After
- * this resolves, `loadDonorState` returns the same data on every device.
+ * this resolves, `loadDonorState` returns the same data on every device and
+ * all `subscribeLifecycleHydrated` listeners fire.
  *
  * Resolves quietly on auth/network failure so the UI can still render the
  * locally-cached state.
@@ -196,6 +213,11 @@ export async function hydrateDonorLifecycles(): Promise<void> {
     if (!parsed) continue;
     MEM_CACHE.set(cacheKey(donorId), parsed);
     try { localStorage.setItem(STORAGE_KEY(donorId), JSON.stringify(parsed)); } catch { /* ignore */ }
+  }
+  // Notify subscribers so any mounted page can recompute touchpoints/stages
+  // off the freshly hydrated cache without waiting for an unrelated rerender.
+  for (const cb of HYDRATE_LISTENERS) {
+    try { cb(); } catch { /* listener errors must not break hydration */ }
   }
 }
 

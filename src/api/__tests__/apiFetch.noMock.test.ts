@@ -15,6 +15,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { apiFetch } from '../client';
+import { hydrateDonorLifecycles, loadDonorState, setLifecycleScope, subscribeLifecycleHydrated } from '../../utils/donorLifecycle';
 
 describe('apiFetch noMockFallback', () => {
   const origFetch = global.fetch;
@@ -77,5 +78,48 @@ describe('apiFetch noMockFallback', () => {
     const passedInit = call[1] as RequestInit & { noMockFallback?: unknown };
     expect(passedInit.noMockFallback).toBeUndefined();
     expect(passedInit.method).toBe('POST');
+  });
+});
+
+describe('hydrateDonorLifecycles', () => {
+  const origFetch = global.fetch;
+  beforeEach(() => {
+    localStorage.clear();
+    setLifecycleScope('test-tenant');
+  });
+  afterEach(() => {
+    global.fetch = origFetch;
+    setLifecycleScope(null);
+    vi.restoreAllMocks();
+  });
+
+  it('populates the in-memory cache + LS from the bulk endpoint and notifies subscribers (works for any role allowed to read /crm/donors/lifecycle, incl. finance)', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        states: {
+          '7': { milestones: { thankyou: '2026-01-02T00:00:00Z' }, skipped: {} },
+        },
+        source: 'memory',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    let notified = 0;
+    const off = subscribeLifecycleHydrated(() => { notified += 1; });
+    await hydrateDonorLifecycles();
+    off();
+    // Subscriber fired exactly once and cache + LS were populated.
+    expect(notified).toBe(1);
+    const state = loadDonorState('7');
+    expect(state.milestones.thankyou).toBe('2026-01-02T00:00:00Z');
+    const lsRaw = localStorage.getItem('goodjobs.test-tenant.donor.7.v2');
+    expect(lsRaw).toBeTruthy();
+  });
+
+  it('resolves quietly (no throw, no notify) on a non-OK response', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 }));
+    let notified = 0;
+    const off = subscribeLifecycleHydrated(() => { notified += 1; });
+    await expect(hydrateDonorLifecycles()).resolves.toBeUndefined();
+    off();
+    expect(notified).toBe(0);
   });
 });
