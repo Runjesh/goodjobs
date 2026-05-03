@@ -17,6 +17,7 @@ import toast from 'react-hot-toast';
 import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
 import MorningBriefBanner from '../../components/Onboarding/MorningBriefBanner';
 import TrialDay7Card from '../../components/Onboarding/TrialDay7Card';
+import FirstRunEmptyState from '../../components/Onboarding/FirstRunEmptyState';
 import './Dashboard.css';
 
 const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
@@ -614,6 +615,13 @@ const Dashboard: React.FC = () => {
 
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
+  // First-run detection: org has not yet imported any operational data.
+  // We intentionally exclude transactions/campaigns/complianceDocs because
+  // those can be auto-seeded by onboarding (e.g. compliance template docs).
+  // The Today page is meaningful only once at least one of the three core
+  // entities exists.
+  const hasNoRealData = donors.length === 0 && beneficiaries.length === 0 && csrCards.length === 0;
+
   return (
     <div className="today-page">
       {/* ── Greeting Header ─────────────────────────────────────────── */}
@@ -649,6 +657,65 @@ const Dashboard: React.FC = () => {
       {/* ── Get Started Checklist (auto-hides when complete or dismissed) ── */}
       <GetStartedChecklist />
 
+      {/* ── First-run empty state: replaces the demo-shaped Today page when
+              the org has imported nothing yet. Renders the "3 fastest ways
+              to bring real data in" card grid instead of a fake priority
+              queue full of placeholder donors. */}
+      {hasNoRealData ? (
+        <FirstRunEmptyState />
+      ) : (
+        <DashboardActiveBody
+          briefLoading={briefLoading}
+          allItems={allItems}
+          urgentItems={urgentItems}
+          attentionItems={attentionItems}
+          wellItems={wellItems}
+          snoozedItems={snoozedItems}
+          yesterdayWins={yesterdayWins}
+          quickActions={quickActions}
+          showAllUrgent={showAllUrgent}
+          setShowAllUrgent={setShowAllUrgent}
+          handleSnooze={handleSnooze}
+          handleWake={handleWake}
+          navigate={navigate}
+          beneficiariesCount={beneficiaries.length}
+          donorsCount={donors.length}
+          campaigns={campaigns}
+          complianceDocs={complianceDocs}
+        />
+      )}
+    </div>
+  );
+};
+
+interface DashboardActiveBodyProps {
+  briefLoading: boolean;
+  allItems: PriorityItem[];
+  urgentItems: PriorityItem[];
+  attentionItems: PriorityItem[];
+  wellItems: PriorityItem[];
+  snoozedItems: PriorityItem[];
+  yesterdayWins: ReturnType<typeof computeWins>;
+  quickActions: ReturnType<typeof getQuickActions>;
+  showAllUrgent: boolean;
+  setShowAllUrgent: (fn: (v: boolean) => boolean) => void;
+  handleSnooze: (id: string, hours: number) => void;
+  handleWake: (id: string) => void;
+  navigate: ReturnType<typeof useNavigate>;
+  beneficiariesCount: number;
+  donorsCount: number;
+  campaigns: any[];
+  complianceDocs: any[];
+}
+
+const DashboardActiveBody: React.FC<DashboardActiveBodyProps> = ({
+  briefLoading, allItems, urgentItems, attentionItems, wellItems, snoozedItems,
+  yesterdayWins, quickActions, showAllUrgent, setShowAllUrgent,
+  handleSnooze, handleWake, navigate,
+  beneficiariesCount, donorsCount, campaigns, complianceDocs,
+}) => {
+  return (
+    <>
       {/* ── Yesterday strip ──────────────────────────────────────────── */}
       <motion.div className="yesterday-strip" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
         <div className="yesterday-strip-header">
@@ -707,11 +774,11 @@ const Dashboard: React.FC = () => {
       <motion.div className="today-stats" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
         <div className="today-stat-card" onClick={() => navigate('/programs')}>
           <Users size={18} className="today-stat-icon" />
-          <div><div className="today-stat-value">{beneficiaries.length || '—'}</div><div className="today-stat-label">Beneficiaries</div></div>
+          <div><div className="today-stat-value">{beneficiariesCount || '—'}</div><div className="today-stat-label">Beneficiaries</div></div>
         </div>
         <div className="today-stat-card" onClick={() => navigate('/funding')}>
           <HeartHandshake size={18} className="today-stat-icon" />
-          <div><div className="today-stat-value">{donors.length || '—'}</div><div className="today-stat-label">Donors</div></div>
+          <div><div className="today-stat-value">{donorsCount || '—'}</div><div className="today-stat-label">Donors</div></div>
         </div>
         <div className="today-stat-card" onClick={() => navigate('/funding')}>
           <TrendingUp size={18} className="today-stat-icon" />
@@ -719,10 +786,10 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="today-stat-card" onClick={() => navigate('/compliance')}>
           <ShieldCheck size={18} className="today-stat-icon" />
-          <div><div className="today-stat-value">{complianceDocs.filter(d => d.status === 'Valid').length || '—'}</div><div className="today-stat-label">Docs Current</div></div>
+          <div><div className="today-stat-value">{complianceDocs.filter((d: any) => d.status === 'Valid').length || '—'}</div><div className="today-stat-label">Docs Current</div></div>
         </div>
       </motion.div>
-    </div>
+    </>
   );
 };
 

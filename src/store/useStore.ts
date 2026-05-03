@@ -168,12 +168,20 @@ const initialCSRCards: CSRCard[] = [
   { id: 6, company: 'Infosys Foundation', amount: 6000000, project: 'STEM for Girls', tags: ['Education'], agent: 'AD', col: 'live', date: 'Report due: Dec 15' }
 ];
 
-export const initialBeneficiaries: Beneficiary[] = [
+// Seed beneficiaries are only included in dev builds. Production starts empty
+// so a freshly-onboarded NGO doesn't see fictional people in their programs
+// table; Programs.tsx falls back to this list only when the store is empty,
+// which (in prod) means the empty-state UI takes over instead.
+const SEED_DEMO_DATA = (() => {
+  try { return !!import.meta.env.DEV; } catch { return false; }
+})();
+
+export const initialBeneficiaries: Beneficiary[] = SEED_DEMO_DATA ? [
   { id: 'BEN-1045', name: 'Lakshmi Devi', program: 'Women Livelihood Center', location: 'Nashik, MH', aadhaar: true, familySize: 4 },
   { id: 'BEN-1046', name: 'Rahul Kumar', program: 'Digital Literacy 2026', location: 'Patna, BR', aadhaar: true, familySize: 1 },
   { id: 'BEN-1047', name: 'Sunita Bai', program: 'Healthcare Camp', location: 'Pune, MH', aadhaar: false, familySize: 3 },
   { id: 'BEN-1048', name: 'Anita Desai', program: 'Women Livelihood Center', location: 'Nashik, MH', aadhaar: true, familySize: 5 },
-];
+] : [];
 
 const initialVolunteers: Volunteer[] = [
   { id: 'V-101', name: 'Rohan Sharma', skills: ['Teaching', 'English'], hours: 45, verified: true },

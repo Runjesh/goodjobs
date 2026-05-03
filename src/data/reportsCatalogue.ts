@@ -16,10 +16,17 @@ export interface ReportRecord {
   funder?: string;
 }
 
-export const REPORTS_CATALOGUE: ReportRecord[] = [
+// Demo reports are only seeded in dev builds. In production the catalogue is
+// empty until the user generates their first report — both the Reports page
+// and the command palette respect that and render empty-state UI instead.
+const SEED_DEMO_REPORTS = (() => {
+  try { return !!import.meta.env.DEV; } catch { return false; }
+})();
+
+export const REPORTS_CATALOGUE: ReportRecord[] = SEED_DEMO_REPORTS ? [
   { id: '1', title: 'Q2 Progress Report — Tata Trusts',     type: 'funder', status: 'review',    date: '2026-05-15', funder: 'Tata Trusts'  },
   { id: '2', title: 'Annual Impact Report 2025–26',          type: 'impact', status: 'draft',     date: '2026-04-30'  },
   { id: '3', title: 'Donor Impact Update — April 2026',      type: 'donor',  status: 'submitted', date: '2026-04-10'  },
   { id: '4', title: 'Board Brief — Q1 FY 2026–27',           type: 'board',  status: 'submitted', date: '2026-04-01'  },
   { id: '5', title: 'UC Report — CSR Fund Education',         type: 'funder', status: 'overdue',   date: '2026-03-31', funder: 'HDFC Bank CSR' },
-];
+] : [];

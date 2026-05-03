@@ -51,6 +51,11 @@ const REVERSIBILITY_META = {
   reversible:           { label: 'Fully reversible',                color: '#16A34A', Icon: RotateCcw   },
 } as const;
 
+// Demo intents only appear in dev builds. See empty-queue render below.
+const AGENT_HQ_SHOW_DEMO = (() => {
+  try { return !!import.meta.env.DEV; } catch { return false; }
+})();
+
 function getMockIntents(): RichIntent[] {
   return [
     {
@@ -192,15 +197,27 @@ const IntentCard: React.FC<{
         </div>
       </div>
 
-      <div className="intent-actions">
-        <button className="intent-btn intent-btn--approve" onClick={() => onApprove(intent.id)}>
-          <Check size={14} /> Approve
+      <div className="intent-actions" role="group" aria-label="Decide on this agent action">
+        <button
+          className="intent-btn intent-btn--approve"
+          onClick={() => onApprove(intent.id)}
+          title="Approve and execute (A)"
+        >
+          <Check size={15} /> Approve
         </button>
-        <button className="intent-btn intent-btn--modify" onClick={() => onModify(intent.id)}>
-          <Pencil size={13} /> Modify
+        <button
+          className="intent-btn intent-btn--modify"
+          onClick={() => onModify(intent.id)}
+          title="Edit parameters before approving (E)"
+        >
+          <Pencil size={13} /> Edit
         </button>
-        <button className="intent-btn intent-btn--reject" onClick={() => onReject(intent.id)}>
-          <XCircle size={14} /> Reject
+        <button
+          className="intent-btn intent-btn--reject"
+          onClick={() => onReject(intent.id)}
+          title="Dismiss without executing (D)"
+        >
+          <XCircle size={14} /> Dismiss
         </button>
       </div>
     </div>
@@ -559,20 +576,26 @@ const AgentHQ: React.FC = () => {
                         <CheckCircle size={18} style={{ color: '#16A34A' }} />
                         <span>All clear — no actions pending human review</span>
                       </div>
-                      <div className="intent-demo-section">
-                        <div className="intent-demo-section-label">
-                          <Zap size={13} /> Sample intents — this is what the queue looks like when agents are active
+                      {/* Sample intents are dev-only. In production we keep
+                          the surface honest: when the queue is empty, it's
+                          empty. Showing fake "demo" intents to a paying NGO
+                          erodes trust in everything else on the page. */}
+                      {AGENT_HQ_SHOW_DEMO && (
+                        <div className="intent-demo-section">
+                          <div className="intent-demo-section-label">
+                            <Zap size={13} /> Sample intents — this is what the queue looks like when agents are active
+                          </div>
+                          {getMockIntents().map(intent => (
+                            <IntentCard
+                              key={intent.id}
+                              intent={intent}
+                              onApprove={() => toast.success('Demo: agents would execute this action', { icon: '✓' })}
+                              onReject={() => toast('Demo: intent removed from queue', { icon: '✕' })}
+                              onModify={() => toast('Demo: edit parameters before approving', { icon: '✏️' })}
+                            />
+                          ))}
                         </div>
-                        {getMockIntents().map(intent => (
-                          <IntentCard
-                            key={intent.id}
-                            intent={intent}
-                            onApprove={() => toast.success('Demo: agents would execute this action', { icon: '✓' })}
-                            onReject={() => toast('Demo: intent removed from queue', { icon: '✕' })}
-                            onModify={() => toast('Demo: edit parameters before approving', { icon: '✏️' })}
-                          />
-                        ))}
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>

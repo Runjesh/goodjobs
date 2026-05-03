@@ -345,15 +345,19 @@
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-items: stretch;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--color-border, #e2e8f0);
 }
 
 .intent-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.4rem 0.875rem;
+  gap: 0.35rem;
+  padding: 0.55rem 1rem;
   border-radius: var(--radius-sm);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 600;
   border: 1px solid;
   cursor: pointer;
@@ -364,8 +368,18 @@
   background: #16A34A;
   color: white;
   border-color: #16A34A;
+  flex: 1 1 auto;
+  min-width: 140px;
+  justify-content: center;
+  font-size: 0.9rem;
+  padding: 0.6rem 1.1rem;
+  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.2);
 }
-.intent-btn--approve:hover { background: #15803d; }
+.intent-btn--approve:hover {
+  background: #15803d;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.3);
+  transform: translateY(-1px);
+}
 
 .intent-btn--modify {
   background: var(--color-bg-main);
