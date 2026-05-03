@@ -243,12 +243,27 @@ describe('donorLifecycle: urgencyScore', () => {
     expect(acq).toBeGreaterThan(stw);
   });
 
-  it('overdue milestones add +30, due add +20', () => {
-    // Both donors are stewardship (60d). Donor A has no work due (impact
-    // is upcoming — 30 days away). Donor B is at 95d so impact is overdue.
-    const a = urgencyScore(donor('a', 60),  NOW); // base 40 + small upcoming bump
-    const b = urgencyScore(donor('b', 95),  NOW); // base 70 (renewal) + 30 overdue
-    expect(b - a).toBeGreaterThanOrEqual(30);
+  it('the +20 "due" bump is added on top of the stage weight (isolated)', () => {
+    // Same stage (acquisition, base 50) for both donors, isolating the
+    // milestone-state bump. Donor A has every milestone skipped → no
+    // next-milestone bump. Donor B is exactly at day 3, so thankyou is
+    // "due" → +20 bump.
+    const a = donor('a-clean', 10);
+    (['thankyou', 'impact', 'fullimpact', 'renewal'] as MilestoneId[])
+      .forEach(mid => markMilestoneSkipped(a.id, mid));
+    expect(urgencyScore(a, NOW)).toBe(50);                // base only
+    expect(urgencyScore(donor('b-due', 3), NOW)).toBe(70); // base 50 + 20
+  });
+
+  it('the +30 "overdue" bump is added on top of the stage weight (isolated)', () => {
+    // Both donors are renewal (base 70). Donor A: skip everything → no
+    // milestone bump. Donor B: at 100d → impact (trigger 30) is overdue
+    // → +30 bump.
+    const a = donor('a-rn', 120);
+    (['thankyou', 'impact', 'fullimpact', 'renewal'] as MilestoneId[])
+      .forEach(mid => markMilestoneSkipped(a.id, mid));
+    expect(urgencyScore(a, NOW)).toBe(70);                  // base only
+    expect(urgencyScore(donor('b-rn', 100), NOW)).toBe(100); // base 70 + 30
   });
 
   it('upcoming bump grows as the dueDate approaches (max 14)', () => {
