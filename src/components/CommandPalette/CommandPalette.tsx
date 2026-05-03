@@ -141,6 +141,14 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
         onClose();
         return;
       }
+      // Cmd/Ctrl+Enter always runs the directive parser, even when entity
+      // results are visible — gives keyboard users an explicit escape hatch
+      // for free-text commands that happen to match an entity name.
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && query.trim()) {
+        e.preventDefault();
+        void runNaturalDirective();
+        return;
+      }
       if (entityResults.length === 0) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -162,7 +170,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, confirmDonor, confirmIntent, entityResults, activeIndex, handleEntityNavigate]);
+  }, [isOpen, onClose, confirmDonor, confirmIntent, entityResults, activeIndex, handleEntityNavigate, query, runNaturalDirective]);
 
   const hour = new Date().getHours();
   const rhythmHint = useMemo(() => {
@@ -663,7 +671,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
 
         <div className="palette-footer">
           <div>
-            <kbd>esc</kbd> close · <kbd>↑</kbd><kbd>↓</kbd> nav · <kbd>enter</kbd> open / run
+            <kbd>esc</kbd> close · <kbd>↑</kbd><kbd>↓</kbd> nav · <kbd>enter</kbd> open · <kbd>⌘</kbd><kbd>↵</kbd> run directive
           </div>
           <div>
             <kbd>⌘</kbd>
