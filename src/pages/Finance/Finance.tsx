@@ -37,6 +37,11 @@ const Finance: React.FC = () => {
   const [exLoading, setExLoading] = useState(false);
   const [classifiedStream, setClassifiedStream] = useState<any[]>([]);
   const [streamExceptionOnly, setStreamExceptionOnly] = useState(false);
+  // Inline FCRA reclassification — per-row pending category selection + busy lock.
+  const [exPending, setExPending] = useState<Record<string, string>>({});
+  const [exBusy, setExBusy] = useState<Record<string, boolean>>({});
+
+  const FCRA_CATEGORIES = ['FCRA', 'Domestic', 'CSR', 'Grant', 'Donation', 'Other'];
 
   const loadGrants = async () => {
     setGrantsLoading(true);
@@ -128,6 +133,68 @@ const Finance: React.FC = () => {
   useEffect(() => {
     if (exceptionMode) loadExceptionTx();
   }, [exceptionMode, loadExceptionTx]);
+
+  // Approve a low-confidence transaction with the operator's chosen FCRA category.
+  // Tries the dedicated classify endpoint first, then falls back to a journal-entry
+  // memo so the action is auditable even when the classify route isn't deployed.
+  const approveExceptionRow = async (t: any) => {
+    const id = String(t.id ?? '');
+    if (!id) return;
+    const category = exPending[id] || t.agent_category || 'Domestic';
+    setExBusy(prev => ({ ...prev, [id]: true }));
+    try {
+      let ok = false;
+      try {
+        const r = await apiFetch(`/finance/transactions/${encodeURIComponent(id)}/classify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category, approved_by: 'operator' }),
+        });
+        ok = r.ok;
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        // Fallback: write an audit journal entry so the approval still lands somewhere.
+        try {
+          const r2 = await apiFetch('/finance/journal-entry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              description: `FCRA reclassify TX ${id}: ${t.donorName || 'Donor'} → ${category}`,
+              amount: Number(t.amount) || 0,
+              entry_type: 'Reclassification',
+              fund: category,
+            }),
+          });
+          ok = r2.ok;
+        } catch {
+          ok = false;
+        }
+      }
+      if (!ok) {
+        toast.error('Failed to approve classification.');
+        return;
+      }
+      // Optimistically remove from both queues.
+      setExTx(prev => prev.filter(row => String(row.id) !== id));
+      setClassifiedStream(prev => prev.map(row => (
+        String(row.id) === id ? { ...row, agent_category: category, agent_confidence: 1 } : row
+      )));
+      setExPending(prev => {
+        const n = { ...prev };
+        delete n[id];
+        return n;
+      });
+      toast.success(`Classified as ${category}.`);
+    } finally {
+      setExBusy(prev => {
+        const n = { ...prev };
+        delete n[id];
+        return n;
+      });
+    }
+  };
 
   const fcraGrants = grants.filter((g: any) => (g?.name || '').toString().toLowerCase().includes('fcra'));
   const fcraTotal = fcraGrants.reduce((s: number, g: any) => s + (Number(g.total) || 0), 0);
@@ -439,7 +506,7 @@ const Finance: React.FC = () => {
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(88px,1fr) minmax(72px,0.85fr) minmax(120px,1.2fr) minmax(80px,1fr) 64px',
+                    gridTemplateColumns: 'minmax(80px,0.9fr) minmax(64px,0.7fr) minmax(110px,1.1fr) minmax(70px,0.9fr) 52px minmax(110px,1fr) 88px',
                     gap: '0.5rem',
                     padding: '0.6rem 0.75rem',
                     fontSize: '0.7rem',
@@ -459,6 +526,8 @@ const Finance: React.FC = () => {
                   <span>Campaign</span>
                   <span>Agent</span>
                   <span>Conf.</span>
+                  <span>Reclassify</span>
+                  <span>Action</span>
                 </div>
                 <div style={{ height: exVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
                   {exVirtualizer.getVirtualItems().map(vr => {
@@ -479,7 +548,7 @@ const Finance: React.FC = () => {
                         <div
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: 'minmax(88px,1fr) minmax(72px,0.85fr) minmax(120px,1.2fr) minmax(80px,1fr) 64px',
+                            gridTemplateColumns: 'minmax(80px,0.9fr) minmax(64px,0.7fr) minmax(110px,1.1fr) minmax(70px,0.9fr) 52px minmax(110px,1fr) 88px',
                             gap: '0.5rem',
                             padding: '0.5rem 0.75rem',
                             alignItems: 'center',
@@ -492,6 +561,25 @@ const Finance: React.FC = () => {
                           <span style={{ fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.campaignTitle || '—'}</span>
                           <span style={{ fontSize: '0.78rem' }}>{t.agent_category || '—'}</span>
                           <span>{Math.round((Number(t.agent_confidence) || 0) * 100)}%</span>
+                          <select
+                            aria-label={`Reclassify transaction ${t.id}`}
+                            className="input-field"
+                            style={{ padding: '0.2rem 0.35rem', fontSize: '0.75rem', width: '100%' }}
+                            value={exPending[String(t.id)] ?? (t.agent_category || 'Domestic')}
+                            onChange={e => setExPending(prev => ({ ...prev, [String(t.id)]: e.target.value }))}
+                            disabled={!!exBusy[String(t.id)]}
+                          >
+                            {FCRA_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem' }}
+                            onClick={() => approveExceptionRow(t)}
+                            disabled={!!exBusy[String(t.id)]}
+                          >
+                            {exBusy[String(t.id)] ? '…' : 'Approve'}
+                          </button>
                         </div>
                       </div>
                     );

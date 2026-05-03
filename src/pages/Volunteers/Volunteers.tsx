@@ -82,6 +82,7 @@ const Volunteers: React.FC = () => {
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [signupShift, setSignupShift] = useState<Shift | null>(null);
   const [signupName, setSignupName] = useState('');
+  const [signupError, setSignupError] = useState<{ message: string; conflictShift?: Shift } | null>(null);
   const [signupExtra, setSignupExtra] = useState({
     phone: '',
     email: '',
@@ -274,6 +275,7 @@ const Volunteers: React.FC = () => {
     const shift = shifts.find(s => s.id === shiftId) || null;
     setSignupShift(shift);
     setSignupName('');
+    setSignupError(null);
     setSignupExtra({
       phone: '',
       email: '',
@@ -286,10 +288,42 @@ const Volunteers: React.FC = () => {
     setShowSignupModal(true);
   };
 
+  // Detect overlapping commitments before POST. Two shifts conflict when the same
+  // volunteer is on both AND their date strings normalise to the same calendar day.
+  const detectShiftConflict = (name: string, target: Shift): Shift | null => {
+    const norm = (s: string) => s.trim().toLowerCase();
+    const candidateName = norm(name);
+    const targetDay = (target.date || '').trim().toLowerCase();
+    if (!targetDay) return null;
+    for (const su of signups) {
+      if (norm(su.volunteerName) !== candidateName) continue;
+      const other = shifts.find(s => s.id === su.shiftId);
+      if (!other || other.id === target.id) continue;
+      const otherDay = (other.date || '').trim().toLowerCase();
+      if (!otherDay) continue;
+      // Compare full string and a coarse day-only token match (handles "Sat 14 Dec • 9–11am").
+      const targetToken = targetDay.split(/[•|@]/)[0].trim();
+      const otherToken = otherDay.split(/[•|@]/)[0].trim();
+      if (otherDay === targetDay || (targetToken && otherToken === targetToken)) {
+        return other;
+      }
+    }
+    return null;
+  };
+
   const submitSignup = async () => {
     if (!signupShift) return;
     const name = signupName.trim();
     if (!name) return;
+    setSignupError(null);
+    const conflict = detectShiftConflict(name, signupShift);
+    if (conflict) {
+      setSignupError({
+        message: `${name} is already signed up for "${conflict.title}" on ${conflict.date}. Resolve the conflict before adding this shift.`,
+        conflictShift: conflict,
+      });
+      return;
+    }
     try {
       const res = await apiFetch(`/volunteers/shifts/${encodeURIComponent(String(signupShift.id))}/signup`, {
         method: 'POST',
@@ -305,7 +339,14 @@ const Volunteers: React.FC = () => {
           notes: signupExtra.notes || undefined,
         }),
       });
-      if (!res.ok) throw new Error('signup');
+      if (!res.ok) {
+        // Backend can also reject for conflicts (409); surface inline.
+        if (res.status === 409) {
+          setSignupError({ message: 'Backend rejected: this volunteer already has an overlapping commitment.' });
+          return;
+        }
+        throw new Error('signup');
+      }
       toast.success('Signed up.');
       setShowSignupModal(false);
       refresh();
@@ -727,7 +768,7 @@ const Volunteers: React.FC = () => {
               <select
                 className="input-field"
                 value={signupName}
-                onChange={(e) => setSignupName(e.target.value)}
+                onChange={(e) => { setSignupName(e.target.value); setSignupError(null); }}
               >
                 <option value="">Select from roster…</option>
                 {volunteers.map(v => (
@@ -738,6 +779,44 @@ const Volunteers: React.FC = () => {
                 Not in roster? Add them first with “Add Volunteer”.
               </div>
             </div>
+
+            {signupError && (
+              <div
+                role="alert"
+                style={{
+                  marginBottom: '0.75rem',
+                  padding: '0.65rem 0.85rem',
+                  borderRadius: 'var(--radius-md)',
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#991b1b',
+                  fontSize: '0.82rem',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '0.5rem',
+                }}
+              >
+                <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>Shift conflict</div>
+                  <div>{signupError.message}</div>
+                  {signupError.conflictShift && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ marginTop: '0.5rem', fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
+                      onClick={() => {
+                        const c = signupError.conflictShift!;
+                        setSignupShift(c);
+                        setSignupError(null);
+                      }}
+                    >
+                      Open conflicting shift
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
               <div className="input-group" style={{ marginBottom: 0 }}>
@@ -782,7 +861,7 @@ const Volunteers: React.FC = () => {
               <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowSignupModal(false)}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-primary" style={{ flex: 2 }} onClick={submitSignup} disabled={!signupName}>
+              <button type="button" className="btn btn-primary" style={{ flex: 2 }} onClick={submitSignup} disabled={!signupName || !!signupError}>
                 Confirm signup
               </button>
             </div>

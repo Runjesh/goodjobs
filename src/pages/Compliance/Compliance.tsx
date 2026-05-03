@@ -7,6 +7,11 @@ import DPDPModule from './DPDPModule';
 import './Compliance.css';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
+import {
+  buildComplianceReminders,
+  persistComplianceReminders,
+  pickUntoastedReminders,
+} from '../../utils/complianceReminders';
 
 const PAGE_TABS = [
   { id: 'vault',  label: '📁 Registration Vault' },
@@ -297,6 +302,22 @@ const Compliance: React.FC = () => {
 
   const validDocs = complianceDocs.filter(d => d.status === 'Valid').length;
   const expiringSoon = complianceDocs.filter(d => d.status === 'Expiring Soon').length;
+
+  // Recompute proactive reminders whenever filings or board change. We persist
+  // to localStorage (so Today inbox can read them) and surface a one-time toast
+  // per session for any newly-detected items.
+  useEffect(() => {
+    if (filingsLoading || boardLoading) return;
+    const reminders = buildComplianceReminders(filings, boardMembers);
+    persistComplianceReminders(reminders);
+    const fresh = pickUntoastedReminders(reminders);
+    for (const r of fresh.slice(0, 3)) {
+      toast(r.text, {
+        icon: r.level === 'urgent' ? '⚠️' : '🔔',
+        duration: 5500,
+      });
+    }
+  }, [filings, boardMembers, filingsLoading, boardLoading]);
 
   return (
     <div className="compliance-container">

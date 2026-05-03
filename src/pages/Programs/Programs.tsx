@@ -486,7 +486,7 @@ const Programs: React.FC = () => {
       </div>
 
       {activeTab === 'forms' && <FormBuilder />}
-      {activeTab === 'toc' && <TheoryOfChangeBuilder />}
+      {activeTab === 'toc' && <TheoryOfChangeBuilder programs={programs} />}
 
       {activeTab === 'mis' && (<>
         <div className="flex items-center gap-3">

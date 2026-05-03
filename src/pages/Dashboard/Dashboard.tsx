@@ -12,6 +12,7 @@ import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../api/client';
 import { computeStage, nextDueMilestone } from '../../utils/donorLifecycle';
+import { readComplianceReminders } from '../../utils/complianceReminders';
 import toast from 'react-hot-toast';
 import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
 import MorningBriefBanner from '../../components/Onboarding/MorningBriefBanner';
@@ -216,6 +217,20 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
   const expiringDocs = complianceDocs.filter(d => d.status === 'Expiring Soon' || d.status === 'Expired');
   if (expiringDocs.length > 0)
     items.push({ id: 'exp-docs', text: `${expiringDocs.length} compliance document${expiringDocs.length > 1 ? 's' : ''} expiring — renewal required`, action: 'Renew now', path: '/compliance', level: 'urgent', ageDays: 3 });
+
+  // Filings + board-tenure reminders persisted by the Compliance page.
+  // These keep the Today surface in lockstep with what the Compliance tab shows.
+  const complianceReminders = readComplianceReminders();
+  for (const r of complianceReminders) {
+    items.push({
+      id: r.id,
+      text: r.text,
+      action: 'Open Compliance',
+      path: r.path,
+      level: r.level,
+      ageDays: r.daysUntil < 0 ? Math.abs(r.daysUntil) : undefined,
+    });
+  }
 
   const pendingReceipts = transactions.filter((t: any) => t.receipt_status === 'pending' || !t.receipt_number);
   if (pendingReceipts.length > 3)

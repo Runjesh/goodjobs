@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, ArrowRight, Save, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './TheoryOfChange.css';
@@ -18,19 +18,102 @@ const INITIAL_NODES: ToCNode[] = [
   { id: '5', type: 'impact', content: 'Increased Household Income & Financial Independence' },
 ];
 
-const TheoryOfChangeBuilder: React.FC = () => {
-  const [nodes, setNodes] = useState<ToCNode[]>(INITIAL_NODES);
+const GENERAL_KEY = '__general__';
+const LEGACY_KEY = 'goodjobs.toc.v1';
+
+const programKey = (p: string) => (p && p.trim() ? p.trim() : GENERAL_KEY);
+const storageKeyFor = (p: string) => `goodjobs.toc.${programKey(p)}.v2`;
+
+function loadNodes(program: string): ToCNode[] {
+  try {
+    const raw = localStorage.getItem(storageKeyFor(program));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as ToCNode[];
+    }
+    // One-time migration: legacy single-canvas → General bucket
+    if (programKey(program) === GENERAL_KEY) {
+      const legacy = localStorage.getItem(LEGACY_KEY);
+      if (legacy) {
+        const parsed = JSON.parse(legacy);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          localStorage.setItem(storageKeyFor(program), JSON.stringify(parsed));
+          return parsed as ToCNode[];
+        }
+      }
+    }
+  } catch {
+    /* ignore — fall through to defaults */
+  }
+  return INITIAL_NODES;
+}
+
+interface Props {
+  programs?: string[];
+}
+
+const TheoryOfChangeBuilder: React.FC<Props> = ({ programs = [] }) => {
+  const programOptions = useMemo(() => {
+    const list = ['General', ...programs.filter(p => p && p.trim() && p !== 'General')];
+    return Array.from(new Set(list));
+  }, [programs]);
+
+  const [selectedProgram, setSelectedProgram] = useState<string>(programOptions[0] || 'General');
+  const [nodes, setNodes] = useState<ToCNode[]>(() => loadNodes(programOptions[0] || 'General'));
+  const [dirty, setDirty] = useState(false);
+
+  // When program changes, swap canvases.
+  useEffect(() => {
+    setNodes(loadNodes(selectedProgram));
+    setDirty(false);
+  }, [selectedProgram]);
+
+  // Keep selected program valid when the program list changes upstream.
+  // If unsaved edits exist, persist them under the previous key before swapping
+  // so a beneficiary list refresh never silently discards operator work.
+  useEffect(() => {
+    if (programOptions.length && !programOptions.includes(selectedProgram)) {
+      if (dirty) {
+        try {
+          localStorage.setItem(storageKeyFor(selectedProgram), JSON.stringify(nodes));
+          if (programKey(selectedProgram) === GENERAL_KEY) {
+            localStorage.setItem(LEGACY_KEY, JSON.stringify(nodes));
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      setSelectedProgram(programOptions[0]);
+    }
+  }, [programOptions, selectedProgram, dirty, nodes]);
 
   const handleAdd = (type: ToCNode['type']) => {
-    setNodes([...nodes, { id: Date.now().toString(), type, content: 'New ' + type }]);
+    setNodes(prev => [...prev, { id: Date.now().toString(), type, content: 'New ' + type }]);
+    setDirty(true);
   };
 
   const handleUpdate = (id: string, content: string) => {
-    setNodes(nodes.map(n => n.id === id ? { ...n, content } : n));
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, content } : n));
+    setDirty(true);
   };
 
   const handleDelete = (id: string) => {
-    setNodes(nodes.filter(n => n.id !== id));
+    setNodes(prev => prev.filter(n => n.id !== id));
+    setDirty(true);
+  };
+
+  const handleSave = () => {
+    try {
+      localStorage.setItem(storageKeyFor(selectedProgram), JSON.stringify(nodes));
+      // Keep legacy key warm so any old reader keeps working with the General canvas.
+      if (programKey(selectedProgram) === GENERAL_KEY) {
+        localStorage.setItem(LEGACY_KEY, JSON.stringify(nodes));
+      }
+      setDirty(false);
+      toast.success(`Saved ToC for "${selectedProgram}".`);
+    } catch {
+      toast.error('Failed to save.');
+    }
   };
 
   const renderColumn = (type: ToCNode['type'], title: string, colorClass: string) => {
@@ -64,39 +147,52 @@ const TheoryOfChangeBuilder: React.FC = () => {
 
   return (
     <div className="toc-builder">
-      <div className="toc-toolbar flex justify-between items-center">
+      <div className="toc-toolbar flex justify-between items-center" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h2 style={{ fontSize: '1.125rem', fontWeight: 600 }}>Theory of Change (ToC) Canvas</h2>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>Map your program logic. Linked MIS metrics update automatically.</p>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
+            Map program logic per program. Linked MIS metrics update automatically.
+          </p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => {
-            try {
-              localStorage.setItem('goodjobs.toc.v1', JSON.stringify(nodes));
-              toast.success('Saved locally.');
-            } catch {
-              toast.error('Failed to save.');
-            }
-          }}
-        >
-          <Save size={16} /> Save Canvas
-        </button>
+        <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
+          <label style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+            Program
+            <select
+              className="input-field"
+              style={{ marginLeft: 8, display: 'inline-block', width: 'auto', minWidth: 180, padding: '0.35rem 0.6rem' }}
+              value={selectedProgram}
+              onChange={(e) => {
+                if (dirty && !confirm('Unsaved changes will be lost. Switch program?')) return;
+                setSelectedProgram(e.target.value);
+              }}
+            >
+              {programOptions.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+          <button
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={!dirty}
+            title={dirty ? 'Save changes' : 'Nothing to save'}
+          >
+            <Save size={16} /> {dirty ? 'Save Canvas' : 'Saved'}
+          </button>
+        </div>
       </div>
 
       <div className="toc-canvas">
         {renderColumn('input', 'Inputs', 'col-input')}
         <div className="toc-arrow"><ArrowRight color="var(--color-text-tertiary)" /></div>
-        
+
         {renderColumn('activity', 'Activities', 'col-activity')}
         <div className="toc-arrow"><ArrowRight color="var(--color-text-tertiary)" /></div>
-        
+
         {renderColumn('output', 'Outputs', 'col-output')}
         <div className="toc-arrow"><ArrowRight color="var(--color-text-tertiary)" /></div>
-        
+
         {renderColumn('outcome', 'Outcomes', 'col-outcome')}
         <div className="toc-arrow"><ArrowRight color="var(--color-text-tertiary)" /></div>
-        
+
         {renderColumn('impact', 'Impact', 'col-impact')}
       </div>
     </div>
