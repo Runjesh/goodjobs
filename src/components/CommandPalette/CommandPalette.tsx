@@ -1,9 +1,20 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Search, Sparkles, UserPlus, IndianRupee, ShieldCheck, Mail, ArrowRight, Clock } from 'lucide-react';
+import { Search, Sparkles, UserPlus, IndianRupee, ShieldCheck, Mail, ArrowRight, Clock, Users, Briefcase, Heart, Flag, FolderKanban } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
+import { useStore } from '../../store/useStore';
+import { searchEntities, ENTITY_GROUP_LABEL, type EntityResult, type EntityKind } from '../../utils/entitySearch';
 import './CommandPalette.css';
+
+const ENTITY_ICON: Record<EntityKind, React.ComponentType<{ size?: number }>> = {
+  donor: Heart,
+  beneficiary: Users,
+  csr: Briefcase,
+  campaign: Flag,
+  program: FolderKanban,
+  team: UserPlus,
+};
 
 const HISTORY_KEY = 'goodjobs.directive_history.v1';
 
@@ -70,8 +81,33 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
   const [history, setHistory] = useState<string[]>([]);
   const [confirmDonor, setConfirmDonor] = useState<DonorConfirm | null>(null);
   const [confirmIntent, setConfirmIntent] = useState<IntentConfirm | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  const donors = useStore(s => s.donors);
+  const beneficiaries = useStore(s => s.beneficiaries);
+  const csrCards = useStore(s => s.csrCards);
+  const campaigns = useStore(s => s.campaigns);
+  const volunteers = useStore(s => s.volunteers);
+
+  const entityResults = useMemo<EntityResult[]>(() => {
+    if (query.startsWith('/')) return [];
+    return searchEntities(query, { donors, beneficiaries, csrCards, campaigns, volunteers });
+  }, [query, donors, beneficiaries, csrCards, campaigns, volunteers]);
+
+  const groupedEntityResults = useMemo(() => {
+    const groups = new Map<EntityKind, EntityResult[]>();
+    for (const r of entityResults) {
+      const arr = groups.get(r.kind) ?? [];
+      arr.push(r);
+      groups.set(r.kind, arr);
+    }
+    return [...groups.entries()];
+  }, [entityResults]);
+
+  // Reset selection whenever the result set changes.
+  useEffect(() => { setActiveIndex(0); }, [entityResults]);
 
   useEffect(() => {
     if (isOpen && inputRef.current) {
@@ -85,9 +121,15 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
     }
   }, [isOpen]);
 
+  const handleEntityNavigate = useCallback((r: EntityResult) => {
+    navigate(r.path);
+    onClose();
+  }, [navigate, onClose]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (!isOpen) return;
+      if (e.key === 'Escape') {
         if (confirmDonor || confirmIntent) {
           setConfirmDonor(null);
           setConfirmIntent(null);
@@ -95,11 +137,26 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
           return;
         }
         onClose();
+        return;
+      }
+      if (entityResults.length === 0) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActiveIndex(i => (i + 1) % entityResults.length);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActiveIndex(i => (i - 1 + entityResults.length) % entityResults.length);
+      } else if (e.key === 'Enter') {
+        const r = entityResults[activeIndex];
+        if (r) {
+          e.preventDefault();
+          handleEntityNavigate(r);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, confirmDonor, confirmIntent]);
+  }, [isOpen, onClose, confirmDonor, confirmIntent, entityResults, activeIndex, handleEntityNavigate]);
 
   const hour = new Date().getHours();
   const rhythmHint = useMemo(() => {
@@ -433,6 +490,36 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
             </div>
           )}
 
+          {entityResults.length > 0 && !confirmDonor && !confirmIntent && (
+            <div className="palette-entity-results">
+              {groupedEntityResults.map(([kind, rows]) => (
+                <div className="suggestion-group" key={kind}>
+                  <div className="suggestion-group-title">{ENTITY_GROUP_LABEL[kind]}</div>
+                  {rows.map(r => {
+                    const Icon = ENTITY_ICON[r.kind];
+                    const flatIdx = entityResults.indexOf(r);
+                    const isActive = flatIdx === activeIndex;
+                    return (
+                      <div
+                        key={`${r.kind}:${r.id}`}
+                        className={`suggestion-item palette-entity-item${isActive ? ' palette-entity-item--active' : ''}`}
+                        onMouseEnter={() => setActiveIndex(flatIdx)}
+                        onClick={() => handleEntityNavigate(r)}
+                      >
+                        <div className="suggestion-icon"><Icon size={16} /></div>
+                        <div className="palette-entity-text">
+                          <div className="palette-entity-label">{r.label}</div>
+                          <div className="palette-entity-context">{r.context}</div>
+                        </div>
+                        <ArrowRight size={14} className="suggestion-hint" />
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="suggestion-group">
             <div className="suggestion-group-title flex items-center gap-1">
               <Clock size={12} /> Now ({rhythmHint})
@@ -570,7 +657,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
 
         <div className="palette-footer">
           <div>
-            <kbd>esc</kbd> close · <kbd>enter</kbd> preview / run
+            <kbd>esc</kbd> close · <kbd>↑</kbd><kbd>↓</kbd> nav · <kbd>enter</kbd> open / run
           </div>
           <div>
             <kbd>⌘</kbd>

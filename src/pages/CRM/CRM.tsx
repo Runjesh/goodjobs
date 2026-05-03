@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Search, Filter, MessageCircle, Mail, Phone, MapPin,
@@ -9,6 +10,7 @@ import {
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
+import { deriveNextAction } from '../../utils/donorNextAction';
 import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import StageBadge from '../../components/Donor/StageBadge';
@@ -35,7 +37,22 @@ const CSV_TEMPLATE = 'name,type,pan,location,email,phone,employer\nAnita Sharma,
 
 const CRM: React.FC = () => {
   const { donors, transactions, addDonor, updateDonor, deleteDonor } = useStore();
-  const [activeDonorId, setActiveDonorId] = useState<string>(String(donors[0]?.id || ''));
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusFromUrl = searchParams.get('focus') || '';
+  const [activeDonorId, setActiveDonorId] = useState<string>(focusFromUrl || String(donors[0]?.id || ''));
+
+  // Sync from ?focus=ID — when arriving via Command Palette deep link.
+  useEffect(() => {
+    if (!focusFromUrl) return;
+    if (donors.some(d => String(d.id) === focusFromUrl)) {
+      setActiveDonorId(focusFromUrl);
+      setViewMode('list');
+      // Strip the param so subsequent navigation isn't sticky.
+      const next = new URLSearchParams(searchParams);
+      next.delete('focus');
+      setSearchParams(next, { replace: true });
+    }
+  }, [focusFromUrl, donors, searchParams, setSearchParams]);
   const [viewMode, setViewMode] = useState<'list' | 'heatmap'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
@@ -386,10 +403,75 @@ const CRM: React.FC = () => {
     }
   };
 
+  const [emailNotConnected, setEmailNotConnected] = useState(false);
+  const [composerSending, setComposerSending] = useState(false);
+
   const handleSendComposer = async () => {
     const donorIds = bulkMode ? Array.from(selectedIds) : (activeDonor?.id ? [activeDonor.id] : []);
     if (donorIds.length === 0) { toast.error('Select at least one donor.'); return; }
+
+    const donorMap = new Map(donors.map(d => [String(d.id), d]));
+    const message = (customMessage || selectedTemplate.body || '').toString();
+    setComposerSending(true);
+    setEmailNotConnected(false);
+
     try {
+      // Email branches to the dedicated email endpoint; if missing, surface a
+      // clear "not connected" state instead of silently piggy-backing on WhatsApp.
+      if (composerChannel === 'email') {
+        const missingEmail = donorIds.filter(id => !donorMap.get(String(id))?.email);
+        const sendableIds = donorIds.filter(id => !!donorMap.get(String(id))?.email);
+        if (sendableIds.length === 0) {
+          toast.error('None of the selected donors have an email address on file.');
+          return;
+        }
+        let res: Response;
+        try {
+          res = await apiFetch('/crm/outreach/email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              donor_ids: sendableIds,
+              template_id: selectedTemplate?.id,
+              message,
+            }),
+          });
+        } catch {
+          setEmailNotConnected(true);
+          return;
+        }
+        if (res.status === 404 || res.status === 405 || res.status === 501) {
+          setEmailNotConnected(true);
+          return;
+        }
+        if (!res.ok) {
+          toast.error('Email send failed.');
+          return;
+        }
+        // Per-recipient feedback: parse {results:[{donor_id, ok, error?}]} when
+        // the backend returns it; otherwise infer all-success.
+        let sent = sendableIds.length;
+        let failed: string[] = [];
+        try {
+          const data = await res.json();
+          if (Array.isArray(data?.results)) {
+            sent = data.results.filter((r: any) => r.ok).length;
+            failed = data.results
+              .filter((r: any) => !r.ok)
+              .map((r: any) => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
+          }
+        } catch { /* keep defaults */ }
+        const skipped = missingEmail.map(id => donorMap.get(String(id))?.name || String(id));
+        const failedSummary = failed.length ? ` · ${failed.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}` : '';
+        const skippedSummary = skipped.length ? ` · skipped (no email): ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}` : '';
+        toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}${skippedSummary}`, { icon: '📧', duration: 6000 });
+        setShowComposer(false);
+        setSelectedIds(new Set());
+        setBulkMode(false);
+        return;
+      }
+
+      // WhatsApp path (unchanged transport).
       const res = await apiFetch('/crm/outreach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -398,17 +480,36 @@ const CRM: React.FC = () => {
           channel: composerChannel,
           donor_ids: donorIds,
           template_id: selectedTemplate?.id,
-          message: (customMessage || selectedTemplate.body || '').toString(),
+          message,
         }),
       });
       if (!res.ok) throw new Error('send');
-      toast.success('Queued for sending.', { icon: composerChannel === 'whatsapp' ? '📲' : '📧' });
+      let sent = donorIds.length;
+      let failed: string[] = [];
+      try {
+        const data = await res.json();
+        if (Array.isArray(data?.results)) {
+          sent = data.results.filter((r: any) => r.ok).length;
+          failed = data.results
+            .filter((r: any) => !r.ok)
+            .map((r: any) => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
+        }
+      } catch { /* keep defaults */ }
+      const failedSummary = failed.length ? ` · ${failed.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}` : '';
+      toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}`, { icon: '📲', duration: 6000 });
       setShowComposer(false);
       setSelectedIds(new Set());
       setBulkMode(false);
     } catch {
       toast.error('Failed to send (backend not reachable).');
+    } finally {
+      setComposerSending(false);
     }
+  };
+
+  const switchComposerToWhatsApp = () => {
+    setComposerChannel('whatsapp');
+    setEmailNotConnected(false);
   };
 
   const openBulkCompose = (channel: 'whatsapp' | 'email') => {
@@ -418,9 +519,17 @@ const CRM: React.FC = () => {
     setShowComposer(true);
   };
 
-  const openSingleCompose = (channel: 'whatsapp' | 'email') => {
+  const openSingleCompose = (channel: 'whatsapp' | 'email', templateId?: string) => {
     setComposerChannel(channel);
     setBulkMode(false);
+    if (templateId) {
+      const t = WA_TEMPLATES.find(x => x.id === templateId);
+      if (t) {
+        setSelectedTemplate(t);
+        setCustomMessage(t.body);
+      }
+    }
+    setEmailNotConnected(false);
     setShowComposer(true);
   };
 
@@ -718,6 +827,14 @@ const CRM: React.FC = () => {
                             <span>{donor.type}</span>
                             <StageBadge stage={donorStages.get(String(donor.id)) ?? 'unknown'} size="xs" />
                           </div>
+                          {(() => {
+                            const na = deriveNextAction(donor);
+                            return (
+                              <div className={`donor-next-action donor-next-action--${na.band}`} title="Suggested next action">
+                                <Zap size={10} /> {na.label}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -797,6 +914,22 @@ const CRM: React.FC = () => {
                       </span>
                     </div>
                   </div>
+                  {/* Suggested next action — derived from propensity band when available. */}
+                  {(() => {
+                    const na = deriveNextAction(activeDonor, propensity?.score);
+                    const channel = na.templateId === 'reactivate' || na.templateId === 'thank' ? 'whatsapp' : 'whatsapp';
+                    return (
+                      <button
+                        type="button"
+                        className={`donor-next-action-cta donor-next-action-cta--${na.band}`}
+                        onClick={() => openSingleCompose(channel as 'whatsapp', na.templateId)}
+                      >
+                        <Zap size={13} />
+                        <span><strong>Suggested next action:</strong> {na.label}</span>
+                        <ArrowRight size={13} />
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
               <div className="contact-actions">
@@ -1061,6 +1194,21 @@ const CRM: React.FC = () => {
               </div>
             )}
 
+            {emailNotConnected && (
+              <div className="email-not-connected" role="alert">
+                <AlertTriangle size={16} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Email backend not connected</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                    Your account doesn't have a transactional email service wired up yet. You can switch this draft to WhatsApp, or save it for later.
+                  </div>
+                </div>
+                <button type="button" className="btn btn-primary" style={{ fontSize: '0.75rem', padding: '0.35rem 0.7rem' }} onClick={switchComposerToWhatsApp}>
+                  Switch to WhatsApp
+                </button>
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={async () => {
                 const donorIds = bulkMode ? Array.from(selectedIds) : (activeDonor?.id ? [activeDonor.id] : []);
@@ -1085,8 +1233,10 @@ const CRM: React.FC = () => {
               }}>
                 Save Draft
               </button>
-              <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSendComposer}>
-                <Send size={16} /> Send {bulkMode ? `to ${selectedIds.size} donors` : `to ${activeDonor?.name}`}
+              <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSendComposer} disabled={composerSending || emailNotConnected}>
+                {composerSending
+                  ? <><Loader2 size={16} className="animate-spin" /> Sending…</>
+                  : <><Send size={16} /> Send {bulkMode ? `to ${selectedIds.size} donors` : `to ${activeDonor?.name}`}</>}
               </button>
             </div>
           </div>

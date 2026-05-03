@@ -488,3 +488,82 @@
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+
+/* Suggested next action — inline on donor row */
+.donor-next-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 500;
+  margin-top: 0.2rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--color-bg-main);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.donor-next-action--high {
+  background: #ecfdf5;
+  color: #047857;
+}
+.donor-next-action--mid {
+  background: #fef3c7;
+  color: #b45309;
+}
+.donor-next-action--low {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+/* Suggested next action CTA — banner on active donor profile */
+.donor-next-action-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-main);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.donor-next-action-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.donor-next-action-cta--high {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #065f46;
+}
+.donor-next-action-cta--mid {
+  background: #fef3c7;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+.donor-next-action-cta--low {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+/* Email-not-connected banner inside composer */
+.email-not-connected {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius-md);
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+}
