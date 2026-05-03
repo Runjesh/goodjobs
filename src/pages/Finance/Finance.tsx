@@ -8,11 +8,11 @@ import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
 
 const Finance: React.FC = () => {
-  const grantBudgetHeads     = useStore(s => s.grantBudgetHeads);
-  const storeTransactions    = useStore(s => s.transactions);
-  const transactionGrantTags = useStore(s => s.transactionGrantTags);
-  const setTxGrantTag        = useStore(s => s.setTransactionGrantTag);
-  const csrCards             = useStore(s => s.csrCards);
+  const grantBudgetHeads = useStore(s => s.grantBudgetHeads);
+  const journalEntries   = useStore(s => s.journalEntries);
+  const upsertJournalEntry      = useStore(s => s.upsertJournalEntry);
+  const setJournalEntryGrantTag = useStore(s => s.setJournalEntryGrantTag);
+  const csrCards         = useStore(s => s.csrCards);
   const [grants, setGrants] = useState<any[]>([]);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showGrantModal, setShowGrantModal] = useState(false);
@@ -23,7 +23,10 @@ const Finance: React.FC = () => {
     spent: 0,
     status: 'On Track',
   });
-  const [entry, setEntry] = useState({ description: '', amount: 1000, type: 'Expense', fund: 'General' });
+  const [entry, setEntry] = useState<{
+    description: string; amount: number; type: 'Expense' | 'Income' | 'Transfer'; fund: string;
+    grantId: string; budgetHeadId: string;
+  }>({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '' });
   const [classification, setClassification] = useState<{category: string, confidence: number} | null>(null);
   const [isClassifying, setIsClassifying] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -260,6 +263,12 @@ const Finance: React.FC = () => {
 
   const handleJournalEntry = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Frontend-first OS: persist locally so utilisation reflects the entry
+    // immediately, then best-effort sync to the backend (which may not be up
+    // in dev). The id is the persisted backend id when we get one back, else
+    // a deterministic local id — both flow through the same store action so
+    // the entry is never lost.
+    let backendId: string | null = null;
     try {
       const res = await apiFetch('/finance/journal-entry', {
         method: 'POST',
@@ -271,13 +280,30 @@ const Finance: React.FC = () => {
           fund: entry.fund,
         }),
       });
-      if (!res.ok) throw new Error('journal');
-      toast.success(`Journal entry recorded: ₹${Number(entry.amount).toLocaleString()} (${entry.type}) in ${entry.fund} fund.`);
-      setShowEntryModal(false);
-      setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General' });
-    } catch {
-      toast.error('Failed to record journal entry (backend not reachable).');
-    }
+      if (res.ok) {
+        try {
+          const data = await res.json();
+          if (data?.id) backendId = String(data.id);
+        } catch { /* response without body — fine */ }
+      }
+    } catch { /* offline/no backend — local persist still happens */ }
+
+    const id = backendId ?? `JE-${Date.now()}`;
+    const tag = entry.grantId && entry.budgetHeadId
+      ? { grantId: entry.grantId, budgetHeadId: entry.budgetHeadId }
+      : undefined;
+    upsertJournalEntry({
+      id,
+      date: new Date().toISOString().slice(0, 10),
+      amount: Number(entry.amount) || 0,
+      description: entry.description,
+      fund: entry.fund,
+      entryType: entry.type,
+      grantTag: tag,
+    });
+    toast.success(`Journal entry recorded: ₹${Number(entry.amount).toLocaleString()} (${entry.type})${tag ? ' · tagged' : ''}.`);
+    setShowEntryModal(false);
+    setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '' });
   };
 
   const handleTallySync = async () => {
@@ -346,8 +372,10 @@ const Finance: React.FC = () => {
     toast.success('Grant utilization report exported!');
   };
 
-  // ── Session 4: per-grant + per-budget-head expense tagging ──────────────
-  // Index helpers for the tagging UI + CSV export.
+  // ── Session 4: per-grant + per-budget-head EXPENSE tagging ──────────────
+  // The source of truth for utilisation is `journalEntries` — booked
+  // outflows (entryType === 'Expense'). Donor receipts in `transactions`
+  // are NOT counted toward grant utilisation.
   const cardLabel = (cid: string | number) => {
     const c = csrCards.find(x => String(x.id) === String(cid));
     return c ? `${c.company} — ${c.project}` : `Grant ${cid}`;
@@ -355,71 +383,54 @@ const Finance: React.FC = () => {
   const headLabel = (hid: string) =>
     grantBudgetHeads.find(h => h.id === hid)?.label ?? hid;
 
-  // Combine the two streams (server stream + store-resident demo tx) into one
-  // de-duped list of `{ id, amount, label, date }` for tagging.
-  const taggableTx = useMemo(() => {
-    const map = new Map<string, { id: string; amount: number; label: string; date: string }>();
-    for (const t of storeTransactions) {
-      map.set(String(t.id), {
-        id: String(t.id),
-        amount: Math.abs(Number(t.amount) || 0),
-        label: `${t.donorName || 'Donor'} → ${t.campaignTitle || 'Campaign'}`,
-        date: t.date || '',
-      });
-    }
-    for (const t of classifiedStream) {
-      const id = String(t.id ?? '');
-      if (!id || map.has(id)) continue;
-      map.set(id, {
-        id,
-        amount: Math.abs(Number(t.amount) || 0),
-        label: `${t.donorName || 'Donor'} → ${t.campaignTitle || t.agent_category || 'Tx'}`,
-        date: t.date || '',
-      });
-    }
-    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
-  }, [storeTransactions, classifiedStream]);
-
-  // ≥ ₹1k untagged — these are what the audit calls out as "no idea which
-  // grant they belong to". Surface them prominently for clean-up.
-  const untaggedSignificant = useMemo(
-    () => taggableTx.filter(t => t.amount >= 1000 && !transactionGrantTags[t.id]),
-    [taggableTx, transactionGrantTags],
+  // Only Expense-type entries are taggable to a grant budget head.
+  const expensesOnly = useMemo(
+    () => journalEntries
+      .filter(e => e.entryType === 'Expense')
+      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
+    [journalEntries],
   );
-  const untaggedTotal = untaggedSignificant.reduce((s, t) => s + t.amount, 0);
+
+  // ≥ ₹1k untagged expenses — what the audit calls "no idea which grant
+  // they belong to". Surface them so the user can clean them up.
+  const untaggedSignificant = useMemo(
+    () => expensesOnly.filter(e => Math.abs(e.amount) >= 1000 && !e.grantTag),
+    [expensesOnly],
+  );
+  const untaggedTotal = untaggedSignificant.reduce((s, e) => s + Math.abs(e.amount), 0);
 
   // Per-row inline picker state.
   const [tagDraft, setTagDraft] = useState<Record<string, { grantId: string; budgetHeadId: string }>>({});
   const [showTagSection, setShowTagSection] = useState(true);
 
-  const handleTagSave = (txId: string) => {
-    const draft = tagDraft[txId];
+  const handleTagSave = (entryId: string) => {
+    const draft = tagDraft[entryId];
     if (!draft || !draft.grantId || !draft.budgetHeadId) {
       toast.error('Pick a grant and a budget head first.');
       return;
     }
-    setTxGrantTag(txId, draft);
+    setJournalEntryGrantTag(entryId, draft);
     setTagDraft(prev => {
       const n = { ...prev };
-      delete n[txId];
+      delete n[entryId];
       return n;
     });
     toast.success('Expense tagged.');
   };
 
   const handleExportByGrant = () => {
-    const rows = ['Tx ID,Date,Amount,Description,Grant,Budget Head'];
-    for (const t of taggableTx) {
-      const tag = transactionGrantTags[t.id];
-      if (!tag) continue;
+    const rows = ['Entry ID,Date,Amount,Description,Fund,Grant,Budget Head'];
+    for (const e of expensesOnly) {
+      if (!e.grantTag) continue;
       const safe = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
       rows.push([
-        t.id,
-        t.date,
-        t.amount,
-        safe(t.label),
-        safe(cardLabel(tag.grantId)),
-        safe(headLabel(tag.budgetHeadId)),
+        e.id,
+        e.date,
+        Math.abs(e.amount),
+        safe(e.description),
+        safe(e.fund ?? ''),
+        safe(cardLabel(e.grantTag.grantId)),
+        safe(headLabel(e.grantTag.budgetHeadId)),
       ].join(','));
     }
     if (rows.length === 1) {
@@ -1148,25 +1159,26 @@ const Finance: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {(untaggedSignificant.length > 0 ? untaggedSignificant : taggableTx.slice(0, 25)).map(t => {
-                      const existing = transactionGrantTags[t.id];
-                      const draft    = tagDraft[t.id] ?? { grantId: existing?.grantId ?? '', budgetHeadId: existing?.budgetHeadId ?? '' };
+                    {(untaggedSignificant.length > 0 ? untaggedSignificant : expensesOnly.slice(0, 25)).map(e => {
+                      const existing = e.grantTag;
+                      const draft    = tagDraft[e.id] ?? { grantId: existing?.grantId ?? '', budgetHeadId: existing?.budgetHeadId ?? '' };
                       const headsForGrant = grantBudgetHeads.filter(h => String(h.grantId) === String(draft.grantId));
+                      const desc = `${e.description}${e.fund ? ` · ${e.fund}` : ''}`;
                       return (
-                        <tr key={t.id} style={{ borderTop: '1px solid var(--color-border-light)' }}>
-                          <td style={{ padding: '0.4rem 0.6rem', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.label}>
-                            {t.label}
+                        <tr key={e.id} style={{ borderTop: '1px solid var(--color-border-light)' }}>
+                          <td style={{ padding: '0.4rem 0.6rem', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={desc}>
+                            {desc}
                             {existing && <span style={{ marginLeft: 6, color: '#16A34A', fontSize: '0.7rem' }}>· tagged</span>}
                           </td>
                           <td style={{ padding: '0.4rem 0.6rem', textAlign: 'right', fontWeight: 600 }}>
-                            ₹{Math.round(t.amount).toLocaleString('en-IN')}
+                            ₹{Math.round(Math.abs(e.amount)).toLocaleString('en-IN')}
                           </td>
                           <td style={{ padding: '0.4rem 0.6rem' }}>
                             <select
                               className="input-field"
                               style={{ padding: '0.25rem 0.4rem', fontSize: '0.78rem' }}
                               value={draft.grantId}
-                              onChange={e => setTagDraft(prev => ({ ...prev, [t.id]: { grantId: e.target.value, budgetHeadId: '' } }))}
+                              onChange={ev => setTagDraft(prev => ({ ...prev, [e.id]: { grantId: ev.target.value, budgetHeadId: '' } }))}
                             >
                               <option value="">Select grant…</option>
                               {csrCards.map(c => (
@@ -1180,7 +1192,7 @@ const Finance: React.FC = () => {
                               style={{ padding: '0.25rem 0.4rem', fontSize: '0.78rem' }}
                               disabled={!draft.grantId}
                               value={draft.budgetHeadId}
-                              onChange={e => setTagDraft(prev => ({ ...prev, [t.id]: { ...(prev[t.id] ?? draft), budgetHeadId: e.target.value } }))}
+                              onChange={ev => setTagDraft(prev => ({ ...prev, [e.id]: { ...(prev[e.id] ?? draft), budgetHeadId: ev.target.value } }))}
                             >
                               <option value="">{headsForGrant.length === 0 ? 'No heads on this grant' : 'Select head…'}</option>
                               {headsForGrant.map(h => (
@@ -1193,12 +1205,12 @@ const Finance: React.FC = () => {
                               type="button"
                               className="btn btn-primary"
                               style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
-                              onClick={() => handleTagSave(t.id)}
+                              onClick={() => handleTagSave(e.id)}
                             >Save</button>
                             {existing && (
                               <button
                                 type="button"
-                                onClick={() => { setTxGrantTag(t.id, undefined); toast.success('Tag cleared.'); }}
+                                onClick={() => { setJournalEntryGrantTag(e.id, null); toast.success('Tag cleared.'); }}
                                 title="Clear tag"
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', marginLeft: 4, color: 'var(--color-text-tertiary)' }}
                               >
@@ -1271,7 +1283,7 @@ const Finance: React.FC = () => {
                 </div>
                 <div className="input-group" style={{ marginBottom: 0 }}>
                   <label className="input-label">Type</label>
-                  <select className="input-field" value={entry.type} onChange={e => setEntry({ ...entry, type: e.target.value })}>
+                  <select className="input-field" value={entry.type} onChange={e => setEntry({ ...entry, type: e.target.value as 'Expense'|'Income'|'Transfer', grantId: e.target.value === 'Expense' ? entry.grantId : '', budgetHeadId: e.target.value === 'Expense' ? entry.budgetHeadId : '' })}>
                     <option>Expense</option>
                     <option>Income</option>
                     <option>Transfer</option>
@@ -1287,6 +1299,42 @@ const Finance: React.FC = () => {
                   <option>Restricted Grant</option>
                 </select>
               </div>
+              {entry.type === 'Expense' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Tag to grant (optional)</label>
+                    <select
+                      className="input-field"
+                      value={entry.grantId}
+                      onChange={e => setEntry({ ...entry, grantId: e.target.value, budgetHeadId: '' })}
+                    >
+                      <option value="">— None —</option>
+                      {csrCards.map(c => (
+                        <option key={c.id} value={String(c.id)}>{c.company} — {c.project}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Budget head</label>
+                    <select
+                      className="input-field"
+                      disabled={!entry.grantId}
+                      value={entry.budgetHeadId}
+                      onChange={e => setEntry({ ...entry, budgetHeadId: e.target.value })}
+                    >
+                      {(() => {
+                        const heads = grantBudgetHeads.filter(h => String(h.grantId) === String(entry.grantId));
+                        return (
+                          <>
+                            <option value="">{!entry.grantId ? 'Pick grant first' : heads.length === 0 ? 'No heads on this grant' : '— Select head —'}</option>
+                            {heads.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
+                          </>
+                        );
+                      })()}
+                    </select>
+                  </div>
+                </div>
+              )}
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Record Entry</button>
             </form>
           </div>

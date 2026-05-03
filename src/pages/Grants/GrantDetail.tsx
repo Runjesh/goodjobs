@@ -180,9 +180,8 @@ const GrantDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { csrCards, updateCSRCard } = useStore();
-  const grantBudgetHeads    = useStore(s => s.grantBudgetHeads);
-  const transactions        = useStore(s => s.transactions);
-  const transactionGrantTags = useStore(s => s.transactionGrantTags);
+  const grantBudgetHeads = useStore(s => s.grantBudgetHeads);
+  const journalEntries   = useStore(s => s.journalEntries);
 
   const card = useMemo(() => csrCards.find(c => String(c.id) === String(id)), [csrCards, id]);
 
@@ -591,8 +590,7 @@ const GrantDetail: React.FC = () => {
             const live = selectGrantUtilisation(
               String(card.id),
               grantBudgetHeads,
-              transactions,
-              transactionGrantTags,
+              journalEntries,
             );
             const useLive = live.rows.length > 0;
             const totalAlloc = useLive ? live.totalAllocated : state.budget.reduce((s, b) => s + b.allocated, 0);

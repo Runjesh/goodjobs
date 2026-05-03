@@ -3,7 +3,7 @@ import {
   selectGrantUtilisation,
   budgetSanity,
   type GrantBudgetHead,
-  type GrantTag,
+  type JournalExpense,
 } from '../grantBudgetHeads';
 
 const heads: GrantBudgetHead[] = [
@@ -13,22 +13,28 @@ const heads: GrantBudgetHead[] = [
   { id: 'hX', grantId: '2', label: 'Other grant head',    allocatedAmount: 999_999, sortOrder: 1 },
 ];
 
+const exp = (
+  id: string,
+  amount: number,
+  tag?: { grantId: string; budgetHeadId: string },
+  entryType: JournalExpense['entryType'] = 'Expense',
+): JournalExpense => ({
+  id, amount, entryType, date: '2026-01-01', description: id,
+  grantTag: tag,
+});
+
 describe('selectGrantUtilisation', () => {
-  it('sums tagged transactions per head, ignores untagged + other-grant tx', () => {
-    const tx = [
-      { id: 't1', amount: 100_000 }, // tagged → h1
-      { id: 't2', amount: 50_000 },  // tagged → h2
-      { id: 't3', amount: 75_000 },  // untagged → ignored
-      { id: 't4', amount: 80_000 },  // tagged → other grant '2', ignored for grant '3'
-      { id: 't5', amount: 25_000 },  // tagged → grant '3' but removed head 'h-gone' → orphan
+  it('sums tagged expenses per head, ignores untagged + other-grant + non-expense', () => {
+    const expenses: JournalExpense[] = [
+      exp('e1', 100_000, { grantId: '3', budgetHeadId: 'h1' }),
+      exp('e2',  50_000, { grantId: '3', budgetHeadId: 'h2' }),
+      exp('e3',  75_000), // untagged → ignored
+      exp('e4',  80_000, { grantId: '2', budgetHeadId: 'hX' }), // other grant
+      exp('e5',  25_000, { grantId: '3', budgetHeadId: 'h-gone' }), // orphan
+      exp('e6', 999_999, { grantId: '3', budgetHeadId: 'h1' }, 'Income'),    // not an expense
+      exp('e7', 999_999, { grantId: '3', budgetHeadId: 'h1' }, 'Transfer'),  // not an expense
     ];
-    const tags: Record<string, GrantTag> = {
-      t1: { grantId: '3', budgetHeadId: 'h1' },
-      t2: { grantId: '3', budgetHeadId: 'h2' },
-      t4: { grantId: '2', budgetHeadId: 'hX' },
-      t5: { grantId: '3', budgetHeadId: 'h-gone' },
-    };
-    const u = selectGrantUtilisation('3', heads, tx, tags);
+    const u = selectGrantUtilisation('3', heads, expenses);
     const byId = Object.fromEntries(u.rows.map(r => [r.headId, r]));
     expect(byId.h1.spent).toBe(100_000);
     expect(byId.h1.remaining).toBe(500_000);
@@ -37,33 +43,42 @@ describe('selectGrantUtilisation', () => {
     expect(byId.h3.spent).toBe(0);
     expect(u.orphanSpent).toBe(25_000);
     expect(u.totalAllocated).toBe(850_000);
-    expect(u.totalSpent).toBe(175_000); // 100k + 50k + 25k orphan
+    expect(u.totalSpent).toBe(175_000);
     expect(u.totalRemaining).toBe(675_000);
     expect(u.utilisationPct).toBe(21);
   });
 
-  it('returns zero rows + zero totals for a grant with no heads', () => {
-    const u = selectGrantUtilisation('999', heads, [], {});
+  it('returns zero rows for a grant with no heads', () => {
+    const u = selectGrantUtilisation('999', heads, []);
     expect(u.rows).toEqual([]);
     expect(u.totalAllocated).toBe(0);
     expect(u.utilisationPct).toBe(0);
     expect(u.orphanSpent).toBe(0);
   });
 
-  it('matches grantId regardless of string/number type', () => {
-    const tx = [{ id: 9, amount: 1000 }];
-    const tags: Record<string, GrantTag> = { '9': { grantId: '3', budgetHeadId: 'h1' } };
-    const u = selectGrantUtilisation('3', heads, tx, tags);
+  it('matches grantId regardless of string/number type via String() coercion', () => {
+    const expenses: JournalExpense[] = [
+      exp('e1', 1000, { grantId: '3', budgetHeadId: 'h1' }),
+    ];
+    const u = selectGrantUtilisation('3', heads, expenses);
     expect(u.totalSpent).toBe(1000);
   });
 
-  it('treats negative tx amounts as positive spend (refund accounting comes later)', () => {
+  it('treats negative amounts as positive spend (refund accounting comes later)', () => {
     const u = selectGrantUtilisation(
       '3', heads,
-      [{ id: 'tA', amount: -5_000 }],
-      { tA: { grantId: '3', budgetHeadId: 'h1' } },
+      [exp('eA', -5_000, { grantId: '3', budgetHeadId: 'h1' })],
     );
     expect(u.rows.find(r => r.headId === 'h1')!.spent).toBe(5_000);
+  });
+
+  it('ignores Income entries even when tagged to a grant head', () => {
+    const expenses: JournalExpense[] = [
+      exp('inc', 9_999_999, { grantId: '3', budgetHeadId: 'h1' }, 'Income'),
+    ];
+    const u = selectGrantUtilisation('3', heads, expenses);
+    expect(u.totalSpent).toBe(0);
+    expect(u.rows.find(r => r.headId === 'h1')!.spent).toBe(0);
   });
 });
 

@@ -2,12 +2,14 @@
  * Grant budget heads (Session 4 / Audit P0 #3).
  *
  * Each grant has a list of budget heads (Programme delivery, M&E, Admin, etc.)
- * with an allocated amount. Finance transactions can be tagged to a
- * `(grantId, budgetHeadId)` pair so utilisation per head is real, not mocked.
+ * with an allocated amount. Finance JOURNAL EXPENSES (booked outflows, not
+ * donor receipts) can be tagged to a `(grantId, budgetHeadId)` pair so
+ * utilisation per head is real, not mocked.
  *
- * The selector here turns three inputs (the grant's heads, every transaction,
- * and a `txId → tag` map) into a row-per-head utilisation breakdown the
- * GrantDetail screen renders directly.
+ * The selector here turns three inputs (the grant's heads, every booked
+ * journal expense, and an optional override `expenseId → tag` map for
+ * pre-tag-on-entity backwards compatibility) into a row-per-head
+ * utilisation breakdown the GrantDetail screen renders directly.
  */
 
 export interface GrantBudgetHead {
@@ -23,6 +25,22 @@ export interface GrantBudgetHead {
 export interface GrantTag {
   grantId: string;
   budgetHeadId: string;
+}
+
+/**
+ * A booked finance expense — the source-of-truth for utilisation math.
+ * Receipts/incoming donor transactions are NOT included here.
+ */
+export interface JournalExpense {
+  id: string;
+  date: string;
+  amount: number;
+  description: string;
+  fund?: string;
+  /** Only `Expense` rows count toward utilisation; other types are ignored. */
+  entryType: 'Expense' | 'Income' | 'Transfer';
+  /** Where this expense lands in a grant's budget. */
+  grantTag?: GrantTag;
 }
 
 export interface BudgetHeadUtilisation {
@@ -46,23 +64,19 @@ export interface GrantUtilisation {
   orphanSpent: number;
 }
 
-interface TxLite {
-  id: string | number;
-  amount: number;
-}
-
 /**
- * Sums tagged transactions per budget head and returns a render-ready breakdown.
- *  - Untagged transactions are ignored.
- *  - Transactions tagged to other grants are ignored.
- *  - Transactions tagged to a removed head are bucketed into `orphanSpent` so
+ * Sums tagged JOURNAL EXPENSES per budget head. Only `entryType === 'Expense'`
+ * rows count — incomes/transfers are ignored even if tagged.
+ *
+ *  - Untagged expenses are ignored.
+ *  - Expenses tagged to other grants are ignored.
+ *  - Expenses tagged to a removed head are bucketed into `orphanSpent` so
  *    the number doesn't silently disappear from the grant total.
  */
 export function selectGrantUtilisation(
   grantId: string,
   heads: GrantBudgetHead[],
-  transactions: TxLite[],
-  tagsById: Record<string, GrantTag>,
+  expenses: JournalExpense[],
 ): GrantUtilisation {
   const myHeads = heads
     .filter(h => String(h.grantId) === String(grantId))
@@ -71,11 +85,12 @@ export function selectGrantUtilisation(
   const spentByHead = new Map<string, number>();
   let orphanSpent = 0;
 
-  for (const t of transactions) {
-    const tag = tagsById[String(t.id)];
+  for (const e of expenses) {
+    if (e.entryType !== 'Expense') continue;
+    const tag = e.grantTag;
     if (!tag) continue;
     if (String(tag.grantId) !== String(grantId)) continue;
-    const amt = Math.abs(Number(t.amount) || 0);
+    const amt = Math.abs(Number(e.amount) || 0);
     if (headIds.has(tag.budgetHeadId)) {
       spentByHead.set(tag.budgetHeadId, (spentByHead.get(tag.budgetHeadId) || 0) + amt);
     } else {

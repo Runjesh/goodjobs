@@ -26,11 +26,10 @@ const fmtINR = (v: number) => {
 
 const GrantBudgetHeadsPanel: React.FC<Props> = ({ grantId, grantTotal }) => {
   const navigate = useNavigate();
-  const heads        = useStore(s => s.grantBudgetHeads);
-  const transactions = useStore(s => s.transactions);
-  const tagsById     = useStore(s => s.transactionGrantTags);
-  const upsert       = useStore(s => s.upsertGrantBudgetHead);
-  const removeHead   = useStore(s => s.removeGrantBudgetHead);
+  const heads          = useStore(s => s.grantBudgetHeads);
+  const journalEntries = useStore(s => s.journalEntries);
+  const upsert         = useStore(s => s.upsertGrantBudgetHead);
+  const removeHead     = useStore(s => s.removeGrantBudgetHead);
 
   const myHeads = useMemo(
     () => heads.filter(h => String(h.grantId) === String(grantId))
@@ -39,8 +38,8 @@ const GrantBudgetHeadsPanel: React.FC<Props> = ({ grantId, grantTotal }) => {
   );
 
   const utilisation = useMemo(
-    () => selectGrantUtilisation(grantId, heads, transactions, tagsById),
-    [grantId, heads, transactions, tagsById],
+    () => selectGrantUtilisation(grantId, heads, journalEntries),
+    [grantId, heads, journalEntries],
   );
 
   const sanity = useMemo(() => budgetSanity(grantTotal, myHeads), [grantTotal, myHeads]);

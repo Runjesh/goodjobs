@@ -5,7 +5,8 @@ import type { GrantTranche } from '../utils/grantLifecycle';
 import type { VolunteerAssignment } from '../utils/volunteerProgram';
 import type { ComplianceGrantLink } from '../utils/complianceGrant';
 import type { ProgramGrantLink } from '../utils/programGrantLink';
-import type { GrantBudgetHead, GrantTag } from '../utils/grantBudgetHeads';
+import type { GrantBudgetHead, GrantTag, JournalExpense } from '../utils/grantBudgetHeads';
+export type { JournalExpense } from '../utils/grantBudgetHeads';
 import { programIdFromName } from '../utils/programFinance';
 
 /**
@@ -79,10 +80,6 @@ export interface Transaction {
   campaignTitle: string;
   date: string;
   timestamp: number;
-  /** Optional grant + budget-head tag (Session 4). Source-of-truth lives in
-   *  the `transactionGrantTags` map below; this field is here for type-completeness
-   *  when a caller materialises a Transaction with its tag inline. */
-  grantTag?: GrantTag;
 }
 
 export interface CSRCard {
@@ -165,11 +162,12 @@ interface AppState {
   programGrantLinks:     ProgramGrantLink[];
 
   // ── Cross-module connective state (Session 4) ──────────────────────────
-  // grantBudgetHeads     : per-grant editable budget heads
-  // transactionGrantTags : tx-id → { grantId, budgetHeadId } map (source of truth
-  //                        for tagging both store-resident and server-fetched tx)
+  // grantBudgetHeads : per-grant editable budget heads
+  // journalEntries   : booked finance journal entries (expenses/income/transfers).
+  //                    Source-of-truth for grant utilisation math; receipt
+  //                    transactions (donor inflows) are NOT counted here.
   grantBudgetHeads:      GrantBudgetHead[];
-  transactionGrantTags:  Record<string, GrantTag>;
+  journalEntries:        JournalExpense[];
 
   // Custom programme names defined by the org (in addition to those
   // derived from existing beneficiaries). Persisted to localStorage so
@@ -196,7 +194,10 @@ interface AppState {
   removeProgramGrantLink:    (id: string) => void;
   upsertGrantBudgetHead:     (h: GrantBudgetHead) => void;
   removeGrantBudgetHead:     (id: string) => void;
-  setTransactionGrantTag:    (txId: string, tag: GrantTag | null) => void;
+  /** Append/replace a booked journal entry. Caller assigns id. */
+  upsertJournalEntry:        (e: JournalExpense) => void;
+  /** Tag (or untag with `null`) a journal expense to a grant + budget head. */
+  setJournalEntryGrantTag:   (id: string, tag: GrantTag | null) => void;
 
   setDonors: (donors: Donor[]) => void;
   setComplianceDocs: (docs: ComplianceDocument[]) => void;
@@ -299,7 +300,7 @@ const LS_COMP_LINKS = 'goodjobs.complianceGrantLinks.v1';
 const LS_PROG_GRANT_LINKS = 'goodjobs.programGrantLinks.v1';
 const LS_CUSTOM_PROGRAMS = 'goodjobs.customPrograms.v1';
 const LS_BUDGET_HEADS    = 'goodjobs.grantBudgetHeads.v1';
-const LS_TX_GRANT_TAGS   = 'goodjobs.transactionGrantTags.v1';
+const LS_JOURNAL_ENTRIES = 'goodjobs.journalEntries.v1';
 
 function loadLS<T>(key: string, fallback: T): T {
   try {
@@ -395,14 +396,18 @@ const seedGrantBudgetHeads: GrantBudgetHead[] = SEED_DEMO_CONNECTIONS ? [
   { id: 'gbh-2-admin', grantId: '2', label: 'Admin (cap 10%)',         allocatedAmount:   250_000, sortOrder: 4 },
 ] : [];
 
-// A handful of seeded tags so the utilisation panel shows non-zero spend
-// even before the user tags anything. Keys are seed transaction ids.
-const seedTransactionGrantTags: Record<string, GrantTag> = SEED_DEMO_CONNECTIONS ? {
-  'TRX-1089': { grantId: '3', budgetHeadId: 'gbh-3-prog'  }, // ₹50k Infosys → HDFC programme
-  'TRX-1091': { grantId: '2', budgetHeadId: 'gbh-2-prog'  }, // ₹15k Priya → TCS programme
-  'TRX-1090': { grantId: '2', budgetHeadId: 'gbh-2-cap'   }, // ₹2.5k → TCS devices
-  'TRX-1092': { grantId: '3', budgetHeadId: 'gbh-3-me'    }, // ₹5k → HDFC M&E
-} : {};
+// A handful of seeded JOURNAL EXPENSES so utilisation shows non-zero spend
+// before the user posts anything. These are real outflows (salaries,
+// devices, etc.) — donor receipts are NOT counted toward grant utilisation.
+const seedJournalEntries: JournalExpense[] = SEED_DEMO_CONNECTIONS ? [
+  { id: 'JE-3001', date: '2026-04-02', amount: 320_000, description: 'Field staff salaries (Mar)',     fund: 'Restricted', entryType: 'Expense', grantTag: { grantId: '3', budgetHeadId: 'gbh-3-prog' } },
+  { id: 'JE-3002', date: '2026-04-05', amount:  45_000, description: 'M&E baseline survey enumerators', fund: 'Restricted', entryType: 'Expense', grantTag: { grantId: '3', budgetHeadId: 'gbh-3-me'   } },
+  { id: 'JE-2001', date: '2026-04-10', amount: 180_000, description: 'Trainer honoraria — Digital Lit', fund: 'Restricted', entryType: 'Expense', grantTag: { grantId: '2', budgetHeadId: 'gbh-2-prog' } },
+  { id: 'JE-2002', date: '2026-04-12', amount:  62_500, description: 'Tablet purchase (25 units)',      fund: 'Restricted', entryType: 'Expense', grantTag: { grantId: '2', budgetHeadId: 'gbh-2-cap'  } },
+  // Untagged ≥ ₹1k expenses so the Finance tagging warning has work to surface.
+  { id: 'JE-9001', date: '2026-04-14', amount:  18_000, description: 'Office internet recharge',        fund: 'General',    entryType: 'Expense' },
+  { id: 'JE-9002', date: '2026-04-15', amount:  12_500, description: 'Consultant — UC drafting',         fund: 'General',    entryType: 'Expense' },
+] : [];
 
 const seedTranches: GrantTranche[] = SEED_DEMO_CONNECTIONS ? [
   { id: 'tr-3-1', grantId: '3', number: 1, amount: 4_000_000, expectedDate: new Date(Date.now() - 60*86_400_000).toISOString().slice(0,10), status: 'released', releasedAt: new Date(Date.now() - 60*86_400_000).toISOString() },
@@ -430,7 +435,7 @@ export const useStore = create<AppState>((set) => ({
   programGrantLinks:    loadLS<ProgramGrantLink[]>(LS_PROG_GRANT_LINKS, seedProgramGrantLinks),
   customPrograms:       loadLS<string[]>(LS_CUSTOM_PROGRAMS, []),
   grantBudgetHeads:     loadLS<GrantBudgetHead[]>(LS_BUDGET_HEADS, seedGrantBudgetHeads),
-  transactionGrantTags: loadLS<Record<string, GrantTag>>(LS_TX_GRANT_TAGS, seedTransactionGrantTags),
+  journalEntries:       loadLS<JournalExpense[]>(LS_JOURNAL_ENTRIES, seedJournalEntries),
 
   addCustomProgram: (name) => set((state) => {
     const trimmed = name.trim();
@@ -553,15 +558,19 @@ export const useStore = create<AppState>((set) => ({
     // visible until the user re-tags the affected transactions.
     return { grantBudgetHeads: next };
   }),
-  setTransactionGrantTag: (txId, tag) => set((state) => {
-    const next = { ...state.transactionGrantTags };
-    if (tag) {
-      next[txId] = tag;
-    } else {
-      delete next[txId];
-    }
-    saveLS(LS_TX_GRANT_TAGS, next);
-    return { transactionGrantTags: next };
+  upsertJournalEntry: (e) => set((state) => {
+    const next = state.journalEntries.some(x => x.id === e.id)
+      ? state.journalEntries.map(x => x.id === e.id ? { ...x, ...e } : x)
+      : [e, ...state.journalEntries];
+    saveLS(LS_JOURNAL_ENTRIES, next);
+    return { journalEntries: next };
+  }),
+  setJournalEntryGrantTag: (id, tag) => set((state) => {
+    const next = state.journalEntries.map(e =>
+      e.id === id ? { ...e, grantTag: tag ?? undefined } : e
+    );
+    saveLS(LS_JOURNAL_ENTRIES, next);
+    return { journalEntries: next };
   }),
 
   setDonors: (donors) => set(() => ({ donors })),
