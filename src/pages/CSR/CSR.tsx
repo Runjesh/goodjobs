@@ -326,11 +326,16 @@ const CSR: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docRoom?.cardId]);
 
-  // Pre-seed the prospect DB search with the org's cause area when no
-  // explicit query has been entered and the modal is first opened.
+  // Grant AI matching: when the Prospect DB modal opens with no explicit query,
+  // pre-seed the search with the org's cause area and auto-run it so funders
+  // aligned to that cause appear immediately — no user action required.
   useEffect(() => {
-    if (showProspectDb && !dbQuery && ngoDetails.causeArea) {
+    if (!showProspectDb) return;
+    if (!dbQuery && ngoDetails.causeArea) {
       setDbQuery(ngoDetails.causeArea);
+      // Auto-run the search so funders appear without the user clicking "Search".
+      // setTimeout ensures dbQuery state has settled before the fetch runs.
+      setTimeout(() => searchProspectDb(), 0);
     }
     // Only run when the modal opens — not on every dbQuery change.
     // eslint-disable-next-line react-hooks/exhaustive-deps

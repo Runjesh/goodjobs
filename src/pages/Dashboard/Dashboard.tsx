@@ -715,7 +715,7 @@ const Dashboard: React.FC = () => {
   const [woken,        setWoken]        = useState<Set<string>>(new Set());
   const [showAllUrgent,setShowAllUrgent]= useState(false);
 
-  const role         = user?.role ?? 'ed';
+  const { currentRole: role } = useAuth();
   const preset       = user?.dashboardPreset ?? defaultPresetForRole(role);
   const layoutRole   = preset;
   const greeting     = getGreeting();

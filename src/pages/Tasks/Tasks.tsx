@@ -62,8 +62,8 @@ const Tasks: React.FC = () => {
   const [focusIdx, setFocusIdx] = useState(0);
   const focusRowRef = useRef<HTMLDivElement | null>(null);
   const pendingDeepLinkScrollRef = useRef(false);
-  const role = user?.role as string | undefined;
-  const canRunIntents = role === 'ed' || role === 'admin';
+  const { currentRole } = useAuth();
+  const canRunIntents = currentRole === 'ed';
   const reducedMotion = useReducedMotion();
 
   const sliceTasks         = useStore(s => s.tasks);

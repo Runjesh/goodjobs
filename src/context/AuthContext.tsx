@@ -179,6 +179,11 @@ interface AuthContextValue {
   /** Session-only demo role override — does not persist to localStorage. */
   demoRole: UserRole | null;
   setDemoRole: (role: UserRole | null) => void;
+  /**
+   * The effective role for the current session. Use this everywhere instead of
+   * `user.role` directly so demo role-switch overrides apply across the whole app.
+   */
+  currentRole: UserRole;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -262,8 +267,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return perm ? perm[action] : false;
   }, [user, demoRole]);
 
+  const currentRole: UserRole = user ? (demoRole ?? user.role) : 'ed';
+
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, can, updateUser, demoRole, setDemoRole }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, can, updateUser, demoRole, setDemoRole, currentRole }}>
       {children}
     </AuthContext.Provider>
   );
