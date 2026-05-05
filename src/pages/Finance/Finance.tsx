@@ -1,12 +1,88 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe, Tag } from 'lucide-react';
+import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe, Tag, PackageOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './Finance.css';
 import { apiFetch } from '../../api/client';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
 import { resolvePersistedJournalEntryId } from '../../utils/journalEntryId';
+
+// ── Persistent receipt sequence (Feature 2) ──────────────────────────────────
+// Counter stored in localStorage so it never resets on refresh.
+// Returns the next formatted receipt number and advances the counter.
+const RECEIPT_SEQ_KEY = 'goodjobs.receipt_seq.v1';
+function nextReceiptNumber(ngoName: string): string {
+  let seq = 1;
+  try {
+    const raw = localStorage.getItem(RECEIPT_SEQ_KEY);
+    seq = raw ? (parseInt(raw, 10) + 1) : 1;
+    localStorage.setItem(RECEIPT_SEQ_KEY, String(seq));
+  } catch { /* ignore */ }
+  const fy = (() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    return m >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
+  })();
+  const prefix = ngoName.replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase() || 'NGO';
+  return `${prefix}/80G/${fy}/${String(seq).padStart(5, '0')}`;
+}
+
+// ── 80G receipt HTML generator ────────────────────────────────────────────────
+function generate80GReceiptHtml(opts: {
+  receiptNo: string;
+  donorName: string;
+  donorPan: string;
+  amount: number;
+  date: string;
+  description: string;
+  ngoName: string;
+  ngoPan: string;
+  eighty_g_no: string;
+}): string {
+  const amountWords = (n: number) => {
+    if (n === 0) return 'Zero';
+    const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+    const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+    const convert = (num: number): string => {
+      if (num < 20) return ones[num];
+      if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? ' ' + ones[num % 10] : '');
+      if (num < 1000) return ones[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' ' + convert(num % 100) : '');
+      if (num < 100000) return convert(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + convert(num % 1000) : '');
+      return convert(Math.floor(num / 100000)) + ' Lakh' + (num % 100000 ? ' ' + convert(num % 100000) : '');
+    };
+    return convert(Math.round(n)) + ' Only';
+  };
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>80G Receipt ${opts.receiptNo}</title>
+<style>body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;padding:20px;border:2px solid #333}
+h2{text-align:center;margin:0 0 4px}p{margin:4px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+.row{display:flex;gap:8px}.label{font-weight:600;min-width:160px}
+.footer{margin-top:32px;font-size:0.85em;color:#555;border-top:1px solid #999;padding-top:8px}
+</style></head><body>
+<h2>${opts.ngoName}</h2>
+<p style="text-align:center">80G Donation Receipt under Section 80G of the Income Tax Act, 1961</p>
+<p style="text-align:center">80G Certificate No: <strong>${opts.eighty_g_no || 'N/A'}</strong> &nbsp;|&nbsp; PAN: <strong>${opts.ngoPan || 'N/A'}</strong></p>
+<hr/>
+<div class="grid">
+  <div><div class="row"><span class="label">Receipt No:</span><span>${opts.receiptNo}</span></div></div>
+  <div><div class="row"><span class="label">Date:</span><span>${opts.date}</span></div></div>
+  <div><div class="row"><span class="label">Donor Name:</span><span>${opts.donorName}</span></div></div>
+  <div><div class="row"><span class="label">Donor PAN:</span><span>${opts.donorPan || 'N/A'}</span></div></div>
+  <div><div class="row"><span class="label">Amount (₹):</span><span><strong>₹${Number(opts.amount).toLocaleString('en-IN')}</strong></span></div></div>
+  <div><div class="row"><span class="label">Amount in words:</span><span>${amountWords(opts.amount)}</span></div></div>
+</div>
+<p><span class="label">Purpose:</span> ${opts.description || 'Donation'}</p>
+<p>This receipt is issued for the donation received and qualifies for deduction under Section 80G of the Income Tax Act, 1961.</p>
+<div class="footer">
+  <p>For ${opts.ngoName}</p>
+  <p style="margin-top:40px">Authorised Signatory</p>
+  <p><em>This is a computer-generated receipt. No signature required.</em></p>
+</div>
+</body></html>`;
+}
 
 const Finance: React.FC = () => {
   const grantBudgetHeads = useStore(s => s.grantBudgetHeads);
@@ -68,6 +144,21 @@ const Finance: React.FC = () => {
   const [exPending, setExPending] = useState<Record<string, string>>({});
   const [exBusy, setExBusy] = useState<Record<string, boolean>>({});
   const [exSentToBk, setExSentToBk] = useState<Record<string, boolean>>({});
+
+  // ── Feature 3: FCRA admin 18% pre-save guard ─────────────────────────────
+  // When an FCRA expense would breach 18%, we park the pending entry here and
+  // show a blocking confirm. The user can "Save anyway" or dismiss.
+  const [fcraGuardEntry, setFcraGuardEntry] = useState<null | {
+    projectedPct: number;
+    remainingHeadroom: number;
+    onConfirm: () => void;
+  }>(null);
+
+  // ── Feature 5: bulk receipt generation ───────────────────────────────────
+  const [bulkReceiptBusy, setBulkReceiptBusy] = useState(false);
+
+  // ── Feature 6: live programme spend (computed in useMemo) ─────────────────
+  const programBudgets = useStore(s => s.programBudgets);
 
   const FCRA_CATEGORIES = ['FCRA', 'Domestic', 'CSR', 'Grant', 'Donation', 'Other'];
 
@@ -270,33 +361,30 @@ const Finance: React.FC = () => {
   })();
   const isFcraWarning = fcraStatus.key === 'warning' || fcraStatus.key === 'critical';
 
-  const handleJournalEntry = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // Frontend-first OS: best-effort POST to the backend; if it returns a
-    // persisted id we tag against THAT id (no synthetic ids in LS). When
-    // the backend isn't available, we fall back to a clearly-local id
-    // (prefixed with `local-`) so the entry isn't lost and the rest of the
-    // app can tell drafts apart from server-resident entries.
+  // Core save logic — called directly OR after user confirms the FCRA guard.
+  const doSaveJournalEntry = async (entryToSave: typeof entry) => {
+    // Feature 2: Generate a persistent receipt number for income entries.
+    const receiptNo = entryToSave.type === 'Income'
+      ? nextReceiptNumber(ngoName)
+      : undefined;
+
     let payload: unknown = null;
     try {
       const res = await apiFetch('/finance/journal-entry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          description: entry.description,
-          amount: Number(entry.amount),
-          entry_type: entry.type,
-          fund: entry.fund,
-          // Forward the tag so the server can store it too — store will
-          // reflect whatever id the server hands back.
-          grant_id: entry.grantId || null,
-          budget_head_id: entry.budgetHeadId || null,
-          // Cross-module joins (Data Foundation).
-          donor_id: entry.donorId || null,
-          programme_id: entry.programmeId || null,
-          // Income receipt fields — used by backend for 80G receipt generation.
-          receipt_donor_name: entry.receiptDonorName || null,
-          receipt_donor_pan:  entry.receiptDonorPan  || null,
+          description: entryToSave.description,
+          amount: Number(entryToSave.amount),
+          entry_type: entryToSave.type,
+          fund: entryToSave.fund,
+          grant_id: entryToSave.grantId || null,
+          budget_head_id: entryToSave.budgetHeadId || null,
+          donor_id: entryToSave.donorId || null,
+          programme_id: entryToSave.programmeId || null,
+          receipt_donor_name: entryToSave.receiptDonorName || null,
+          receipt_donor_pan:  entryToSave.receiptDonorPan  || null,
+          receipt_number:     receiptNo || null,
         }),
       });
       if (res.ok) {
@@ -305,33 +393,156 @@ const Finance: React.FC = () => {
     } catch { /* offline/no backend */ }
 
     const { source, id } = resolvePersistedJournalEntryId(payload);
-    const tag = entry.grantId && entry.budgetHeadId
-      ? { grantId: entry.grantId, budgetHeadId: entry.budgetHeadId }
+    const tag = entryToSave.grantId && entryToSave.budgetHeadId
+      ? { grantId: entryToSave.grantId, budgetHeadId: entryToSave.budgetHeadId }
       : undefined;
     upsertJournalEntry({
       id,
       date: new Date().toISOString().slice(0, 10),
-      amount: Number(entry.amount) || 0,
-      description: entry.description,
-      fund: entry.fund,
-      entryType: entry.type,
+      amount: Number(entryToSave.amount) || 0,
+      description: entryToSave.description,
+      fund: entryToSave.fund,
+      entryType: entryToSave.type,
       grantTag: tag,
-      // Direct grantId join — persisted independently of grantTag so grant
-      // utilisation queries work even when no budget head is selected.
-      grantId:    entry.grantId    || undefined,
-      // Cross-module joins: link this entry to the CRM donor and the programme.
-      donorId:    entry.donorId    || undefined,
-      programmeId: entry.programmeId || undefined,
+      grantId:    entryToSave.grantId    || undefined,
+      donorId:    entryToSave.donorId    || undefined,
+      programmeId: entryToSave.programmeId || undefined,
     });
+
+    // Feature 2: If income, auto-download the receipt HTML.
+    if (entryToSave.type === 'Income' && receiptNo) {
+      const html = generate80GReceiptHtml({
+        receiptNo,
+        donorName:    entryToSave.receiptDonorName || entryToSave.donorId || 'Donor',
+        donorPan:     entryToSave.receiptDonorPan  || '',
+        amount:       Number(entryToSave.amount) || 0,
+        date:         new Date().toLocaleDateString('en-IN'),
+        description:  entryToSave.description,
+        ngoName:      ngoName,
+        ngoPan:       ngoDetails.pan || '',
+        eighty_g_no:  ngoDetails.eighty_g_no || '',
+      });
+      const blob = new Blob([html], { type: 'text/html' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `${receiptNo.replace(/\//g, '_')}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
     const tagSuffix = tag ? ' · tagged' : '';
+    const receiptSuffix = receiptNo ? ` · Receipt ${receiptNo}` : '';
     if (source === 'backend') {
-      toast.success(`Journal entry recorded: ₹${Number(entry.amount).toLocaleString()} (${entry.type})${tagSuffix}.`);
+      toast.success(`Journal entry recorded: ₹${Number(entryToSave.amount).toLocaleString()} (${entryToSave.type})${tagSuffix}${receiptSuffix}.`);
     } else {
-      toast.success(`Saved locally: ₹${Number(entry.amount).toLocaleString()} (${entry.type})${tagSuffix}. Will sync when the server is reachable.`);
+      toast.success(`Saved locally: ₹${Number(entryToSave.amount).toLocaleString()} (${entryToSave.type})${tagSuffix}${receiptSuffix}. Will sync when the server is reachable.`);
     }
     setShowEntryModal(false);
     setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '', receiptDonorName: '', receiptDonorPan: '' });
     setDonorSearch('');
+    setClassification(null);
+  };
+
+  const handleJournalEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Feature 3: FCRA admin 18% cap guard — block before save if an FCRA
+    // expense would push total admin spend above 18% of FCRA foreign funds.
+    if (entry.type === 'Expense' && entry.fund === 'FCRA' && fcraTotal > 0) {
+      const currentFcraAdminSpent = journalEntries
+        .filter(je => je.entryType === 'Expense' && je.fund === 'FCRA')
+        .reduce((s, je) => s + Math.abs(Number(je.amount) || 0), 0);
+      const projected = currentFcraAdminSpent + Number(entry.amount);
+      const projectedPct = (projected / fcraTotal) * 100;
+      const CAP = 18;
+      if (projectedPct > CAP) {
+        const remaining = fcraTotal * (CAP / 100) - currentFcraAdminSpent;
+        const capturedEntry = { ...entry };
+        setFcraGuardEntry({
+          projectedPct,
+          remainingHeadroom: Math.max(0, remaining),
+          onConfirm: () => {
+            setFcraGuardEntry(null);
+            doSaveJournalEntry(capturedEntry);
+          },
+        });
+        return;
+      }
+    }
+
+    await doSaveJournalEntry(entry);
+  };
+
+  // Feature 5: Bulk 80G receipt generation — finds income journal entries in
+  // the current month that have a linked donor and generates receipts for them,
+  // bundling all into a single multi-receipt HTML file for download.
+  const handleBulkReceiptGeneration = async () => {
+    setBulkReceiptBusy(true);
+    try {
+      const now = new Date();
+      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      const monthEnd   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-31`;
+
+      const pending = journalEntries.filter(je => {
+        if (je.entryType !== 'Income') return false;
+        if (!je.donorId) return false;
+        const d = je.date || '';
+        return d >= monthStart && d <= monthEnd;
+      });
+
+      if (pending.length === 0) {
+        toast.error('No income entries with a linked donor found for this month.');
+        return;
+      }
+
+      const parts: string[] = [];
+      for (const je of pending) {
+        const donor = donors.find(d => d.id === je.donorId);
+        const receiptNo = nextReceiptNumber(ngoName);
+        const html = generate80GReceiptHtml({
+          receiptNo,
+          donorName:   donor?.name  || je.description || 'Donor',
+          donorPan:    donor?.pan   || '',
+          amount:      Math.abs(Number(je.amount) || 0),
+          date:        je.date || now.toLocaleDateString('en-IN'),
+          description: je.description,
+          ngoName,
+          ngoPan:      ngoDetails.pan || '',
+          eighty_g_no: ngoDetails.eighty_g_no || '',
+        });
+        // Strip the outer HTML wrapper so we can embed multiple receipts.
+        const body = html.replace(/<!DOCTYPE[^>]*>[\s\S]*?<body[^>]*>/i, '')
+                         .replace(/<\/body>[\s\S]*$/i, '');
+        parts.push(`<div class="receipt-page">${body}</div>`);
+      }
+
+      const bundle = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>80G Receipts — ${now.toLocaleDateString('en-IN')}</title>
+<style>
+  body{font-family:Arial,sans-serif;margin:0;padding:0}
+  .receipt-page{max-width:700px;margin:40px auto;padding:20px;border:2px solid #333;page-break-after:always}
+  .receipt-page:last-child{page-break-after:auto}
+  h2{text-align:center;margin:0 0 4px}p{margin:4px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
+  .row{display:flex;gap:8px}.label{font-weight:600;min-width:160px}
+  .footer{margin-top:32px;font-size:0.85em;color:#555;border-top:1px solid #999;padding-top:8px}
+  @media print{.receipt-page{border:none;page-break-after:always}}
+</style></head><body>${parts.join('\n')}</body></html>`;
+
+      const blob = new Blob([bundle], { type: 'text/html' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `80G_Receipts_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Generated ${pending.length} receipt${pending.length > 1 ? 's' : ''} — open the HTML file to print or save as PDF.`, { duration: 6000 });
+    } catch (err) {
+      toast.error('Failed to generate receipts.');
+    } finally {
+      setBulkReceiptBusy(false);
+    }
   };
 
   const handleTallySync = async () => {
@@ -546,7 +757,7 @@ const Finance: React.FC = () => {
           <h1 className="page-title text-gradient">Finance & FCRA</h1>
           <p className="page-subtitle">Fund accounting, automated compliance, and Tally Prime sync.</p>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-secondary" onClick={handleTallyXMLExport}>
             <Download size={16} /> Tally XML Export
           </button>
@@ -555,6 +766,14 @@ const Finance: React.FC = () => {
           </button>
           <button className="btn btn-secondary" onClick={handleExportByGrant} title="Export every tagged expense with its grant + budget head">
             <Download size={16} /> Expenses by grant
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={handleBulkReceiptGeneration}
+            disabled={bulkReceiptBusy}
+            title="Generate 80G receipts for all income entries this month with a linked donor"
+          >
+            <PackageOpen size={16} /> {bulkReceiptBusy ? 'Generating…' : 'Pending Receipts'}
           </button>
           <button className="btn btn-primary" onClick={() => setShowEntryModal(true)}>
             <Plus size={16} /> New Journal Entry
@@ -1347,23 +1566,53 @@ const Finance: React.FC = () => {
                         if (match) nextProgramme = match;
                       }
                       setEntry({ ...entry, description: val, programmeId: nextProgramme });
-                      if (val.length > 5 && entry.fund === 'FCRA') {
+                      if (val.length > 5) {
                         setIsClassifying(true);
                         try {
                           const res = await apiFetch(`/workflows/classify-transaction?description=${encodeURIComponent(val)}`, { method: 'POST' });
                           if (res.ok) {
                             const data = await res.json();
                             setClassification(data);
-                            // Map AI category to a programme — try an exact
-                            // case-insensitive match first, then a prefix match.
-                            if (data?.category && !entry.programmeId) {
+                            // Feature 4: AI pre-fill — write AI category result into form fields.
+                            // Map AI category string to fund type + entry type + programme.
+                            if (data?.category) {
                               const cat = String(data.category).toLowerCase();
-                              const mapped = allProgrammes.find(p =>
-                                p.toLowerCase() === cat ||
-                                p.toLowerCase().startsWith(cat.slice(0, Math.max(5, cat.length))) ||
-                                cat.startsWith(p.toLowerCase().slice(0, Math.max(5, p.length)))
-                              );
-                              if (mapped) setEntry(prev => ({ ...prev, programmeId: mapped }));
+                              // Fund classification mapping
+                              let aiFund = entry.fund;
+                              if (cat.includes('fcra') || cat.includes('foreign')) aiFund = 'FCRA';
+                              else if (cat.includes('csr')) aiFund = 'CSR';
+                              else if (cat.includes('restricted') || cat.includes('grant')) aiFund = 'Restricted Grant';
+                              else if (cat.includes('general') || cat.includes('admin') || cat.includes('overhead')) aiFund = 'General';
+                              // Entry type mapping
+                              let aiType = entry.type as 'Expense' | 'Income' | 'Transfer';
+                              if (cat.includes('income') || cat.includes('donation') || cat.includes('receipt')) aiType = 'Income';
+                              else if (cat.includes('transfer')) aiType = 'Transfer';
+                              else if (cat.includes('expense') || cat.includes('salary') || cat.includes('beneficiary') || cat.includes('program')) aiType = 'Expense';
+                              // Programme mapping — exact or prefix match
+                              let aiProg = entry.programmeId;
+                              if (!aiProg) {
+                                const mapped = allProgrammes.find(p =>
+                                  p.toLowerCase() === cat ||
+                                  p.toLowerCase().startsWith(cat.slice(0, Math.max(5, cat.length))) ||
+                                  cat.startsWith(p.toLowerCase().slice(0, Math.max(5, p.length)))
+                                );
+                                if (mapped) aiProg = mapped;
+                              }
+                              // Amount parsing from description (bank statement paste)
+                              // e.g. "₹12,500" or "Rs 12500" or "INR 12500"
+                              let aiAmount = entry.amount;
+                              const amtMatch = val.match(/(?:₹|Rs\.?\s*|INR\s*)([\d,]+)/i);
+                              if (amtMatch) {
+                                const parsed = parseInt(amtMatch[1].replace(/,/g, ''), 10);
+                                if (!isNaN(parsed) && parsed > 0) aiAmount = parsed;
+                              }
+                              setEntry(prev => ({
+                                ...prev,
+                                fund: aiFund,
+                                type: aiType,
+                                programmeId: aiProg,
+                                amount: aiAmount,
+                              }));
                             }
                           }
                         } catch (err) {} finally { setIsClassifying(false); }
@@ -1473,6 +1722,57 @@ const Finance: React.FC = () => {
         </ModalOverlay>
       )}
 
+      {/* Feature 6: Live Programme Budget Bars ─────────────────────────────── */}
+      {programBudgets.length > 0 && (
+        <div className="card" style={{ marginTop: '1rem' }}>
+          <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <IndianRupee size={18} color="var(--color-primary)" />
+            <h3 className="card-title" style={{ margin: 0 }}>Programme spend (live)</h3>
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginLeft: 4 }}>
+              Computed from journal entries tagged to each programme
+            </span>
+          </div>
+          <div style={{ padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {programBudgets.map(pb => {
+              const liveSpent = journalEntries
+                .filter(je =>
+                  je.entryType === 'Expense' &&
+                  je.programmeId &&
+                  je.programmeId.toLowerCase().replace(/\s+/g, '-') === pb.programId
+                )
+                .reduce((s, je) => s + Math.abs(Number(je.amount) || 0), 0);
+              const pct = pb.planned > 0 ? Math.min((liveSpent / pb.planned) * 100, 100) : 0;
+              const overBudget = liveSpent > pb.planned;
+              const barColor = overBudget ? 'var(--color-danger)' : pct > 80 ? 'var(--color-warning)' : 'var(--color-primary)';
+              return (
+                <div key={pb.programId}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.3rem' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{pb.label}</span>
+                    <span style={{ fontSize: '0.8rem', color: overBudget ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>
+                      ₹{liveSpent.toLocaleString('en-IN')} / ₹{pb.planned.toLocaleString('en-IN')}
+                      {overBudget && <span style={{ marginLeft: 6, fontWeight: 700 }}>OVER</span>}
+                    </span>
+                  </div>
+                  <div style={{ height: 8, background: 'var(--color-border-light)', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${pct}%`,
+                      background: barColor,
+                      borderRadius: 4,
+                      transition: 'width 0.5s ease',
+                    }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--color-text-tertiary)', marginTop: '0.2rem' }}>
+                    <span>{Math.round(pct)}% utilised</span>
+                    {pb.windowEnd && <span>Window ends {new Date(pb.windowEnd).toLocaleDateString('en-IN')}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {showGrantModal && (
         <ModalOverlay onBackdropClick={() => setShowGrantModal(false)}>
           <div
@@ -1510,6 +1810,68 @@ const Finance: React.FC = () => {
                 {editingGrantId ? 'Save changes' : 'Create grant'}
               </button>
             </form>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* Feature 3: FCRA admin 18% cap pre-save guard dialog ─────────────── */}
+      {fcraGuardEntry && (
+        <ModalOverlay onBackdropClick={() => setFcraGuardEntry(null)}>
+          <div
+            className="modal-card modal-card--narrow"
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="fcra-guard-title"
+            style={{ maxWidth: 440 }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem',
+              marginBottom: '1rem',
+              padding: '0.75rem 1rem',
+              background: '#FEF3C7',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid #FCD34D',
+            }}>
+              <AlertCircle size={22} color="#D97706" style={{ flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, color: '#92400E', fontSize: '0.95rem' }} id="fcra-guard-title">
+                  FCRA Admin Cap Warning
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#92400E', marginTop: 2 }}>
+                  This expense would push FCRA admin spend above 18%
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: '0.875rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
+              <p style={{ margin: '0 0 0.5rem' }}>
+                Saving this entry would project FCRA admin overhead to{' '}
+                <strong style={{ color: '#DC2626' }}>{fcraGuardEntry.projectedPct.toFixed(1)}%</strong>
+                {' '}of total FCRA funds — above the 18% pre-save threshold.
+              </p>
+              <p style={{ margin: 0 }}>
+                Rupee headroom before 18% cap:{' '}
+                <strong>₹{Math.round(fcraGuardEntry.remainingHeadroom).toLocaleString('en-IN')}</strong>
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => setFcraGuardEntry(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1, background: '#DC2626', borderColor: '#DC2626' }}
+                onClick={fcraGuardEntry.onConfirm}
+              >
+                Save anyway
+              </button>
+            </div>
           </div>
         </ModalOverlay>
       )}
