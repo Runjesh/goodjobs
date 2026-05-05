@@ -185,8 +185,8 @@ const Settings: React.FC = () => {
 
   const handleExportData = async () => {
     try {
-      const toCsv = (rows: Record<string, unknown>[]): string => {
-        if (rows.length === 0) return '';
+      const toCsv = (rows: Record<string, unknown>[], fallbackHeaders?: string[]): string => {
+        if (rows.length === 0) return fallbackHeaders ? fallbackHeaders.join(',') + '\n' : '';
         const headers = Object.keys(rows[0]);
         const escape = (v: unknown): string => {
           const s = v == null ? '' : String(v);
