@@ -465,14 +465,14 @@ const Finance: React.FC = () => {
   // Core save logic — called directly OR after user confirms the FCRA guard.
   const doSaveJournalEntry = async (entryToSave: typeof entry) => {
     // Feature 2: Persistent receipt numbering.
-    // Production path: use the receipt_number returned by the server (DB sequence).
-    // Mock / offline path: fall back to the localStorage counter so the UI stays
-    // functional without a running FastAPI backend.
-    // The client-side number is generated BEFORE the POST so it can be included in
-    // the request body; the server response overrides it if available.
-    const clientReceiptNo = entryToSave.type === 'Income'
-      ? nextReceiptNumber(ngoName)
-      : undefined;
+    // In mock / offline mode (isMockEnabled()), generate the number client-side
+    // from the localStorage counter and send it in the POST body so the mock
+    // handler can echo it back. In production, send null and use the DB-sequence
+    // number the server returns — no localStorage counter is consumed.
+    const clientReceiptNo: string | undefined =
+      entryToSave.type === 'Income' && isMockEnabled()
+        ? nextReceiptNumber(ngoName)
+        : undefined;
 
     let payload: unknown = null;
     try {
@@ -502,11 +502,16 @@ const Finance: React.FC = () => {
       }
     } catch { /* offline/no backend */ }
 
-    // Resolve the authoritative receipt number:
-    //   Production (real backend): prefer the DB-sequence number returned in the
-    //   response JSON so the server is the single source of truth.
-    //   Mock / offline: fall back to the localStorage-generated number.
-    const serverReceiptNo = (payload as any)?.receipt_number as string | undefined;
+    // Resolve the authoritative receipt number.
+    // The server response is typed as unknown — narrow safely without any-casts.
+    const serverReceiptNo: string | undefined =
+      typeof payload === 'object' && payload !== null && 'receipt_number' in payload
+        ? (typeof (payload as Record<string, unknown>).receipt_number === 'string'
+            ? (payload as Record<string, unknown>).receipt_number as string
+            : undefined)
+        : undefined;
+    // Production: use the DB-sequence number from the server response.
+    // Mock / offline: fall back to the localStorage-generated clientReceiptNo.
     const receiptNo: string | undefined = entryToSave.type === 'Income'
       ? (serverReceiptNo ?? clientReceiptNo)
       : undefined;
@@ -1765,8 +1770,10 @@ const Finance: React.FC = () => {
                             const parsed = parseInt(amtMatch[1].replace(/,/g, ''), 10);
                             if (!isNaN(parsed) && parsed > 0) aiAmount = parsed;
                           }
-                          // Also set admin overhead flag if the AI says this is admin / overhead.
-                          const aiAdminOverhead = entry.fund === 'FCRA'
+                          // Set admin overhead flag based on the POST-CLASSIFICATION fund (aiFund),
+                          // not the current entry.fund, so the FCRA guard fires correctly even
+                          // when the user hadn't already selected FCRA before clicking Categorise.
+                          const aiAdminOverhead = aiFund === 'FCRA'
                             ? (cat.includes('admin') || cat.includes('overhead') || cat.includes('management'))
                             : false;
                           setEntry(prev => ({ ...prev, fund: aiFund, type: aiType, programmeId: aiProg, amount: aiAmount, category: data.category, isAdminOverhead: aiAdminOverhead }));
