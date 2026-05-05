@@ -602,9 +602,22 @@ const Finance: React.FC = () => {
 
     // Feature 3: FCRA admin 18% cap guard — block before save if an FCRA
     // admin-overhead expense would push total admin spend above 18% of FCRA
-    // foreign funds. Only fires when the user has checked "Admin overhead?" on
-    // the form — programme delivery expenses are NOT counted toward the cap.
-    if (entry.type === 'Expense' && entry.fund === 'FCRA' && entry.isAdminOverhead && fcraTotal > 0) {
+    // foreign funds.
+    // An entry is treated as admin overhead if:
+    //   a) The user explicitly checked "Admin overhead?", OR
+    //   b) The AI category or the selected budget head label contains a known
+    //      admin keyword — auto-derived so the guard fires even if the checkbox
+    //      was not manually set.
+    const ADMIN_KEYWORDS = ['admin', 'overhead', 'management', 'salary', 'salaries', 'rent', 'utilities', 'payroll'];
+    const selectedHead = entry.budgetHeadId
+      ? grantBudgetHeads.find(h => h.id === entry.budgetHeadId)
+      : undefined;
+    const derivedIsAdmin =
+      entry.isAdminOverhead ||
+      (entry.category ? ADMIN_KEYWORDS.some(k => entry.category.toLowerCase().includes(k)) : false) ||
+      (selectedHead   ? ADMIN_KEYWORDS.some(k => selectedHead.label.toLowerCase().includes(k)) : false);
+
+    if (entry.type === 'Expense' && entry.fund === 'FCRA' && derivedIsAdmin && fcraTotal > 0) {
       const currentFcraAdminSpent = journalEntries
         .filter(je => je.entryType === 'Expense' && je.fund === 'FCRA' && je.isAdminOverhead)
         .reduce((s, je) => s + Math.abs(Number(je.amount) || 0), 0);
@@ -710,6 +723,13 @@ const Finance: React.FC = () => {
         upsertJournalEntry({ ...je, receiptNo });
       }
 
+      // Use zipFiles.length (actual generated count) not pending.length — some
+      // entries may have been skipped due to missing server receipt numbers.
+      const generatedCount = zipFiles.length;
+      if (generatedCount === 0) {
+        toast.error('No receipts were generated — all pending entries were skipped (server did not return receipt numbers).', { duration: 7000 });
+        return;
+      }
       const zipBytes = createZip(zipFiles);
       // Cast to ArrayBuffer to satisfy the strict BlobPart type check —
       // Uint8Array's .buffer is typed as ArrayBufferLike (which includes
@@ -721,8 +741,9 @@ const Finance: React.FC = () => {
       a.download = `80G_Receipts_${monthStr}.zip`;
       a.click();
       URL.revokeObjectURL(url);
+      const skippedCount = pending.length - generatedCount;
       toast.success(
-        `Generated ${pending.length} receipt${pending.length > 1 ? 's' : ''} — extract the ZIP to get individual HTML files.`,
+        `Generated ${generatedCount} receipt${generatedCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} skipped — see warnings above)` : ''} — extract the ZIP to get individual HTML files.`,
         { duration: 7000 }
       );
     } catch (err) {
