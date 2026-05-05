@@ -383,7 +383,7 @@ function computeGoingWell(
   // Beneficiaries enrolled — proxy: unique beneficiaries with an outcome recorded today
   const enrolledToday = new Set(
     beneficiaryOutcomes
-      .filter(o => o.date && o.date.slice(0, 10) === todayStr)
+      .filter(o => o.measuredAt && o.measuredAt.slice(0, 10) === todayStr)
       .map(o => o.beneficiaryId)
   );
   if (enrolledToday.size > 0)
