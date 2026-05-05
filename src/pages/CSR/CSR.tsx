@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight, TrendingUp, Users } from 'lucide-react';
+import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight, TrendingUp, Users, CalendarClock } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import type { Task } from '../../utils/tasks';
+import type { ProgramGrantLink } from '../../utils/programGrantLink';
+import { selectGrantProgramRollups, grantHealthForProgram } from '../../utils/programGrantLink';
 import PermissionGate from '../../components/Auth/PermissionGate';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
@@ -39,9 +41,17 @@ function idleDaysFromIso(iso?: string): number {
 }
 
 /**
- * Compute a heuristic win probability score (0–99) for a CSR card.
- * Factors: pipeline stage, idle-day penalty, compliance document health.
- * Used when the card does not have a manually-set win_probability.
+ * Compute a heuristic AI win-probability score (0–99) for a CSR card.
+ *
+ * Scoring model:
+ *   Stage base      prospecting=20, pitch=35, diligence=50, mou=75, live=100
+ *   Touch penalty   -5 per full week of inactivity
+ *   Stage penalty   -2 per full week beyond each stage's expected median
+ *                   (prospecting=14d, pitch=21d, diligence=30d, mou=14d, live=90d)
+ *   Compliance +    +10 when at least one linked doc is Valid
+ *   Compliance -    -15 per Expiring Soon doc, -25 per Expired doc (cumulative, floor 5)
+ *
+ * Stored `win_probability` takes precedence when manually set by the user.
  */
 function computeWinProbability(
   card: { col: string; last_activity_at?: string; updated_at?: string; id: number | string },
@@ -49,41 +59,51 @@ function computeWinProbability(
   complianceDocs: { id: string; status: string }[],
 ): number {
   const stageBase: Record<string, number> = {
-    prospecting: 10, pitch: 25, diligence: 45, mou: 75, live: 92,
+    prospecting: 20, pitch: 35, diligence: 50, mou: 75, live: 100,
   };
-  let score = stageBase[card.col] ?? 10;
+  const stageMedian: Record<string, number> = {
+    prospecting: 14, pitch: 21, diligence: 30, mou: 14, live: 90,
+  };
+  let score = stageBase[card.col] ?? 20;
   const idle = idleDaysFromIso(card.last_activity_at || card.updated_at);
-  if (idle > 60) score = Math.max(score - 25, 5);
-  else if (idle > 30) score = Math.max(score - 15, 5);
-  else if (idle <= 7 && idle >= 0) score = Math.min(score + 5, 97);
+  const median = stageMedian[card.col] ?? 21;
+
+  // Stale-touchpoint penalty: -5 per full week of inactivity
+  const weeksIdle = Math.floor(idle / 7);
+  if (weeksIdle > 0) score = Math.max(score - weeksIdle * 5, 5);
+
+  // Days-in-stage penalty: -2 per full week beyond stage median
+  if (idle > median) {
+    const weeksOver = Math.floor((idle - median) / 7);
+    score = Math.max(score - weeksOver * 2, 5);
+  }
+
+  // Compliance adjustment
   const links = complianceGrantLinks.filter(l => String(l.grantId) === String(card.id));
+  let hasValid = false;
   for (const link of links) {
     const doc = complianceDocs.find(d => d.id === link.complianceDocId);
-    if (doc?.status === 'Expired') { score = Math.max(score - 25, 5); break; }
-    if (doc?.status === 'Expiring Soon') { score = Math.max(score - 12, 5); }
+    if (!doc) continue;
+    if (doc.status === 'Expired') score = Math.max(score - 25, 5);
+    else if (doc.status === 'Expiring Soon') score = Math.max(score - 15, 5);
+    else if (doc.status === 'Valid') hasValid = true;
   }
+  if (hasValid) score = Math.min(score + 10, 99);
+
   return Math.min(Math.round(score), 99);
 }
 
 /**
- * Return live programme KPIs for a grant card when it is in mou/live stage.
- * Reads from the programGrantLinks → programBudgets → beneficiaries chain.
+ * KPI shape returned for kanban cards in mou/live stage.
+ * Built via the existing selectGrantProgramRollups + grantHealthForProgram utilities.
  */
-function getCardKpi(
-  cardId: string,
-  programGrantLinks: { grantId: string | number; programId: string; programLabel?: string; allocationPct?: number }[],
-  programBudgets: { programId: string; planned: number; spent: number; label?: string }[],
-  beneficiaries: { program: string }[],
-): { utilPct: number | null; benCount: number; label: string } | null {
-  const link = programGrantLinks.find(l => String(l.grantId) === cardId && (l as any).role !== 'co-funder');
-  if (!link) return null;
-  const budget = programBudgets.find(b => b.programId === link.programId);
-  const label = link.programLabel ?? budget?.label ?? link.programId;
-  const normalised = link.programId.replace(/-/g, ' ').toLowerCase();
-  const benCount = beneficiaries.filter(b => b.program.toLowerCase() === normalised ||
-    b.program.toLowerCase().replace(/\s+/g, '-') === link.programId).length;
-  const utilPct = budget && budget.planned > 0 ? Math.round((budget.spent / budget.planned) * 100) : null;
-  return { utilPct, benCount, label };
+interface CardKpi {
+  programLabel: string;
+  beneficiaryCount: number;
+  reportReadinessPct: number;
+  utilPct: number | null;
+  nextReportDue: string | null;
+  healthStatus: 'healthy' | 'at_risk' | 'overdue';
 }
 
 type CsrExtraForm = {
@@ -162,7 +182,10 @@ const CSR: React.FC = () => {
   const programBudgets = useStore(s => s.programBudgets);
   const programGrantLinks = useStore(s => s.programGrantLinks);
   const beneficiaries = useStore(s => s.beneficiaries);
+  const beneficiaryOutcomes = useStore(s => s.beneficiaryOutcomes);
+  const grantTranches = useStore(s => s.grantTranches);
   const addTask = useStore(s => s.addTask);
+  const addComplianceDoc = useStore(s => s.addComplianceDoc);
   const { can } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [dragId, setDragId] = useState<number | string | null>(null);
@@ -204,26 +227,40 @@ const CSR: React.FC = () => {
         }
         toast.success(`Moved "${card.company}" to ${columns.find(c => c.id === col)?.title}`);
 
-        // MOU → Live: auto-create a compliance reminder task so the team
-        // doesn't forget to file CSR-1 and upload the executed MoU to the vault.
+        // MOU → Live: create a compliance record + task so CSR-1 filing doesn't
+        // slip. The compliance doc is staged as "Expiring Soon" (due in 30 days)
+        // so it surfaces immediately in the Compliance HQ expiry list and
+        // triggers the At-Risk Grants Banner on this page.
         if (card.col === 'mou' && col === 'live') {
           const now = new Date();
+          const dueDate = new Date(now.getTime() + 30 * 86_400_000);
+          const expiryIso = dueDate.toISOString().slice(0, 10);
+
+          // 1) Compliance record — shows in Compliance HQ + AtRiskGrantsBanner
+          addComplianceDoc({
+            name: `${card.company} — CSR-1 Filing`,
+            type: 'CSR Eligibility',
+            status: 'Expiring Soon',
+            expiry: expiryIso,
+          });
+
+          // 2) High-priority task for the finance / ED team
           const compTask: Task = {
             id: `mou-live-${String(card.id)}-${now.getTime()}`,
             title: `File CSR-1 compliance record — ${card.company} grant is now Live`,
-            description: `${card.company} moved from MoU Signed → Project Live. Upload the executed MoU and file the CSR-1 form in the Compliance Vault within 7 days.`,
+            description: `${card.company} moved from MoU Signed → Project Live. Upload the executed MoU to the Compliance Vault and file the CSR-1 form within 30 days (by ${expiryIso}).`,
             priority: 'high',
             status: 'open',
             sourceType: 'agent',
             sourceAgent: 'Pipeline Guardian',
             relatedEntityType: 'grant',
             relatedEntityId: String(card.id),
-            dueAt: new Date(now.getTime() + 7 * 86_400_000).toISOString(),
+            dueAt: dueDate.toISOString(),
             createdAt: now.toISOString(),
             updatedAt: now.toISOString(),
           };
           addTask(compTask);
-          toast('Compliance task created: file CSR-1 record within 7 days.', {
+          toast('CSR-1 compliance record created and task assigned — due in 30 days.', {
             icon: '📋', duration: 4500,
           });
         }
@@ -732,6 +769,37 @@ const CSR: React.FC = () => {
         {columns.map(col => {
           const colCards = csrCards.filter(c => c.col === col.id);
           const colTotal = colCards.reduce((s, c) => s + c.amount, 0);
+          const showKpi = col.id === 'mou' || col.id === 'live';
+
+          // Build a KPI map keyed by card id for this column (only mou/live).
+          const kpiByCard = showKpi
+            ? new Map<string, CardKpi>(colCards.map(card => {
+                const rollups = selectGrantProgramRollups(String(card.id), {
+                  links: programGrantLinks as ProgramGrantLink[],
+                  beneficiaries,
+                  outcomes: beneficiaryOutcomes,
+                  periodDays: 90,
+                });
+                const primary = rollups.find(r => r.role !== 'co-funder') ?? rollups[0];
+                if (!primary) return [String(card.id), null as unknown as CardKpi];
+                const health = grantHealthForProgram(primary.programId, String(card.id), {
+                  budgets: programBudgets,
+                  tranches: grantTranches,
+                  complianceLinks: complianceGrantLinks,
+                  docs: complianceDocs,
+                });
+                const kpi: CardKpi = {
+                  programLabel: primary.programLabel,
+                  beneficiaryCount: primary.beneficiaryCount,
+                  reportReadinessPct: primary.reportReadinessPct,
+                  utilPct: health.utilisationPct,
+                  nextReportDue: health.nextReportDue,
+                  healthStatus: health.status,
+                };
+                return [String(card.id), kpi];
+              }))
+            : new Map<string, CardKpi>();
+
           return (
             <div key={col.id} className={`kanban-column ${col.class}`}
               onDragOver={e => e.preventDefault()} onDrop={() => handleDrop(col.id)}>
@@ -747,10 +815,10 @@ const CSR: React.FC = () => {
               <div className="kanban-cards">
                 {colCards.map(card => {
                   const touchHint = formatActivityHint(card.last_activity_at || card.updated_at);
-                  const winProb = computeWinProbability(card, complianceGrantLinks, complianceDocs);
-                  const kpi = (col.id === 'mou' || col.id === 'live')
-                    ? getCardKpi(String(card.id), programGrantLinks, programBudgets, beneficiaries)
-                    : null;
+                  const aiProb = computeWinProbability(card, complianceGrantLinks, complianceDocs);
+                  const displayProb = card.win_probability != null ? card.win_probability : aiProb;
+                  const isManualOverride = card.win_probability != null;
+                  const kpi = kpiByCard.get(String(card.id)) ?? null;
                   return (
                   <div key={String(card.id)} className="kanban-card" data-focus-id={String(card.id)} draggable
                     onDragStart={() => handleDragStart(card.id)}
@@ -799,29 +867,52 @@ const CSR: React.FC = () => {
                     <div className="csr-tags">
                       {card.tags.map(tag => <span key={tag} className="csr-tag">{tag}</span>)}
                     </div>
-                    {/* Win probability — computed from stage + idle days + compliance health;
-                        stored value (manually entered) takes precedence when present. */}
+                    {/* Win-probability badge — "AI: X%" label; shows "Override: X%" when
+                        a manually-entered value takes precedence over the computed score. */}
                     <div style={{ fontSize: '0.65rem', color: 'var(--color-text-tertiary)', marginTop: 2, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                      <span style={{
-                        background: winProb >= 70 ? '#dcfce7' : winProb >= 40 ? '#fef9c3' : '#fee2e2',
-                        color: winProb >= 70 ? '#166534' : winProb >= 40 ? '#854d0e' : '#991b1b',
-                        borderRadius: 4, padding: '1px 5px', fontWeight: 700, fontSize: '0.6rem',
-                      }}>
-                        {card.win_probability != null ? card.win_probability : winProb}% win
+                      <span
+                        title={isManualOverride ? 'Manually set — AI would score ' + aiProb + '%' : 'AI-computed from stage, activity & compliance'}
+                        style={{
+                          background: displayProb >= 70 ? '#dcfce7' : displayProb >= 40 ? '#fef9c3' : '#fee2e2',
+                          color: displayProb >= 70 ? '#166534' : displayProb >= 40 ? '#854d0e' : '#991b1b',
+                          borderRadius: 4, padding: '1px 5px', fontWeight: 700, fontSize: '0.6rem',
+                        }}
+                      >
+                        {isManualOverride ? 'Override' : 'AI'}: {displayProb}%
                       </span>
                       {touchHint ? <span>· {touchHint}</span> : null}
                     </div>
-                    {/* Live programme KPI strip — shown for MoU + Project Live cards */}
+                    {/* Live programme KPI strip — shown for MoU + Project Live cards.
+                        Surfaces: programme, beneficiaries, report readiness, utilisation, next report. */}
                     {kpi && (
-                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.375rem', fontSize: '0.62rem', color: 'var(--color-text-secondary)', flexWrap: 'wrap' }}>
-                        {kpi.benCount > 0 && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: '#f0fdf4', color: '#166534', borderRadius: 4, padding: '1px 5px' }}>
-                            <Users size={9} /> {kpi.benCount} ben
+                      <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.375rem', fontSize: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {kpi.programLabel && (
+                          <span style={{ fontSize: '0.58rem', color: 'var(--color-text-tertiary)', fontWeight: 600, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={kpi.programLabel}>
+                            {kpi.programLabel}
                           </span>
                         )}
-                        {kpi.utilPct !== null && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.utilPct < 25 ? '#fee2e2' : kpi.utilPct < 60 ? '#fef9c3' : '#f0fdf4', color: kpi.utilPct < 25 ? '#991b1b' : kpi.utilPct < 60 ? '#854d0e' : '#166534', borderRadius: 4, padding: '1px 5px' }}>
-                            <TrendingUp size={9} /> {kpi.utilPct}% util
+                        {kpi.beneficiaryCount > 0 && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: '#f0fdf4', color: '#166534', borderRadius: 4, padding: '1px 5px' }}>
+                            <Users size={8} /> {kpi.beneficiaryCount}
+                          </span>
+                        )}
+                        {(() => {
+                          const u = kpi.utilPct ?? 0;
+                          return (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: u < 25 ? '#fee2e2' : u < 60 ? '#fef9c3' : '#f0fdf4', color: u < 25 ? '#991b1b' : u < 60 ? '#854d0e' : '#166534', borderRadius: 4, padding: '1px 5px' }}>
+                              <TrendingUp size={8} /> {u}%
+                            </span>
+                          );
+                        })()}
+                        {kpi.reportReadinessPct > 0 && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.reportReadinessPct >= 70 ? '#f0fdf4' : '#fef9c3', color: kpi.reportReadinessPct >= 70 ? '#166534' : '#854d0e', borderRadius: 4, padding: '1px 5px' }}>
+                            {kpi.reportReadinessPct}% ready
+                          </span>
+                        )}
+                        {kpi.nextReportDue && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--color-text-tertiary)' }}>
+                            <CalendarClock size={8} />
+                            {new Date(kpi.nextReportDue).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                           </span>
                         )}
                       </div>
