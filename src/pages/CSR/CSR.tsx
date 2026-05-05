@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight, Users, CalendarClock } from 'lucide-react';
+import { improvementPct } from '../../utils/outcomes';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import type { Task } from '../../utils/tasks';
@@ -816,10 +817,20 @@ const CSR: React.FC = () => {
               complianceLinks: complianceGrantLinks,
               docs: complianceDocs,
             });
+            // outcomeAchievementPct: avg improvement from baseline across
+            //   all outcomes measured for this programme (positive change %).
+            // dataReadinessPct: % of enrolled beneficiaries with at least one
+            //   outcome recorded in the last 90 days (report readiness).
+            const progOutcomes = beneficiaryOutcomes.filter(o => o.programId === primary.programId);
+            const outcomeAchievementPct = progOutcomes.length > 0
+              ? Math.round(
+                  progOutcomes.reduce((s, o) => s + Math.max(0, improvementPct(o)), 0) / progOutcomes.length
+                )
+              : 0;
             const kpi: CardKpi = {
               programLabel: primary.programLabel,
               beneficiaryCount: primary.beneficiaryCount,
-              outcomeAchievementPct: primary.reportReadinessPct,
+              outcomeAchievementPct,
               dataReadinessPct: primary.reportReadinessPct,
               nextReportDue: health.nextReportDue,
               healthStatus: health.status,
