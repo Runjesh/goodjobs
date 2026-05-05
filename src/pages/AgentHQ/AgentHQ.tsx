@@ -240,7 +240,7 @@ function buildComplianceExpiryIntents(complianceDocs: ReturnType<typeof useStore
     const dayText = daysLeft < 0
       ? `expired ${Math.abs(daysLeft)}d ago`
       : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;
-    const riskLevel: RichIntent['risk_level'] = daysLeft <= 0 ? 'critical' : daysLeft <= 7 ? 'high' : 'medium';
+    const riskLevel: RichIntent['risk_level'] = daysLeft <= 0 ? 'critical' : 'high';
     return [{
       id: `compliance-expiry-intent-${doc.id}`,
       agent_name: 'Compliance Guardian',
