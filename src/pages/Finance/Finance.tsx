@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import './Finance.css';
 import { apiFetch } from '../../api/client';
 import { isMockEnabled } from '../../api/mockBackend';
+import { programIdFromName } from '../../utils/programFinance';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
 import { resolvePersistedJournalEntryId } from '../../utils/journalEntryId';
@@ -637,7 +638,33 @@ const Finance: React.FC = () => {
       const zipFiles: Array<{ name: string; content: string }> = [];
       for (const je of pending) {
         const donor = donors.find(d => d.id === je.donorId);
-        const receiptNo = nextReceiptNumber(ngoName);
+        // In production, POST to the backend so the DB-sequence issues the
+        // receipt number. In mock / offline mode, use the localStorage counter.
+        let receiptNo: string;
+        if (!isMockEnabled()) {
+          try {
+            const res = await apiFetch('/finance/issue-receipt', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ journal_entry_id: je.id, ngo_name: ngoName }),
+            });
+            if (res.ok) {
+              const data: unknown = await res.json();
+              const serverNo =
+                typeof data === 'object' && data !== null && 'receipt_number' in data &&
+                typeof (data as Record<string, unknown>).receipt_number === 'string'
+                  ? (data as Record<string, unknown>).receipt_number as string
+                  : undefined;
+              receiptNo = serverNo ?? nextReceiptNumber(ngoName);
+            } else {
+              receiptNo = nextReceiptNumber(ngoName);
+            }
+          } catch {
+            receiptNo = nextReceiptNumber(ngoName);
+          }
+        } else {
+          receiptNo = nextReceiptNumber(ngoName);
+        }
         const html = generate80GReceiptHtml({
           receiptNo,
           donorName:   donor?.name  || je.description || 'Donor',
@@ -1919,7 +1946,7 @@ const Finance: React.FC = () => {
                 .filter(je =>
                   je.entryType === 'Expense' &&
                   je.programmeId &&
-                  je.programmeId.toLowerCase().replace(/\s+/g, '-') === pb.programId
+                  programIdFromName(je.programmeId) === pb.programId
                 )
                 .reduce((s, je) => s + Math.abs(Number(je.amount) || 0), 0);
               const pct = pb.planned > 0 ? Math.min((liveSpent / pb.planned) * 100, 100) : 0;
