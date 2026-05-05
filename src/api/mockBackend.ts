@@ -167,6 +167,71 @@ const HANDLERS: Handler[] = [
     handle: () => jsonResponse({ error: 'auth_endpoint_not_mocked' }, 503),
   },
 
+  // ── Settings ───────────────────────────────────────────────────────────────
+  {
+    test: (p, m) => m === 'GET' && p === '/settings',
+    handle: () => {
+      try {
+        const raw = localStorage.getItem('sevasuite_auth');
+        const user = raw ? JSON.parse(raw) : {};
+        return jsonResponse({
+          profile: { full_name: user.name ?? '' },
+          ngo: {
+            name: user.ngoName ?? '',
+            reg_no: user.reg_no ?? '',
+            fcra_reg: user.fcra_reg ?? '',
+            pan: user.pan ?? '',
+            state: user.state ?? '',
+          },
+          notification_prefs: {},
+        });
+      } catch {
+        return jsonResponse({ profile: { full_name: '' }, ngo: {}, notification_prefs: {} });
+      }
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/settings/profile',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      try {
+        const raw = localStorage.getItem('sevasuite_auth');
+        if (raw) {
+          const user = JSON.parse(raw);
+          user.name = body.full_name ?? user.name;
+          localStorage.setItem('sevasuite_auth', JSON.stringify(user));
+        }
+      } catch { /* ignore */ }
+      return jsonResponse({ ok: true, profile: { full_name: body.full_name ?? '' } });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/settings/ngo',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      try {
+        const raw = localStorage.getItem('sevasuite_auth');
+        if (raw) {
+          const user = JSON.parse(raw);
+          if (body.name) user.ngoName = body.name;
+          if (body.reg_no !== undefined) user.reg_no = body.reg_no;
+          if (body.fcra_reg !== undefined) user.fcra_reg = body.fcra_reg;
+          if (body.pan !== undefined) user.pan = body.pan;
+          localStorage.setItem('sevasuite_auth', JSON.stringify(user));
+        }
+      } catch { /* ignore */ }
+      return jsonResponse({ ok: true, ngo: { name: body.name ?? '', reg_no: body.reg_no, fcra_reg: body.fcra_reg, pan: body.pan } });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/settings/notifications',
+    handle: () => jsonResponse({ ok: true }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/settings/export',
+    handle: () => jsonResponse({ ok: true, download_url: null }),
+  },
+
   // ── Morning brief / agent HQ summaries ─────────────────────────────────────
   {
     test: (_p, m) => m === 'GET' && _p.startsWith('/morning-brief'),

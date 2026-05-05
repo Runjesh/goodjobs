@@ -100,8 +100,17 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}): Promise<R
     // when the mock is actually enabled (i.e. dev / static-only deploys).
     // If a real backend is configured and returns 404, surface the real 404
     // so we don't silently mask backend bugs.
+    // Detect non-JSON response (HTML SPA fallback or error page).
+    // Static Vite deployments return 200 + index.html for every route, so
+    // res.ok is true but res.json() would throw. Treat any non-JSON reply
+    // as "no real backend" and route through the mock when mock is active.
+    const ct = res.headers.get('content-type') ?? '';
+    if (!noMock && !ct.includes('application/json')) {
+      const { mockResponse, isMockEnabled } = await import('./mockBackend');
+      if (isMockEnabled()) return mockResponse(path, fetchInit);
+    }
+    // Legacy: explicit 404/405/502/503 non-JSON (kept for non-mock-enabled cases)
     if (!noMock && (res.status === 404 || res.status === 405 || res.status === 502 || res.status === 503)) {
-      const ct = res.headers.get('content-type') ?? '';
       if (!ct.includes('application/json')) {
         const { mockResponse, isMockEnabled } = await import('./mockBackend');
         if (isMockEnabled()) return mockResponse(path, fetchInit);

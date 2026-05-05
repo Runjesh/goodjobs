@@ -547,10 +547,13 @@ const Layout: React.FC = () => {
 
   // Dark mode init
   useEffect(() => {
-    const isDark = localStorage.getItem('theme') === 'dark' || 
-      (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    // Default to light mode. Only honour an explicit user preference stored in
+    // localStorage — never auto-follow prefers-color-scheme so first-time
+    // visitors always land in the light theme.
+    const isDark = localStorage.getItem('theme') === 'dark';
     setIsDarkMode(isDark);
     if (isDark) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
   }, []);
 
   const toggleDarkMode = () => {

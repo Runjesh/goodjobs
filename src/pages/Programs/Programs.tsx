@@ -555,6 +555,44 @@ const Programs: React.FC = () => {
         </div>
       </div>
 
+      {/* Program chips — always visible so newly added programs show immediately */}
+      <div className="card" style={{ marginBottom: '1rem', padding: '0.9rem 1.1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+          <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>
+            Active Programs ({programs.length})
+          </span>
+          <button
+            className="btn btn-secondary"
+            style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem', border: '1px solid #0F766E', color: '#0F766E' }}
+            onClick={() => { setNewProgramName(''); setShowAddProgramModal(true); }}
+          >
+            <Plus size={12} /> Add
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+          {programs.map(p => (
+            <span
+              key={p}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                padding: '0.25rem 0.65rem', borderRadius: '99px',
+                background: customPrograms.includes(p) ? '#eff6ff' : '#f0fdf4',
+                color: customPrograms.includes(p) ? '#1d4ed8' : '#15803d',
+                border: `1px solid ${customPrograms.includes(p) ? '#93c5fd' : '#86efac'}`,
+                fontSize: '0.78rem', fontWeight: 600,
+              }}
+            >
+              {p}
+              {beneficiaries.filter(b => b.program === p).length > 0 && (
+                <span style={{ opacity: 0.65, fontWeight: 400, fontSize: '0.72rem' }}>
+                  · {beneficiaries.filter(b => b.program === p).length}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
+      </div>
+
       <div className="programs-grid">
         <div className="flex-col gap-6 flex">
           <div className="card">
