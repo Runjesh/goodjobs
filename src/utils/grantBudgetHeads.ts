@@ -41,6 +41,16 @@ export interface JournalExpense {
   entryType: 'Expense' | 'Income' | 'Transfer';
   /** Where this expense lands in a grant's budget. */
   grantTag?: GrantTag;
+  /**
+   * Cross-module join: which programme this income/expense belongs to.
+   * Drives live budget-vs-actuals in ProgramBudgetBar and report data pulls.
+   */
+  programmeId?: string;
+  /**
+   * Cross-module join: which CRM donor this income came from.
+   * Enables giving-history tab on the donor profile and 80G auto-fill.
+   */
+  donorId?: string;
 }
 
 export interface BudgetHeadUtilisation {

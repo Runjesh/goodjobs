@@ -9,6 +9,7 @@ import PlansSection from '../../components/Billing/PlansSection';
 import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import { useTier, useUpgradeListener } from '../../hooks/useTier';
 import { canAddTeamMember, normalizeTier, tierLimits } from '../../utils/trial';
+import { useStore } from '../../store/useStore';
 
 const TABS = [
   { id: 'profile',  label: 'Profile',      icon: <User size={16} /> },
@@ -23,6 +24,7 @@ const TABS = [
 
 const Settings: React.FC = () => {
   const { user, login, updateUser } = useAuth();
+  const setNgoDetails = useStore(s => s.setNgoDetails);
   // Honor ?tab=plans (or any other tab) so contextual upgrade prompts can
   // deep-link. We accept "billing" as an alias for "plans" because the
   // expired-trial banner and the day-28 upgrade modal historically link to
@@ -95,11 +97,13 @@ const Settings: React.FC = () => {
     }
     setActiveTab('plans');
   });
+  const storedNgoDetails = useStore(s => s.ngoDetails);
   const [name, setName] = useState(user?.name || '');
-  const [ngoName, setNgoName] = useState(user?.ngoName || 'India NGO Trust');
-  const [regNo, setRegNo] = useState('MH/2015/0012345');
-  const [fcraReg, setFcraReg] = useState('231650212');
-  const [panNo, setPanNo] = useState('AABCI1234C');
+  const [ngoName, setNgoName] = useState(user?.ngoName || storedNgoDetails.name || 'India NGO Trust');
+  const [regNo, setRegNo] = useState(storedNgoDetails.reg_no || 'MH/2015/0012345');
+  const [fcraReg, setFcraReg] = useState(storedNgoDetails.fcra_reg || '231650212');
+  const [panNo, setPanNo] = useState(storedNgoDetails.pan || 'AABCI1234C');
+  const [ngoState, setNgoState] = useState(storedNgoDetails.state || 'Maharashtra');
   const [notifs, setNotifs] = useState({ agentApprovals: true, complianceDue: true, donorLapse: true, dailyBrief: false, weeklyReport: true });
   const [consentGiven, setConsentGiven] = useState(true);
   const [pwCurrent, setPwCurrent] = useState('');
@@ -122,6 +126,7 @@ const Settings: React.FC = () => {
         if (typeof data?.ngo?.reg_no !== 'undefined') setRegNo(data.ngo.reg_no || '');
         if (typeof data?.ngo?.fcra_reg !== 'undefined') setFcraReg(data.ngo.fcra_reg || '');
         if (typeof data?.ngo?.pan !== 'undefined') setPanNo(data.ngo.pan || '');
+        if (typeof data?.ngo?.state !== 'undefined') setNgoState(data.ngo.state || 'Maharashtra');
         if (data?.notification_prefs && typeof data.notification_prefs === 'object') {
           setNotifs(prev => ({ ...prev, ...data.notification_prefs }));
         }
@@ -173,11 +178,20 @@ const Settings: React.FC = () => {
       const res = await apiFetch('/settings/ngo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: ngoName, reg_no: regNo || null, fcra_reg: fcraReg || null, pan: panNo || null, state: null }),
+        body: JSON.stringify({ name: ngoName, reg_no: regNo || null, fcra_reg: fcraReg || null, pan: panNo || null, state: ngoState || null }),
       });
       if (!res.ok) throw new Error('ngo');
       const data = await res.json().catch(() => ({}));
       login({ ...user, ngoName: data?.ngo?.name || ngoName, name });
+      // Single source of truth: write to Zustand so Finance, Compliance, and
+      // every other module always reads the same canonical org identity.
+      setNgoDetails({
+        name: data?.ngo?.name || ngoName,
+        reg_no: data?.ngo?.reg_no ?? regNo,
+        fcra_reg: data?.ngo?.fcra_reg ?? fcraReg,
+        pan: data?.ngo?.pan ?? panNo,
+        state: data?.ngo?.state ?? ngoState,
+      });
       toast.success('NGO details saved.');
     } catch {
       toast.error('Failed to save NGO details.');
@@ -468,7 +482,12 @@ const Settings: React.FC = () => {
                 <div className="input-group"><label className="input-label">PAN / TAN</label>
                   <input className="input-field" value={panNo} onChange={e => setPanNo(e.target.value)} /></div>
                 <div className="input-group"><label className="input-label">State of Registration</label>
-                  <select className="input-field"><option>Maharashtra</option><option>Delhi</option><option>Karnataka</option><option>Tamil Nadu</option></select></div>
+                  <select className="input-field" value={ngoState} onChange={e => setNgoState(e.target.value)}>
+                    <option>Andhra Pradesh</option><option>Delhi</option><option>Gujarat</option><option>Karnataka</option>
+                    <option>Kerala</option><option>Maharashtra</option><option>Rajasthan</option><option>Tamil Nadu</option>
+                    <option>Telangana</option><option>Uttar Pradesh</option><option>West Bengal</option>
+                  </select>
+                </div>
                 <button className="btn btn-primary" onClick={handleSaveNgo}><Save size={16} /> Save NGO Details</button>
               </div>
             </div>

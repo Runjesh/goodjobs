@@ -13,6 +13,20 @@ import { dispatchOnComplete } from '../utils/taskDispatcher';
 import { programIdFromName } from '../utils/programFinance';
 
 /**
+ * NGO identity details — single source of truth for org-level fields used
+ * across Finance (Tally export ngo_name, 80G, FCRA) and Compliance.
+ * Persisted to localStorage; loaded at boot and overwritten on Settings save.
+ */
+export interface NgoDetails {
+  name: string;
+  reg_no: string;
+  fcra_reg: string;
+  pan: string;
+  /** ISO state name, e.g. "Maharashtra". */
+  state: string;
+}
+
+/**
  * Cross-module connective state (Session 1 of the audit).
  *
  *  - programBudgets         : Programs ↔ Finance loop
@@ -172,6 +186,13 @@ interface AppState {
   grantBudgetHeads:      GrantBudgetHead[];
   journalEntries:        JournalExpense[];
 
+  // ── Cross-module connective state (Session 5 — Data Foundation) ────────
+  // ngoDetails: single source of truth for org-level identity fields.
+  //             Read by Finance (Tally XML, UC, ngo_name) and Compliance.
+  //             Written by Settings > NGO Details tab.
+  ngoDetails:            NgoDetails;
+  setNgoDetails:         (d: Partial<NgoDetails>) => void;
+
   /** Cross-module Tasks slice — see src/utils/tasks.ts. */
   tasks:                 Task[];
   addTask:               (t: Task) => void;
@@ -314,6 +335,15 @@ const LS_CUSTOM_PROGRAMS = 'goodjobs.customPrograms.v1';
 const LS_BUDGET_HEADS    = 'goodjobs.grantBudgetHeads.v1';
 const LS_JOURNAL_ENTRIES = 'goodjobs.journalEntries.v1';
 const LS_TASKS = 'goodjobs.tasks.v1';
+const LS_NGO_DETAILS = 'goodjobs.ngoDetails.v1';
+
+const DEFAULT_NGO_DETAILS: NgoDetails = {
+  name: 'India NGO Trust',
+  reg_no: 'MH/2015/0012345',
+  fcra_reg: '231650212',
+  pan: 'AABCI1234C',
+  state: 'Maharashtra',
+};
 
 function loadLS<T>(key: string, fallback: T): T {
   try {
@@ -450,6 +480,7 @@ export const useStore = create<AppState>((set, get) => ({
   grantBudgetHeads:     loadLS<GrantBudgetHead[]>(LS_BUDGET_HEADS, seedGrantBudgetHeads),
   journalEntries:       loadLS<JournalExpense[]>(LS_JOURNAL_ENTRIES, seedJournalEntries),
   tasks:                loadLS<Task[]>(LS_TASKS, []),
+  ngoDetails:           loadLS<NgoDetails>(LS_NGO_DETAILS, DEFAULT_NGO_DETAILS),
 
   addTask: (t) => set((state) => {
     const next = [t, ...state.tasks];
@@ -680,6 +711,12 @@ export const useStore = create<AppState>((set, get) => ({
     );
     saveLS(LS_JOURNAL_ENTRIES, next);
     return { journalEntries: next };
+  }),
+
+  setNgoDetails: (d) => set((state) => {
+    const next = { ...state.ngoDetails, ...d };
+    saveLS(LS_NGO_DETAILS, next);
+    return { ngoDetails: next };
   }),
 
   setDonors: (donors) => set(() => ({ donors })),

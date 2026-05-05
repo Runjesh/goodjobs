@@ -25,9 +25,27 @@ const ProgramBudgetBar: React.FC<Props> = ({ programName, allowEdit }) => {
   const budget = useStore(s => s.programBudgets.find(b => b.programId === programId));
   const upsert = useStore(s => s.upsertProgramBudget);
 
-  const health = budget ? classifyBudget(budget) : 'no_budget';
+  // Live spend: sum all journal Expense entries whose programmeId matches
+  // this programme name (stored as the label string). This replaces the
+  // stored `budget.spent` field so spend is always up-to-date without manual
+  // recordProgramSpend calls.
+  const liveSpent = useStore(s =>
+    s.journalEntries
+      .filter(e => e.entryType === 'Expense' && e.programmeId === programName)
+      .reduce((sum, e) => sum + Math.abs(Number(e.amount) || 0), 0)
+  );
+
+  // Merge liveSpent into the budget object so classifyBudget and
+  // budgetUtilization see the real number. Fall back to budget.spent when no
+  // journal entries have been tagged yet (prevents erasing manually-recorded
+  // spend from previous sessions before journal tagging was adopted).
+  const effectiveBudget = budget
+    ? { ...budget, spent: liveSpent > 0 ? liveSpent : budget.spent }
+    : undefined;
+
+  const health = effectiveBudget ? classifyBudget(effectiveBudget) : 'no_budget';
   const meta = HEALTH_META[health];
-  const pct = budget ? budgetUtilization(budget) : 0;
+  const pct = effectiveBudget ? budgetUtilization(effectiveBudget) : 0;
 
   const promptForBudget = () => {
     const planned = Number(window.prompt(`Set planned budget for "${programName}" (INR):`, String(budget?.planned ?? 500000)));
@@ -38,7 +56,7 @@ const ProgramBudgetBar: React.FC<Props> = ({ programName, allowEdit }) => {
     upsert(next);
   };
 
-  if (!budget) {
+  if (!effectiveBudget) {
     if (!allowEdit) return null;
     return (
       <button type="button" className="program-budget-bar program-budget-bar--empty" onClick={promptForBudget}>
@@ -57,7 +75,7 @@ const ProgramBudgetBar: React.FC<Props> = ({ programName, allowEdit }) => {
     >
       <div className="program-budget-bar-row">
         <span className="program-budget-bar-label">
-          <Wallet size={11} /> {formatINR(budget.spent)} <span className="muted">/ {formatINR(budget.planned)}</span>
+          <Wallet size={11} /> {formatINR(effectiveBudget.spent)} <span className="muted">/ {formatINR(effectiveBudget.planned)}</span>
         </span>
         <span className="program-budget-bar-status" style={{ color: meta.color }}>
           {health === 'underspending' && <AlertTriangle size={11} />}
@@ -70,9 +88,9 @@ const ProgramBudgetBar: React.FC<Props> = ({ programName, allowEdit }) => {
           style={{ width: `${Math.min(100, pct * 100)}%`, background: meta.color }}
         />
       </div>
-      {health === 'underspending' && budget.restricted && (
+      {health === 'underspending' && effectiveBudget.restricted && (
         <div className="program-budget-bar-alert">
-          Restricted-grant program is behind schedule — risk of tranche clawback by {budget.windowEnd}.
+          Restricted-grant program is behind schedule — risk of tranche clawback by {effectiveBudget.windowEnd}.
         </div>
       )}
     </div>

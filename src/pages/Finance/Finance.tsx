@@ -14,6 +14,18 @@ const Finance: React.FC = () => {
   const upsertJournalEntry      = useStore(s => s.upsertJournalEntry);
   const setJournalEntryGrantTag = useStore(s => s.setJournalEntryGrantTag);
   const csrCards         = useStore(s => s.csrCards);
+  const donors           = useStore(s => s.donors);
+  const ngoDetails       = useStore(s => s.ngoDetails);
+  const beneficiaries    = useStore(s => s.beneficiaries);
+  const customPrograms   = useStore(s => s.customPrograms);
+
+  // All distinct programme names from beneficiaries + custom programmes,
+  // de-duped. Used for the programme dropdown in the journal entry form.
+  const allProgrammes = useMemo(() => {
+    const fromBens = beneficiaries.map(b => b.program).filter(Boolean);
+    const merged = Array.from(new Set([...fromBens, ...customPrograms])).sort();
+    return merged;
+  }, [beneficiaries, customPrograms]);
   const [grants, setGrants] = useState<any[]>([]);
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [showGrantModal, setShowGrantModal] = useState(false);
@@ -26,14 +38,17 @@ const Finance: React.FC = () => {
   });
   const [entry, setEntry] = useState<{
     description: string; amount: number; type: 'Expense' | 'Income' | 'Transfer'; fund: string;
-    grantId: string; budgetHeadId: string;
-  }>({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '' });
+    grantId: string; budgetHeadId: string; donorId: string; programmeId: string;
+  }>({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '' });
+  const [donorSearch, setDonorSearch] = useState('');
   const [classification, setClassification] = useState<{category: string, confidence: number} | null>(null);
   const [isClassifying, setIsClassifying] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [grantsLoading, setGrantsLoading] = useState(false);
-  const [ngoName, setNgoName] = useState<string>('GoodJobs NGO');
+  // ngoName is now read from the Zustand ngoDetails slice (single source of truth).
+  // The local useState fallback is kept only for the rare moment before store hydrates.
+  const ngoName = ngoDetails.name || 'GoodJobs NGO';
   const [aaBannerDismissed, setAaBannerDismissed] = useState(() => {
     try {
       return localStorage.getItem('gj_finance_aa_banner_dismiss') === '1';
@@ -89,15 +104,6 @@ const Finance: React.FC = () => {
   useEffect(() => {
     loadGrants();
     (async () => {
-      try {
-        const me = await apiFetch('/auth/me');
-        if (me.ok) {
-          const data = await me.json();
-          if (data?.ngo_name) setNgoName(data.ngo_name);
-        }
-      } catch {
-        // ignore
-      }
       try {
         const txRes = await apiFetch('/finance/transactions?classify=true');
         if (txRes.ok) {
@@ -283,6 +289,9 @@ const Finance: React.FC = () => {
           // reflect whatever id the server hands back.
           grant_id: entry.grantId || null,
           budget_head_id: entry.budgetHeadId || null,
+          // Cross-module joins (Data Foundation).
+          donor_id: entry.donorId || null,
+          programme_id: entry.programmeId || null,
         }),
       });
       if (res.ok) {
@@ -302,6 +311,9 @@ const Finance: React.FC = () => {
       fund: entry.fund,
       entryType: entry.type,
       grantTag: tag,
+      // Cross-module joins: link this entry to the CRM donor and the programme.
+      donorId:    entry.donorId    || undefined,
+      programmeId: entry.programmeId || undefined,
     });
     const tagSuffix = tag ? ' · tagged' : '';
     if (source === 'backend') {
@@ -310,7 +322,8 @@ const Finance: React.FC = () => {
       toast.success(`Saved locally: ₹${Number(entry.amount).toLocaleString()} (${entry.type})${tagSuffix}. Will sync when the server is reachable.`);
     }
     setShowEntryModal(false);
-    setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '' });
+    setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '' });
+    setDonorSearch('');
   };
 
   const handleTallySync = async () => {
@@ -1248,6 +1261,43 @@ const Finance: React.FC = () => {
             <button type="button" onClick={() => setShowEntryModal(false)} style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }} className="action-btn" aria-label="Close"><X size={20} /></button>
             <h2 id="fin-entry-title" style={{ marginBottom: '1.5rem', paddingRight: '2.5rem' }}>New Journal Entry</h2>
             <form onSubmit={handleJournalEntry} className="flex-col gap-4 flex">
+              {/* Cross-module joins: donor + programme selectors */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Donor (optional)</label>
+                  <input
+                    list="fin-donor-list"
+                    className="input-field"
+                    placeholder="Search donor…"
+                    value={donorSearch}
+                    onChange={ev => {
+                      const val = ev.target.value;
+                      setDonorSearch(val);
+                      const match = donors.find(d => d.name.toLowerCase() === val.toLowerCase());
+                      setEntry(prev => ({ ...prev, donorId: match ? match.id : '' }));
+                    }}
+                  />
+                  <datalist id="fin-donor-list">
+                    {donors.map(d => <option key={d.id} value={d.name} />)}
+                  </datalist>
+                  {entry.donorId && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--color-success)', marginTop: 2 }}>
+                      Linked to CRM donor
+                    </div>
+                  )}
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Programme (optional)</label>
+                  <select
+                    className="input-field"
+                    value={entry.programmeId}
+                    onChange={ev => setEntry(prev => ({ ...prev, programmeId: ev.target.value }))}
+                  >
+                    <option value="">— None —</option>
+                    {allProgrammes.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Description</label>
                 <div style={{ position: 'relative' }}>
