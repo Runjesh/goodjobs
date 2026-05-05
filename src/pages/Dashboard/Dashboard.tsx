@@ -719,22 +719,20 @@ const Dashboard: React.FC = () => {
   const goingWellChips = useMemo(() => computeGoingWell(transactions, misReviewIntents, csrCards, beneficiaryOutcomes), [transactions, misReviewIntents, csrCards, beneficiaryOutcomes]);
 
   // ── Feature 4: Debounced Zustand subscription — re-run brief within 2s of any
-  //    relevant store mutation including field-level changes (status, receipt_status, etc.) ──
+  //    relevant store mutation. Uses plain subscribe(state, prevState) form so it
+  //    works without subscribeWithSelector middleware.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const unsubscribe = useStore.subscribe((state) => {
-      // Fingerprint slices that drive brief computation — include field values
-      // so status transitions (pending→approved, receipt pending→done) trigger refresh.
-      const sig = [
-        state.misReviewIntents.map(i => `${i.id}:${i.status}:${i.decidedAt ?? ''}`).join('|'),
-        state.donors.map(d => `${d.id}:${d.lastGift ?? ''}:${d.totalGiven}`).join('|'),
-        state.transactions.map(t => `${t.id}:${(t as any).receipt_status ?? ''}:${(t as any).receipt_number ?? ''}`).join('|'),
-        state.beneficiaries.map(b => `${b.id}:${(b as any).status ?? ''}`).join('|'),
-        (state.csrCards as any[]).map(c => `${c.id}:${c.col}:${c.updated_at ?? ''}`).join('|'),
-      ].join('///');
-      return sig;
-    }, (next, prev) => {
-      if (next === prev) return;
+    const briefSig = (state: ReturnType<typeof useStore.getState>) => [
+      state.misReviewIntents.map(i => `${i.id}:${i.status}:${i.decidedAt ?? ''}`).join('|'),
+      state.donors.map(d => `${d.id}:${d.lastGift ?? ''}:${d.totalGiven}`).join('|'),
+      state.transactions.map(t => `${t.id}:${(t as any).receipt_status ?? ''}:${(t as any).receipt_number ?? ''}`).join('|'),
+      state.beneficiaries.map(b => `${b.id}:${(b as any).status ?? ''}`).join('|'),
+      (state.csrCards as any[]).map(c => `${c.id}:${c.col}:${c.updated_at ?? ''}`).join('|'),
+    ].join('///');
+
+    const unsubscribe = useStore.subscribe((state, prev) => {
+      if (briefSig(state) === briefSig(prev)) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => setLastRefresh(new Date()), 2000);
     });
@@ -836,7 +834,9 @@ const Dashboard: React.FC = () => {
 
   const allItems = useMemo(() => {
     void lifecycleTick;
-    const store = deriveFromStore(layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets);
+    // Pass auth `role` (not layout preset) so ED-only logic (clawback, grant T-7)
+    // fires only for actual ED users, regardless of dashboard preset.
+    const store = deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets);
     const combined = [...taskItems, ...briefItems, ...store];
     return combined.length === 0 ? getStaticFallback(layoutRole) : combined;
   }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets, lifecycleTick]);
