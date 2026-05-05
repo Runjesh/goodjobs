@@ -231,10 +231,12 @@ function deriveFromStore(
     }
   }
 
-  // ── Clawback risk: live grants under-utilised past halfway point (ED only) ──
+  // ── Clawback risk: *live* grants under-utilised past halfway point (ED only) ──
+  const liveGrantIds = new Set(liveGrants.map((g: any) => String(g.id)));
   if (role === 'ed' && programBudgets.length > 0) {
     const clawbackRisk = programBudgets.filter(b => {
       if (!b.windowEnd || !b.restricted) return false;
+      if (b.grantId && !liveGrantIds.has(String(b.grantId))) return false; // must be a live grant
       const end = new Date(b.windowEnd).getTime();
       const start = end - 180 * 86_400_000; // approximate 6-month window
       const halfway = start + (end - start) / 2;
@@ -710,31 +712,37 @@ const Dashboard: React.FC = () => {
   const greeting     = getGreeting();
 
   const pendingIntents = useMemo(() => misReviewIntents.filter(i => i.status === 'pending').length, [misReviewIntents]);
-  const quickActions   = useMemo(() => getQuickActions(layoutRole, transactions, beneficiaries, campaigns, pendingIntents), [layoutRole, transactions, beneficiaries, campaigns, pendingIntents]);
+  // Quick action tiles are role-specific (AuthContext role), not preset-specific.
+  // Preset only governs layout ordering — Finance users must always get Finance tiles.
+  const quickActions   = useMemo(() => getQuickActions(role, transactions, beneficiaries, campaigns, pendingIntents), [role, transactions, beneficiaries, campaigns, pendingIntents]);
   const roleStats      = useMemo(() => getRoleStats(layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns), [layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns]);
   const goingWellChips = useMemo(() => computeGoingWell(transactions, misReviewIntents, csrCards, beneficiaryOutcomes), [transactions, misReviewIntents, csrCards, beneficiaryOutcomes]);
 
-  // ── Feature 4: Debounced store subscription — re-run brief within 2s of any
-  //    relevant change including status edits, not just length changes ──
+  // ── Feature 4: Debounced Zustand subscription — re-run brief within 2s of any
+  //    relevant store mutation including field-level changes (status, receipt_status, etc.) ──
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const storeKey = useMemo(() => {
-    const intentSig = misReviewIntents.map(i => `${i.id}:${i.status}:${i.decidedAt ?? ''}`).join('|');
-    const donorSig  = donors.map(d => `${d.id}:${d.lastGift ?? ''}:${d.totalGiven}`).join('|');
-    const txSig     = transactions.map(t => t.id).join('|');
-    const benSig    = beneficiaries.map(b => b.id).join('|');
-    const csrSig    = csrCards.map((c: any) => `${c.id}:${c.col}:${c.updated_at ?? ''}`).join('|');
-    return [intentSig, donorSig, txSig, benSig, csrSig].join('///');
-  }, [misReviewIntents, donors, transactions, beneficiaries, csrCards]);
-  const prevStoreKey = useRef(storeKey);
   useEffect(() => {
-    if (storeKey === prevStoreKey.current) return;
-    prevStoreKey.current = storeKey;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setLastRefresh(new Date());
-    }, 2000);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [storeKey]);
+    const unsubscribe = useStore.subscribe((state) => {
+      // Fingerprint slices that drive brief computation — include field values
+      // so status transitions (pending→approved, receipt pending→done) trigger refresh.
+      const sig = [
+        state.misReviewIntents.map(i => `${i.id}:${i.status}:${i.decidedAt ?? ''}`).join('|'),
+        state.donors.map(d => `${d.id}:${d.lastGift ?? ''}:${d.totalGiven}`).join('|'),
+        state.transactions.map(t => `${t.id}:${(t as any).receipt_status ?? ''}:${(t as any).receipt_number ?? ''}`).join('|'),
+        state.beneficiaries.map(b => `${b.id}:${(b as any).status ?? ''}`).join('|'),
+        (state.csrCards as any[]).map(c => `${c.id}:${c.col}:${c.updated_at ?? ''}`).join('|'),
+      ].join('///');
+      return sig;
+    }, (next, prev) => {
+      if (next === prev) return;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => setLastRefresh(new Date()), 2000);
+    });
+    return () => {
+      unsubscribe();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const handleSnooze = useCallback((id: string, hours: number) => {
     snoozeItem(id, hours);
@@ -769,7 +777,7 @@ const Dashboard: React.FC = () => {
           const c = JSON.parse(cached);
           if (c.uid === uid && Date.now() - (c.at ?? 0) < 30 * 60000 && Array.isArray(c.priorities)) {
             if (!cancelled) {
-              setBriefItems(c.priorities.map((p: any, i: number) => ({ id: `brief-${i}`, text: p.text ?? p.message ?? String(p), action: p.action, path: p.path, level: (p.level ?? 'attention') as PriorityLevel, ageDays: p.ageDays, delta: p.delta, deltaDir: p.deltaDir })));
+              setBriefItems(c.priorities.map((p: any, i: number) => ({ id: `brief-${i}`, text: p.text ?? p.message ?? String(p), action: p.action, path: p.deep_link ?? p.path, level: (p.level ?? 'attention') as PriorityLevel, ageDays: p.ageDays, delta: p.delta, deltaDir: p.deltaDir })));
               setBriefLoading(false);
             }
           }
@@ -780,7 +788,7 @@ const Dashboard: React.FC = () => {
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const priorities = Array.isArray(data.priorities) ? data.priorities : [];
-        const mapped: PriorityItem[] = priorities.map((p: any, i: number) => ({ id: `brief-${i}`, text: p.text ?? p.message ?? String(p), action: p.action, path: p.path, level: (p.level ?? 'attention') as PriorityLevel, ageDays: p.ageDays, delta: p.delta, deltaDir: p.deltaDir }));
+        const mapped: PriorityItem[] = priorities.map((p: any, i: number) => ({ id: `brief-${i}`, text: p.text ?? p.message ?? String(p), action: p.action, path: p.deep_link ?? p.path, level: (p.level ?? 'attention') as PriorityLevel, ageDays: p.ageDays, delta: p.delta, deltaDir: p.deltaDir }));
         if (!cancelled) {
           setBriefItems(mapped);
           try { localStorage.setItem(BRIEF_CACHE_KEY, JSON.stringify({ uid, at: Date.now(), priorities })); } catch { /* ignore */ }
