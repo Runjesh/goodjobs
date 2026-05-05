@@ -613,3 +613,152 @@
 
 /* (.focus-flash moved to src/index.css so deep-link highlighting works
    on all pages, not just CRM.) */
+
+/* ── Propensity tooltip ─────────────────────────────────── */
+.propensity-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.propensity-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 0.75rem;
+  min-width: 210px;
+  z-index: 200;
+  pointer-events: none;
+}
+.propensity-tooltip-wrap:hover .propensity-tooltip {
+  display: block;
+}
+.propensity-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  padding: 0.15rem 0;
+}
+.propensity-tooltip-val {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+/* ── Needs attention CTA ─────────────────────────────────── */
+.needs-attention-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  color: #92400e;
+  border: 1px solid color-mix(in srgb, #f59e0b 38%, transparent);
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.needs-attention-btn:hover {
+  background: color-mix(in srgb, #f59e0b 20%, transparent);
+}
+
+/* ── Outreach delivery status pill ───────────────────────── */
+.outreach-delivery-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 600;
+  transition: background 0.4s ease, color 0.4s ease;
+}
+.outreach-delivery-pill--sent {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+}
+.outreach-delivery-pill--delivered {
+  background: color-mix(in srgb, #16a34a 12%, transparent);
+  color: #15803d;
+}
+
+/* ── Detail panel tabs ───────────────────────────────────── */
+.detail-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 1rem;
+}
+.detail-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.detail-tab:hover {
+  color: var(--color-text-primary);
+}
+.detail-tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+.detail-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 0.3rem;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-radius: var(--radius-full);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+/* ── Programme impact pills ──────────────────────────────── */
+.programme-impact-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.programme-impact-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.6rem;
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+/* ── Giving History transaction rows ─────────────────────── */
+.history-tx-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.history-tx-row:last-child {
+  border-bottom: none;
+}

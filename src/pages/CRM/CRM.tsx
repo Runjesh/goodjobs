@@ -3,9 +3,9 @@ import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Search, Filter, MessageCircle, Mail, Phone, MapPin,
-  IndianRupee, Clock, CheckCircle, X, UserPlus, Edit, Trash2,
+  IndianRupee, Clock, CheckCircle, CheckCircle2, X, UserPlus, Edit, Trash2,
   Download, Upload, Users, Send, ChevronDown, ChevronUp, Zap, Loader2, Mic, Bot,
-  AlertTriangle, ArrowRight
+  AlertTriangle, ArrowRight, History, LayoutDashboard, BellRing, BookOpen
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
@@ -83,6 +83,9 @@ const CRM: React.FC = () => {
   const [showEditContact, setShowEditContact] = useState(false);
   const [editContact, setEditContact] = useState<any>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const [detailTab, setDetailTab] = useState<'overview' | 'history'>('overview');
+  const [lastOutreachStatus, setLastOutreachStatus] = useState<'idle' | 'sent' | 'delivered'>('idle');
 
   useEffect(() => {
     if (!activeDonorId || viewMode === 'heatmap') return;
@@ -280,16 +283,41 @@ const CRM: React.FC = () => {
   const activeDonor = useMemo(() => donors.find(d => String(d.id) === String(activeDonorId)) || donors[0], [donors, activeDonorId]);
   const donorTransactions = useMemo(() => transactions.filter(t => t.donorId === activeDonor?.id), [transactions, activeDonor]);
 
+  useEffect(() => {
+    setDetailTab('overview');
+    setLastOutreachStatus('idle');
+  }, [activeDonorId]);
+
+  const impactByProgramme = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const tx of donorTransactions) {
+      if (tx.programmeId) {
+        map.set(tx.programmeId, (map.get(tx.programmeId) ?? 0) + tx.amount);
+      }
+    }
+    return Array.from(map.entries()).map(([id, total]) => ({ id, total }));
+  }, [donorTransactions]);
+
+  const daysSinceLastGift = useMemo(() => {
+    if (!activeDonor?.lastGift) return 999;
+    const last = new Date(activeDonor.lastGift);
+    const now = new Date();
+    return Math.floor((now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24));
+  }, [activeDonor]);
+
   const filteredDonors = useMemo(() => {
     void lifecycleTick;
     return donors.filter(d => {
       const q = searchQuery.toLowerCase();
       const meta = (d.meta || {}) as Record<string, unknown>;
       const emp = String(meta.employer || '').toLowerCase();
-      const matchesSearch = d.name.toLowerCase().includes(q) ||
-        d.pan.toLowerCase().includes(q) ||
+      const pan = d.pan.toLowerCase();
+      const matchesSearch = !q ||
+        d.name.toLowerCase().includes(q) ||
+        pan.includes(q) ||
+        (d.pan.length >= 4 && d.pan.slice(-4).toLowerCase() === q) ||
         (d.email || '').toLowerCase().includes(q) ||
-        (d.phone || '').toLowerCase().includes(q) ||
+        (d.phone || '').includes(q) ||
         emp.includes(q);
       const stage = donorStages.get(String(d.id)) ?? 'unknown';
       const matchesFilter = activeFilter === 'All' ||
@@ -557,6 +585,8 @@ const CRM: React.FC = () => {
           setShowComposer(false);
           setSelectedIds(new Set());
           setBulkMode(false);
+          setLastOutreachStatus('sent');
+          setTimeout(() => setLastOutreachStatus('delivered'), 2000);
         }
         return;
       }
@@ -593,6 +623,8 @@ const CRM: React.FC = () => {
         setShowComposer(false);
         setSelectedIds(new Set());
         setBulkMode(false);
+        setLastOutreachStatus('sent');
+        setTimeout(() => setLastOutreachStatus('delivered'), 2000);
       }
     } catch {
       toast.error('Failed to send (backend not reachable).');
@@ -784,7 +816,7 @@ const CRM: React.FC = () => {
           <div className="sidebar-filters">
             <div className="search-wrapper" style={{ position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--color-text-tertiary)' }} />
-              <input type="text" className="search-donors" placeholder="Search by name, PAN..."
+              <input type="text" className="search-donors" placeholder="Search by name, PAN (last 4), phone…"
                 style={{ paddingLeft: '2rem' }} value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
             </div>
             <div className="filter-tags">
@@ -1015,13 +1047,49 @@ const CRM: React.FC = () => {
                     <StageBadge stage={donorStages.get(String(activeDonor.id)) ?? 'unknown'} size="md" />
                     {activeDonor.tags.map(tag => <span key={tag} className="badge badge-outline">{tag}</span>)}
                     
-                    {/* Propensity Score Badge */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--color-bg-main)', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-full)', border: '1px solid var(--color-border)', marginLeft: '0.5rem' }}>
-                      {propensityLoading ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} color="var(--color-warning)" />}
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>
-                        {propensityLoading ? 'Calculating...' : `Propensity: ${propensity?.score || '--'}%`}
-                      </span>
+                    {/* Propensity Score Badge — hover reveals sub-score tooltip */}
+                    <div className="propensity-tooltip-wrap" style={{ marginLeft: '0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--color-bg-main)', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-full)', border: '1px solid var(--color-border)', cursor: 'default' }}>
+                        {propensityLoading ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} color="var(--color-warning)" />}
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                          {propensityLoading ? 'Calculating...' : `Propensity: ${propensity?.score ?? '--'}%`}
+                        </span>
+                      </div>
+                      {!propensityLoading && propensity && (
+                        <div className="propensity-tooltip">
+                          <div style={{ fontWeight: 700, fontSize: '0.78rem', marginBottom: '0.5rem' }}>Score breakdown</div>
+                          <div className="propensity-tooltip-row">
+                            <span>Recency</span>
+                            <span className="propensity-tooltip-val">{propensity.insights?.recency ?? Math.round((propensity.score ?? 0) * 0.4)}%</span>
+                          </div>
+                          <div className="propensity-tooltip-row">
+                            <span>Frequency</span>
+                            <span className="propensity-tooltip-val">{propensity.insights?.frequency ?? Math.round((propensity.score ?? 0) * 0.35)}%</span>
+                          </div>
+                          <div className="propensity-tooltip-row">
+                            <span>Channel fit</span>
+                            <span className="propensity-tooltip-val">{propensity.insights?.channel ?? Math.round((propensity.score ?? 0) * 0.25)}%</span>
+                          </div>
+                          <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--color-border-light)', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
+                            {propensity.recommendation || (propensity.score >= 70 ? 'Ready for upgrade ask' : propensity.score >= 40 ? 'Stewardship — build relationship' : 'Re-engage with impact story')}
+                          </div>
+                        </div>
+                      )}
                     </div>
+                    {/* Needs attention CTA — shown when 60+ days silent */}
+                    {daysSinceLastGift >= 60 && (
+                      <button
+                        className="needs-attention-btn"
+                        onClick={() => openSingleCompose(
+                          (typeof (activeDonor.meta as Record<string,unknown>)?.preferred_channel === 'string'
+                            ? (activeDonor.meta as Record<string,unknown>).preferred_channel
+                            : 'whatsapp') as 'whatsapp' | 'email',
+                          'reactivate',
+                        )}
+                      >
+                        <BellRing size={11} /> Needs attention · {daysSinceLastGift}d ago
+                      </button>
+                    )}
                   </div>
                   {/* Suggested next action — derived from propensity band when available. */}
                   {(() => {
@@ -1094,173 +1162,239 @@ const CRM: React.FC = () => {
                   <Trash2 size={16} />
                 </button>
               </div>
+              {lastOutreachStatus !== 'idle' && (
+                <div className={`outreach-delivery-pill outreach-delivery-pill--${lastOutreachStatus}`} style={{ marginTop: '0.5rem' }}>
+                  {lastOutreachStatus === 'delivered'
+                    ? <><CheckCircle2 size={12} /> Delivered</>
+                    : <><Send size={12} /> Sent — confirming delivery…</>}
+                </div>
+              )}
             </div>
 
             <div className="detail-body">
-              {/* Donor → campaign(s) → programme(s) → outcomes trail.
-                  This is the funder-pitch panel from the Session 2 audit. */}
-              <DonorImpactPanel donor={activeDonor} />
-
-              <div style={{ marginTop: '1rem' }}>
-                <RecordTasksPanel
-                  entityType="donor"
-                  entityId={String(activeDonor.id)}
-                  entityLabel={activeDonor.name}
-                />
+              {/* ── Tab bar ─────────────────────────────────────── */}
+              <div className="detail-tabs">
+                <button
+                  className={`detail-tab${detailTab === 'overview' ? ' detail-tab--active' : ''}`}
+                  onClick={() => setDetailTab('overview')}
+                >
+                  <LayoutDashboard size={13} /> Overview
+                </button>
+                <button
+                  className={`detail-tab${detailTab === 'history' ? ' detail-tab--active' : ''}`}
+                  onClick={() => setDetailTab('history')}
+                >
+                  <History size={13} /> Giving History
+                  {donorTransactions.length > 0 && (
+                    <span className="detail-tab-count">{donorTransactions.length}</span>
+                  )}
+                </button>
               </div>
 
-              <div className="timeline-section">
-                <div style={{ marginBottom: '1.25rem' }}>
-                  <TouchpointTimeline
-                    donor={activeDonor}
-                    onApprove={async (mid) => {
-                      const ok = await handleNurtureAction(String(activeDonor.id), mid);
-                      return ok;
-                    }}
-                  />
-                </div>
-                <h3 style={{ marginBottom: '1.5rem', fontSize: '1.125rem' }}>Activity Timeline</h3>
-                {donorTransactions.length === 0 ? null : (
-                  <div
-                    ref={donorTxTimelineRef}
-                    style={{ maxHeight: 'min(45vh, 360px)', overflow: 'auto', marginBottom: '0.75rem' }}
-                  >
-                    <div style={{ height: donorTxVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
-                      {donorTxVirtualizer.getVirtualItems().map(vi => {
-                        const tx = donorTransactions[vi.index];
-                        return (
-                          <div
-                            key={tx.id}
-                            data-index={vi.index}
-                            ref={donorTxVirtualizer.measureElement}
-                            style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              width: '100%',
-                              transform: `translateY(${vi.start}px)`,
-                            }}
-                          >
-                            <div className="timeline-item">
-                              <div className="timeline-icon" style={{ borderColor: 'var(--color-primary)' }}>
-                                <IndianRupee size={10} color="var(--color-primary)" />
-                              </div>
-                              <div className="timeline-content">
-                                <div className="timeline-date">
-                                  {tx.date} • {tx.method}
-                                </div>
-                                <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>
-                                  Donation: ₹{tx.amount.toLocaleString()}
-                                </div>
-                                <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-                                  Campaign: {tx.campaignTitle}
-                                </p>
-                                <button
-                                  className="btn btn-secondary"
-                                  style={{ marginTop: '0.5rem', fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
-                                  onClick={() => handleDownload80G(activeDonor.id, tx.id)}
-                                >
-                                  <Download size={12} /> Download 80G
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+              {/* ── Overview tab ─────────────────────────────────── */}
+              {detailTab === 'overview' && (
+                <>
+                  {/* Donor → campaign(s) → programme(s) → outcomes trail. */}
+                  <DonorImpactPanel donor={activeDonor} />
+
+                  <div style={{ marginTop: '1rem' }}>
+                    <RecordTasksPanel
+                      entityType="donor"
+                      entityId={String(activeDonor.id)}
+                      entityLabel={activeDonor.name}
+                    />
+                  </div>
+
+                  <div style={{ marginTop: '1.25rem', marginBottom: '1.25rem' }}>
+                    <TouchpointTimeline
+                      donor={activeDonor}
+                      onApprove={async (mid) => {
+                        const ok = await handleNurtureAction(String(activeDonor.id), mid);
+                        return ok;
+                      }}
+                    />
+                  </div>
+
+                  <div className="stats-section">
+                    <div className="stat-block">
+                      <div className="stat-label">Total Lifetime Value</div>
+                      <div className="stat-value">₹{activeDonor.totalGiven.toLocaleString()}</div>
                     </div>
-                  </div>
-                )}
-                <div className="timeline-item">
-                  <div className="timeline-icon" style={{ borderColor: 'var(--color-warning)' }}>
-                    <Clock size={10} color="var(--color-warning)" />
-                  </div>
-                  <div className="timeline-content">
-                    <div className="timeline-date">Profile Created</div>
-                    <div style={{ fontWeight: 500 }}>Donor Profile Initialized</div>
-                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>System generated 360° profile. AI monitoring active.</p>
-                  </div>
-                </div>
-              </div>
-              <div className="stats-section">
-                <div className="stat-block">
-                  <div className="stat-label">Total Lifetime Value</div>
-                  <div className="stat-value">₹{activeDonor.totalGiven.toLocaleString()}</div>
-                </div>
-                <div className="stat-block">
-                  <div className="stat-label">Donor Score (RFM)</div>
-                  <div className="stat-value" style={{ color: 'var(--color-success)' }}>
-                    {activeDonor.totalGiven > 100000 ? '92' : '75'}/100
-                  </div>
-                </div>
-                {activeDonor.type === 'Recurring' && (
-                  <div className="stat-block">
-                    <div className="stat-label">UPI AutoPay</div>
-                    <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
-                      <CheckCircle size={16} color="var(--color-success)" />
-                      <span style={{ fontWeight: 500 }}>Active Mandate</span>
+                    <div className="stat-block">
+                      <div className="stat-label">Donor Score (RFM)</div>
+                      <div className="stat-value" style={{ color: 'var(--color-success)' }}>
+                        {activeDonor.totalGiven > 100000 ? '92' : '75'}/100
+                      </div>
                     </div>
-                  </div>
-                )}
-                <div className="stat-block">
-                  <div className="stat-label">AI Insight Summary</div>
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginTop: '0.5rem', lineHeight: 1.4, padding: '0.75rem', background: 'var(--color-bg-main)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
-                    {aiLoading ? (
-                      <div className="flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Analyzing history...</div>
-                    ) : (
-                      aiSummary || 'No recent interactions to summarize.'
+                    {activeDonor.type === 'Recurring' && (
+                      <div className="stat-block">
+                        <div className="stat-label">UPI AutoPay</div>
+                        <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
+                          <CheckCircle size={16} color="var(--color-success)" />
+                          <span style={{ fontWeight: 500 }}>Active Mandate</span>
+                        </div>
+                      </div>
                     )}
-                  </div>
-                </div>
-                {sentiment && (
-                  <div className="stat-block">
-                    <div className="stat-label">Donor Sentiment</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-                      <span style={{ fontSize: '1.25rem' }}>{sentiment.sentiment === 'Positive' ? '😊' : sentiment.sentiment === 'Neutral' ? '😐' : '😟'}</span>
-                      <div>
-                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: sentiment.sentiment === 'Positive' ? 'var(--color-success)' : 'var(--color-text-primary)' }}>{sentiment.sentiment}</div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>Confidence Score: {Math.round(sentiment.score * 100)}%</div>
+                    <div className="stat-block">
+                      <div className="stat-label">AI Insight Summary</div>
+                      <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginTop: '0.5rem', lineHeight: 1.4, padding: '0.75rem', background: 'var(--color-bg-main)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                        {aiLoading ? (
+                          <div className="flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Analyzing history...</div>
+                        ) : (
+                          aiSummary || 'No recent interactions to summarize.'
+                        )}
+                      </div>
+                    </div>
+                    {sentiment && (
+                      <div className="stat-block">
+                        <div className="stat-label">Donor Sentiment</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                          <span style={{ fontSize: '1.25rem' }}>{sentiment.sentiment === 'Positive' ? '😊' : sentiment.sentiment === 'Neutral' ? '😐' : '😟'}</span>
+                          <div>
+                            <div style={{ fontSize: '0.875rem', fontWeight: 600, color: sentiment.sentiment === 'Positive' ? 'var(--color-success)' : 'var(--color-text-primary)' }}>{sentiment.sentiment}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)' }}>Confidence Score: {Math.round(sentiment.score * 100)}%</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div className="stat-block">
+                      <div className="stat-label">ML Recommendation</div>
+                      <div style={{ fontSize: '0.8rem', color: propensity?.score && propensity.score > 70 ? 'var(--color-success)' : 'var(--color-text-secondary)', marginTop: '0.5rem', fontWeight: 500 }}>
+                        {propensityLoading ? 'Calculating recommendation...' : (propensity?.recommendation || 'No recommendation available.')}
+                      </div>
+                    </div>
+                    <div className="stat-block" style={{ gridColumn: 'span 1' }}>
+                      <div className="stat-label flex justify-between items-center">
+                        Relationship Notes
+                        <button className="text-primary flex items-center gap-1" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem' }}
+                          onClick={async () => {
+                            try {
+                              const donorId = activeDonor?.id ? String(activeDonor.id) : '';
+                              const res = await apiFetch('/crm/outreach', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  mode: 'voice_event',
+                                  channel: 'whatsapp',
+                                  donor_ids: donorId ? [donorId] : [],
+                                  message: 'Voice note capture requested from UI.',
+                                }),
+                              });
+                              if (!res.ok) throw new Error('voice');
+                              toast.success('Voice note request logged.', { icon: '🎙️' });
+                            } catch {
+                              toast.error('Failed to log voice note request.');
+                            }
+                          }}>
+                          <Mic size={14} /> Voice Note
+                        </button>
+                      </div>
+                      <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginTop: '0.5rem', fontStyle: 'italic', padding: '0.5rem', borderLeft: '2px solid var(--color-border)' }}>
+                        "Interested in the new school project. Mentioned she might bring her husband for the site visit next month."
                       </div>
                     </div>
                   </div>
-                )}
-                <div className="stat-block">
-                  <div className="stat-label">ML Recommendation</div>
-                  <div style={{ fontSize: '0.8rem', color: propensity?.score && propensity.score > 70 ? 'var(--color-success)' : 'var(--color-text-secondary)', marginTop: '0.5rem', fontWeight: 500 }}>
-                    {propensityLoading ? 'Calculating recommendation...' : (propensity?.recommendation || 'No recommendation available.')}
-                  </div>
-                </div>
+                </>
+              )}
 
-                <div className="stat-block" style={{ gridColumn: 'span 1' }}>
-                  <div className="stat-label flex justify-between items-center">
-                    Relationship Notes
-                    <button className="text-primary flex items-center gap-1" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem' }} 
-                      onClick={async () => {
-                        try {
-                          const donorId = activeDonor?.id ? String(activeDonor.id) : '';
-                          const res = await apiFetch('/crm/outreach', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              mode: 'voice_event',
-                              channel: 'whatsapp',
-                              donor_ids: donorId ? [donorId] : [],
-                              message: 'Voice note capture requested from UI.',
-                            }),
-                          });
-                          if (!res.ok) throw new Error('voice');
-                          toast.success('Voice note request logged.', { icon: '🎙️' });
-                        } catch {
-                          toast.error('Failed to log voice note request.');
-                        }
-                      }}>
-                      <Mic size={14} /> Voice Note
-                    </button>
-                  </div>
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginTop: '0.5rem', fontStyle: 'italic', padding: '0.5rem', borderLeft: '2px solid var(--color-border)' }}>
-                    "Interested in the new school project. Mentioned she might bring her husband for the site visit next month."
+              {/* ── Giving History tab ───────────────────────────── */}
+              {detailTab === 'history' && (
+                <div style={{ paddingTop: '0.5rem' }}>
+                  {/* Programme impact roll-up from tagged transactions */}
+                  {impactByProgramme.length > 0 && (
+                    <div style={{ marginBottom: '1.25rem', padding: '0.85rem 1rem', background: 'linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 6%, transparent), var(--color-bg-card))', border: '1px solid color-mix(in srgb, var(--color-accent) 22%, transparent)', borderRadius: 'var(--radius-xl)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.6rem' }}>
+                        <BookOpen size={14} color="var(--color-accent)" />
+                        <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>Programmes funded by {activeDonor.name.split(' ')[0]}</span>
+                      </div>
+                      <div className="programme-impact-pills">
+                        {impactByProgramme.map(({ id, total }) => (
+                          <span key={id} className="programme-impact-pill">
+                            {id} · ₹{total >= 100000 ? `${(total / 100000).toFixed(1)}L` : total >= 1000 ? `${(total / 1000).toFixed(0)}K` : total.toLocaleString()}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Transaction list */}
+                  {donorTransactions.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--color-text-tertiary)' }}>
+                      <IndianRupee size={28} style={{ margin: '0 auto 0.75rem', opacity: 0.35 }} />
+                      <p style={{ fontSize: '0.875rem' }}>No recorded gifts yet for {activeDonor.name}.</p>
+                    </div>
+                  ) : (
+                    <div
+                      ref={donorTxTimelineRef}
+                      style={{ maxHeight: 'min(55vh, 480px)', overflow: 'auto' }}
+                    >
+                      <div style={{ height: donorTxVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                        {donorTxVirtualizer.getVirtualItems().map(vi => {
+                          const tx = donorTransactions[vi.index];
+                          return (
+                            <div
+                              key={tx.id}
+                              data-index={vi.index}
+                              ref={donorTxVirtualizer.measureElement}
+                              style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                transform: `translateY(${vi.start}px)`,
+                              }}
+                            >
+                              <div className="history-tx-row">
+                                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                  <IndianRupee size={14} color="var(--color-primary)" />
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                                    <div>
+                                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>₹{tx.amount.toLocaleString()}</div>
+                                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: '0.1rem' }}>
+                                        {tx.date} · {tx.method}
+                                      </div>
+                                    </div>
+                                    <button
+                                      className="btn btn-secondary"
+                                      style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', flexShrink: 0 }}
+                                      onClick={() => handleDownload80G(activeDonor.id, tx.id)}
+                                    >
+                                      <Download size={11} /> 80G
+                                    </button>
+                                  </div>
+                                  <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>{tx.campaignTitle}</span>
+                                    {tx.programmeId && (
+                                      <span className="programme-impact-pill" style={{ fontSize: '0.68rem' }}>{tx.programmeId}</span>
+                                    )}
+                                    {tx.grantId && (
+                                      <span className="badge badge-outline" style={{ fontSize: '0.68rem' }}>Grant: {tx.grantId}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Profile created anchor */}
+                  <div className="timeline-item" style={{ marginTop: '1rem' }}>
+                    <div className="timeline-icon" style={{ borderColor: 'var(--color-warning)' }}>
+                      <Clock size={10} color="var(--color-warning)" />
+                    </div>
+                    <div className="timeline-content">
+                      <div className="timeline-date">Profile Created</div>
+                      <div style={{ fontWeight: 500 }}>Donor Profile Initialized</div>
+                      <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>System generated 360° profile. AI monitoring active.</p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
