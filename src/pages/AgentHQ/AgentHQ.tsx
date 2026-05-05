@@ -57,7 +57,7 @@ interface AuditLogEntry {
   type: string;
   agent?: string;
   risk?: string;
-  outcome?: 'approved' | 'rejected' | 'failed' | 'escalated' | 'applied';
+  outcome?: 'approved' | 'rejected' | 'failed' | 'expired' | 'applied';
   payload: string;
 }
 
@@ -397,8 +397,8 @@ function buildComplianceExpiryIntents(complianceDocs: ReturnType<typeof useStore
 // ── Edit Intent Modal Component ────────────────────────────────────────────────
 const EditIntentModal: React.FC<{
   state: EditModalState;
-  donors: { name: string }[];
-  beneficiaries: { name: string }[];
+  donors: { id: string; name: string }[];
+  beneficiaries: { id: string; name: string }[];
   onSave: (updated: EditModalState) => void;
   onCancel: () => void;
 }> = ({ state, donors, beneficiaries, onSave, onCancel }) => {
@@ -408,14 +408,17 @@ const EditIntentModal: React.FC<{
     state.originalAmount != null ? String(state.originalAmount) : ''
   );
 
-  const allNames = [
+  // Accept by id OR name (case-insensitive), matching donor ID, beneficiary id, or display name
+  const allTokens = new Set([
+    ...donors.map(d => d.id.toLowerCase()),
     ...donors.map(d => d.name.toLowerCase()),
+    ...beneficiaries.map(b => b.id.toLowerCase()),
     ...beneficiaries.map(b => b.name.toLowerCase()),
-  ];
+  ]);
 
   const amount = parseFloat(amountStr.replace(/,/g, ''));
   const amountExceeded = state.originalAmount != null && !isNaN(amount) && amount > state.originalAmount * 10;
-  const recipientInvalid = recipient.trim().length > 0 && !allNames.includes(recipient.trim().toLowerCase());
+  const recipientInvalid = recipient.trim().length > 0 && !allTokens.has(recipient.trim().toLowerCase());
   const canSave = !amountExceeded && !recipientInvalid && directive.trim().length > 0;
 
   return (
@@ -579,7 +582,8 @@ const AgentHQ: React.FC = () => {
   const [logOutcomeFilter, setLogOutcomeFilter] = useState('');
 
   // ── Step 4: Session-live performance counters ───────────────────────────────
-  const [sessionCounts, setSessionCounts] = useState<Record<string, { approved: number; rejected: number }>>({});
+  // streak: consecutive approvals since last rejection (resets to 0 on any rejection)
+  const [sessionCounts, setSessionCounts] = useState<Record<string, { streak: number; approved: number; rejected: number }>>({});
 
   // ── Step 5: Escalation tracking ────────────────────────────────────────────
   // Maps intent id → new expiry ISO string (set when countdown hits zero)
@@ -588,6 +592,8 @@ const AgentHQ: React.FC = () => {
   // ── Step 6: Edit intent modal ───────────────────────────────────────────────
   const [editModal, setEditModal]     = useState<EditModalState | null>(null);
   const [editCounts, setEditCounts]   = useState<Record<string, number>>({});
+  // intentEdits: directive/recipient overrides that are applied to the rendered cards after a save
+  const [intentEdits, setIntentEdits] = useState<Record<string, { directive: string; recipient?: string }>>({});
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   const appendAuditLog = (entry: Omit<AuditLogEntry, 'id' | 'created_at'>) => {
@@ -599,10 +605,12 @@ const AgentHQ: React.FC = () => {
     setAuditLogs(prev => [newEntry, ...prev]);
   };
 
+  // Streak increments on approve, resets to 0 on any rejection (per spec)
   const bumpSessionCount = (agentName: string, type: 'approved' | 'rejected') => {
     setSessionCounts(prev => {
-      const cur = prev[agentName] ?? { approved: 0, rejected: 0 };
-      return { ...prev, [agentName]: { ...cur, [type]: cur[type] + 1 } };
+      const cur = prev[agentName] ?? { streak: 0, approved: 0, rejected: 0 };
+      const streak = type === 'approved' ? cur.streak + 1 : 0;
+      return { ...prev, [agentName]: { streak, approved: cur.approved + (type === 'approved' ? 1 : 0), rejected: cur.rejected + (type === 'rejected' ? 1 : 0) } };
     });
   };
 
@@ -709,18 +717,25 @@ const AgentHQ: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ decision: 'approved' }),
           });
-          if (!res.ok) throw new Error('decision');
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({})) as Record<string, unknown>;
+            throw new Error(String(errBody.detail ?? errBody.message ?? `HTTP ${res.status}`));
+          }
           const execRes = await apiFetch(`/intent/queue/${encodeURIComponent(a.id)}/execute`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ dry_run: false }),
           });
-          if (!execRes.ok) throw new Error('execute');
+          if (!execRes.ok) {
+            const errBody = await execRes.json().catch(() => ({})) as Record<string, unknown>;
+            const detail = String(errBody.detail ?? errBody.message ?? `HTTP ${execRes.status}`);
+            throw new Error(detail);
+          }
           results.push({ id: a.id, directive: a.directive, outcome: 'ok' });
           bumpSessionCount(agentName, 'approved');
           appendAuditLog({ type: 'batch_decision', agent: agentName, risk: a.risk_level, outcome: 'approved', payload: a.directive });
-        } catch (err: any) {
-          const reason = err?.message === 'execute' ? 'Execution error' : 'Decision error';
+        } catch (e: unknown) {
+          const reason = e instanceof Error ? e.message : 'Unknown error';
           results.push({ id: a.id, directive: a.directive, outcome: 'failed', reason });
           appendAuditLog({ type: 'batch_decision', agent: agentName, risk: a.risk_level, outcome: 'failed', payload: `${a.directive} — ${reason}` });
         }
@@ -791,15 +806,16 @@ const AgentHQ: React.FC = () => {
     }
   };
 
-  // ── Step 5: Escalation handler ──────────────────────────────────────────────
+  // ── Step 5: Escalation handler — only high/critical risk intents escalate ───
   const handleIntentExpire = (intentId: string, agentName: string, risk: string) => {
+    if (risk !== 'high' && risk !== 'critical') return; // medium/low simply expire
     const newExpiry = new Date(Date.now() + 2 * 3600000).toISOString();
     setEscalatedIntents(prev => ({ ...prev, [intentId]: newExpiry }));
     appendAuditLog({
-      type: 'intent_escalated',
+      type: 'intent_expired',
       agent: agentName,
       risk: 'critical',
-      outcome: 'escalated',
+      outcome: 'expired',
       payload: `Intent ${intentId} expired without action — escalated to Critical (was ${risk})`,
     });
   };
@@ -825,6 +841,11 @@ const AgentHQ: React.FC = () => {
 
   const handleSaveEdit = (updated: EditModalState) => {
     setEditCounts(prev => ({ ...prev, [updated.intentId]: (prev[updated.intentId] ?? 0) + 1 }));
+    // Persist the edited directive so the card reflects the change immediately
+    setIntentEdits(prev => ({
+      ...prev,
+      [updated.intentId]: { directive: updated.directive, recipient: updated.recipient || undefined },
+    }));
     appendAuditLog({
       type: 'intent_edited',
       agent: 'User',
@@ -849,6 +870,13 @@ const AgentHQ: React.FC = () => {
     if (logOutcomeFilter && (l.outcome || '') !== logOutcomeFilter) return false;
     return true;
   });
+
+  // Apply any saved parameter edits to an intent before rendering
+  const applyEdits = (intent: RichIntent): RichIntent => {
+    const edit = intentEdits[intent.id];
+    if (!edit) return intent;
+    return { ...intent, directive: edit.directive };
+  };
 
   const auditScrollRef = useRef<HTMLDivElement>(null);
   const auditVirtualizer = useVirtualizer({
@@ -996,7 +1024,7 @@ const AgentHQ: React.FC = () => {
                   {complianceExpiryIntents.map(intent => (
                     <IntentCard
                       key={intent.id}
-                      intent={intent}
+                      intent={applyEdits(intent)}
                       onApprove={() => toast('Navigate to Compliance HQ to upload the renewed certificate.', { icon: '📋' })}
                       onReject={() => toast('Reminder dismissed for this session — doc still requires renewal.', { icon: '⚠️' })}
                       onEdit={(i, c) => handleEditIntent(i, c)}
@@ -1012,7 +1040,7 @@ const AgentHQ: React.FC = () => {
                     ...approvals.filter(a => escalatedIntents[a.id]),
                     ...approvals.filter(a => !escalatedIntents[a.id]),
                   ].map(approval => {
-                    const richIntent = normalizeApproval(approval);
+                    const richIntent = applyEdits(normalizeApproval(approval));
                     return (
                       <IntentCard
                         key={approval.id}
@@ -1042,7 +1070,7 @@ const AgentHQ: React.FC = () => {
                           {getMockIntents().map(intent => (
                             <IntentCard
                               key={intent.id}
-                              intent={intent}
+                              intent={applyEdits(intent)}
                               onApprove={() => toast.success('Demo: agents would execute this action', { icon: '✓' })}
                               onReject={() => toast('Demo: intent removed from queue', { icon: '✕' })}
                               onEdit={(i, c) => handleEditIntent(i, c)}
@@ -1083,7 +1111,7 @@ const AgentHQ: React.FC = () => {
                             <span className="session-metric-rejected">✗ {counts.rejected}</span>
                           </div>
                           <div style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
-                            streak: {counts.rejected === 0 ? counts.approved : counts.approved - counts.rejected > 0 ? counts.approved - counts.rejected : 0} correct in a row
+                            streak: {counts.streak} correct in a row
                           </div>
                         </div>
                       ))}
@@ -1182,8 +1210,7 @@ const AgentHQ: React.FC = () => {
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
                 <option value="failed">Failed</option>
-                <option value="escalated">Escalated</option>
-                <option value="applied">Applied</option>
+                <option value="expired">Expired</option>
               </select>
 
               {/* Risk multi-select chips */}
@@ -1234,7 +1261,7 @@ const AgentHQ: React.FC = () => {
                   {auditVirtualizer.getVirtualItems().map(vr => {
                     const log = filteredLogs[vr.index];
                     const outcomeColor: Record<string, string> = {
-                      approved: '#16A34A', rejected: '#DC2626', failed: '#DC2626', escalated: '#D97706', applied: '#2563EB',
+                      approved: '#16A34A', rejected: '#DC2626', failed: '#DC2626', expired: '#D97706', applied: '#2563EB',
                     };
                     return (
                       <div
