@@ -12,6 +12,7 @@ import { useTier } from '../../hooks/useTier';
 import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import MisReviewQueue from '../../components/AgentHQ/MisReviewQueue';
 import ComplianceCascadeQueue from '../../components/AgentHQ/ComplianceCascadeQueue';
+import { useStore } from '../../store/useStore';
 
 type QueueItem = {
   id: string;
@@ -226,12 +227,51 @@ const IntentCard: React.FC<{
   );
 };
 
+// ── Compliance expiry → RichIntent cards ──────────────────────────────────────
+// Synthesise intent cards from compliance docs expiring within 14 days so that
+// Agent HQ always shows renewal alerts even when the backend /intent/queue is
+// empty or offline. Items are deduplicated by doc id on every re-render.
+function buildComplianceExpiryIntents(complianceDocs: ReturnType<typeof useStore.getState>['complianceDocs']): RichIntent[] {
+  const nowMs = Date.now();
+  return complianceDocs.flatMap(doc => {
+    if (!doc.expiry) return [];
+    const daysLeft = Math.ceil((new Date(doc.expiry).getTime() - nowMs) / 86_400_000);
+    if (daysLeft > 14) return [];
+    const dayText = daysLeft < 0
+      ? `expired ${Math.abs(daysLeft)}d ago`
+      : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;
+    const riskLevel: RichIntent['risk_level'] = daysLeft <= 0 ? 'critical' : daysLeft <= 7 ? 'high' : 'medium';
+    return [{
+      id: `compliance-expiry-intent-${doc.id}`,
+      agent_name: 'Compliance Guardian',
+      action_type: 'compliance_renewal',
+      directive: `Initiate renewal for ${doc.name} — ${dayText}`,
+      risk_level: riskLevel,
+      evidence_summary: `${doc.type} document "${doc.name}" ${dayText}. Missing renewal risks grant compliance blocks and donor receipt validity.${doc.assigned_to ? ` Assigned owner: ${doc.assigned_to}.` : ''} Navigate to Compliance HQ to upload the renewed certificate and update the expiry date.`,
+      impact_preview: {
+        '📋 Document': doc.name,
+        '🏷️ Type': doc.type,
+        '📅 Expiry': doc.expiry,
+        '⚠️ Risk': riskLevel.charAt(0).toUpperCase() + riskLevel.slice(1),
+        ...(doc.assigned_to ? { '👤 Owner': doc.assigned_to } : {}),
+      },
+      reversibility: 'reversible',
+      expires_at: new Date(new Date(doc.expiry).getTime() + 7 * 86_400_000).toISOString(),
+      created_at: new Date().toISOString(),
+    }] satisfies RichIntent[];
+  });
+}
+
 const AgentHQ: React.FC = () => {
   // Tier gate — Starter doesn't include AI agents. We still render the UI so
   // users can see what's behind the paywall, but every action button is gated.
   const { limits: tierLims, openUpgrade: openTierUpgrade } = useTier();
   const agentsEnabled = tierLims.aiAgents;
   const [aiUpgradeOpen, setAiUpgradeOpen] = useState(false);
+
+  // ── Compliance expiry intent cards (always-on, no backend dependency) ──────
+  const complianceDocs = useStore(s => s.complianceDocs);
+  const complianceExpiryIntents = buildComplianceExpiryIntents(complianceDocs);
 
   const [approvals, setApprovals] = useState<QueueItem[]>([]);
   const [approvalsLoading, setApprovalsLoading] = useState(false);
@@ -511,7 +551,7 @@ const AgentHQ: React.FC = () => {
         </div>
         <div className="agent-stat-card">
           <div className="stat-label"><ShieldAlert size={16} color="var(--color-warning)" /> Pending Approvals</div>
-          <div className="stat-value">{approvals.length}</div>
+          <div className="stat-value">{approvals.length + complianceExpiryIntents.length}</div>
         </div>
         <div className="agent-stat-card">
           <div className="stat-label"><Bot size={16} color="#8b5cf6" /> Active Agents</div>
@@ -522,7 +562,7 @@ const AgentHQ: React.FC = () => {
       {/* Tab Bar */}
       <div className="flex gap-2" style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--color-border-light)', paddingBottom: 0 }}>
         {[
-          { id: 'queue', label: '⚡ HITL Queue', count: approvals.length },
+          { id: 'queue', label: '⚡ HITL Queue', count: approvals.length + complianceExpiryIntents.length },
           { id: 'metrics', label: '📊 Performance' },
           { id: 'config', label: '⚙️ Agent Config' },
         ].map(t => (
@@ -565,6 +605,16 @@ const AgentHQ: React.FC = () => {
                 <ComplianceCascadeQueue />
                 <MisReviewQueue />
                 <div className="approval-list">
+                  {/* Compliance expiry intent cards — sourced from store, always visible */}
+                  {complianceExpiryIntents.map(intent => (
+                    <IntentCard
+                      key={intent.id}
+                      intent={intent}
+                      onApprove={() => toast('Navigate to Compliance HQ to upload the renewed certificate.', { icon: '📋' })}
+                      onReject={() => toast('Reminder dismissed for this session — doc still requires renewal.', { icon: '⚠️' })}
+                      onModify={() => toast('Go to Compliance HQ to update the expiry date and re-upload.', { icon: '✏️' })}
+                    />
+                  ))}
                   {approvals.map(approval => (
                     <IntentCard
                       key={approval.id}
@@ -574,7 +624,7 @@ const AgentHQ: React.FC = () => {
                       onModify={() => toast('Open the Action Card to edit parameters, then re-approve.', { icon: '✏️' })}
                     />
                   ))}
-                  {!approvalsLoading && approvals.length === 0 && (
+                  {!approvalsLoading && approvals.length === 0 && complianceExpiryIntents.length === 0 && (
                     <div>
                       <div className="intent-all-clear">
                         <CheckCircle size={18} style={{ color: '#16A34A' }} />
