@@ -476,11 +476,8 @@ const Finance: React.FC = () => {
 
   // Core save logic — called directly OR after user confirms the FCRA guard.
   const doSaveJournalEntry = async (entryToSave: typeof entry) => {
-    // Feature 2: Persistent receipt numbering.
-    // In mock / offline mode (isMockEnabled()), generate the number client-side
-    // from the localStorage counter and send it in the POST body so the mock
-    // handler can echo it back. In production, send null and use the DB-sequence
-    // number the server returns — no localStorage counter is consumed.
+    // Receipt numbering: localStorage counter in mock mode; DB-sequence from
+    // server response in production. clientReceiptNo is only set when mocked.
     const clientReceiptNo: string | undefined =
       entryToSave.type === 'Income' && isMockEnabled()
         ? nextReceiptNumber(ngoName)
@@ -514,31 +511,22 @@ const Finance: React.FC = () => {
       }
     } catch { /* offline/no backend */ }
 
-    // Resolve the authoritative receipt number.
-    // The server response is typed as unknown — narrow safely without any-casts.
+    // Resolve receipt number: prefer server-returned DB sequence; fall back to
+    // clientReceiptNo (only set in mock mode). Warn in production if missing.
     const serverReceiptNo: string | undefined =
       typeof payload === 'object' && payload !== null && 'receipt_number' in payload
         ? (typeof (payload as Record<string, unknown>).receipt_number === 'string'
             ? (payload as Record<string, unknown>).receipt_number as string
             : undefined)
         : undefined;
-    // Production: use the DB-sequence number from the server response.
-    // Mock / offline: fall back to the localStorage-generated clientReceiptNo.
-    // If in production mode and the server didn't return a receipt number, warn —
-    // this indicates the backend hasn't implemented the sequence endpoint yet.
     let receiptNo: string | undefined;
     if (entryToSave.type === 'Income') {
       if (serverReceiptNo) {
         receiptNo = serverReceiptNo;
       } else if (clientReceiptNo) {
-        // clientReceiptNo is only set when isMockEnabled() — so this branch only
-        // executes in mock/offline mode. In production the client never generates one.
         receiptNo = clientReceiptNo;
       } else {
-        // Production + no server receipt number: backend hasn't implemented the
-        // /finance/issue-receipt sequence yet. Surface a clear warning.
         toast('Receipt number not issued — backend sequence endpoint not yet implemented.', { icon: '⚠️', duration: 5000 });
-        receiptNo = undefined;
       }
     }
 
@@ -600,14 +588,10 @@ const Finance: React.FC = () => {
   const handleJournalEntry = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Feature 3: FCRA admin 18% cap guard — block before save if an FCRA
-    // admin-overhead expense would push total admin spend above 18% of FCRA
-    // foreign funds.
-    // An entry is treated as admin overhead if:
-    //   a) The user explicitly checked "Admin overhead?", OR
-    //   b) The AI category or the selected budget head label contains a known
-    //      admin keyword — auto-derived so the guard fires even if the checkbox
-    //      was not manually set.
+    // FCRA admin 18% pre-save guard. Admin status is auto-derived from the
+    // explicit checkbox OR matching keywords in the AI category / budget head
+    // label. The resolved flag is written back into the entry before save so
+    // the monitor and stored data stay consistent with the guard decision.
     const ADMIN_KEYWORDS = ['admin', 'overhead', 'management', 'salary', 'salaries', 'rent', 'utilities', 'payroll'];
     const selectedHead = entry.budgetHeadId
       ? grantBudgetHeads.find(h => h.id === entry.budgetHeadId)
@@ -617,38 +601,39 @@ const Finance: React.FC = () => {
       (entry.category ? ADMIN_KEYWORDS.some(k => entry.category.toLowerCase().includes(k)) : false) ||
       (selectedHead   ? ADMIN_KEYWORDS.some(k => selectedHead.label.toLowerCase().includes(k)) : false);
 
-    if (entry.type === 'Expense' && entry.fund === 'FCRA' && derivedIsAdmin && fcraTotal > 0) {
+    // Normalise: persist derived admin classification into the entry so
+    // doSaveJournalEntry records the correct isAdminOverhead value regardless
+    // of how admin status was determined.
+    const normalisedEntry = { ...entry, isAdminOverhead: derivedIsAdmin };
+
+    if (normalisedEntry.type === 'Expense' && normalisedEntry.fund === 'FCRA' && derivedIsAdmin && fcraTotal > 0) {
       const currentFcraAdminSpent = journalEntries
         .filter(je => je.entryType === 'Expense' && je.fund === 'FCRA' && je.isAdminOverhead)
         .reduce((s, je) => s + Math.abs(Number(je.amount) || 0), 0);
-      const projected = currentFcraAdminSpent + Number(entry.amount);
+      const projected = currentFcraAdminSpent + Number(normalisedEntry.amount);
       const projectedPct = (projected / fcraTotal) * 100;
       const CAP = 18;
       if (projectedPct > CAP) {
         const currentPct = (currentFcraAdminSpent / fcraTotal) * 100;
         const remaining = fcraTotal * (CAP / 100) - currentFcraAdminSpent;
-        const capturedEntry = { ...entry };
         setFcraGuardEntry({
           currentPct,
           projectedPct,
           remainingHeadroom: Math.max(0, remaining),
           onConfirm: () => {
             setFcraGuardEntry(null);
-            doSaveJournalEntry(capturedEntry);
+            doSaveJournalEntry(normalisedEntry);
           },
         });
         return;
       }
     }
 
-    await doSaveJournalEntry(entry);
+    await doSaveJournalEntry(normalisedEntry);
   };
 
-  // Feature 5: Bulk 80G receipt generation.
-  // Finds income journal entries in the current calendar month that have a
-  // linked donor AND no receipt number yet (deduplication: already-receipted
-  // entries are skipped). Generates one HTML file per receipt and bundles them
-  // into a real ZIP archive (pure-JS STORE method, no external dependency).
+  // Bulk 80G receipt generation — current-month income entries with donor link
+  // and no existing receipt. ZIP of individual HTML files (pure-JS STORE).
   const handleBulkReceiptGeneration = async () => {
     setBulkReceiptBusy(true);
     try {
