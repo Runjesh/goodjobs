@@ -496,6 +496,19 @@ const CRM: React.FC = () => {
     }
   };
 
+  /** A lightweight in-session outreach log that drives the per-touchpoint
+   *  delivery status indicator.  Each entry is appended on Send and async-
+   *  updated to 'delivered' after a 2-second mock delay. */
+  interface OutreachEntry {
+    id: string;
+    donorId: string;
+    date: string;
+    channel: 'whatsapp' | 'email';
+    template: string;
+    status: 'sent' | 'delivered';
+  }
+  const [outreachLog, setOutreachLog] = useState<OutreachEntry[]>([]);
+
   const [emailNotConnected, setEmailNotConnected] = useState(false);
   const [composerSending, setComposerSending] = useState(false);
   /** Per-recipient failure list from the most recent send — surfaced as an
@@ -586,7 +599,23 @@ const CRM: React.FC = () => {
           setSelectedIds(new Set());
           setBulkMode(false);
           setLastOutreachStatus('sent');
-          setTimeout(() => setLastOutreachStatus('delivered'), 2000);
+          if (!bulkMode && activeDonor) {
+            const entry: OutreachEntry = {
+              id: Date.now().toString(),
+              donorId: String(activeDonor.id),
+              date: new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+              channel: 'email',
+              template: selectedTemplate.label,
+              status: 'sent',
+            };
+            setOutreachLog(prev => [entry, ...prev]);
+            setTimeout(() => {
+              setOutreachLog(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'delivered' } : e));
+              setLastOutreachStatus('delivered');
+            }, 2000);
+          } else {
+            setTimeout(() => setLastOutreachStatus('delivered'), 2000);
+          }
         }
         return;
       }
@@ -624,7 +653,23 @@ const CRM: React.FC = () => {
         setSelectedIds(new Set());
         setBulkMode(false);
         setLastOutreachStatus('sent');
-        setTimeout(() => setLastOutreachStatus('delivered'), 2000);
+        if (!bulkMode && activeDonor) {
+          const entry: OutreachEntry = {
+            id: Date.now().toString(),
+            donorId: String(activeDonor.id),
+            date: new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+            channel: 'whatsapp',
+            template: selectedTemplate.label,
+            status: 'sent',
+          };
+          setOutreachLog(prev => [entry, ...prev]);
+          setTimeout(() => {
+            setOutreachLog(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'delivered' } : e));
+            setLastOutreachStatus('delivered');
+          }, 2000);
+        } else {
+          setTimeout(() => setLastOutreachStatus('delivered'), 2000);
+        }
       }
     } catch {
       toast.error('Failed to send (backend not reachable).');
@@ -648,15 +693,17 @@ const CRM: React.FC = () => {
     setShowComposer(true);
   };
 
-  const openSingleCompose = (channel: 'whatsapp' | 'email', templateId?: string) => {
+  const openSingleCompose = (channel: 'whatsapp' | 'email', templateId?: string, prefillMsg?: string) => {
     setComposerChannel(channel);
     setBulkMode(false);
     if (templateId) {
       const t = WA_TEMPLATES.find(x => x.id === templateId);
       if (t) {
         setSelectedTemplate(t);
-        setCustomMessage(t.body);
+        setCustomMessage(prefillMsg ?? t.body);
       }
+    } else if (prefillMsg) {
+      setCustomMessage(prefillMsg);
     }
     setEmailNotConnected(false);
     setLastSendFailures([]);
@@ -1077,19 +1124,23 @@ const CRM: React.FC = () => {
                       )}
                     </div>
                     {/* Needs attention CTA — shown when 60+ days silent */}
-                    {daysSinceLastGift >= 60 && (
-                      <button
-                        className="needs-attention-btn"
-                        onClick={() => openSingleCompose(
-                          (typeof (activeDonor.meta as Record<string,unknown>)?.preferred_channel === 'string'
-                            ? (activeDonor.meta as Record<string,unknown>).preferred_channel
-                            : 'whatsapp') as 'whatsapp' | 'email',
-                          'reactivate',
-                        )}
-                      >
-                        <BellRing size={11} /> Needs attention · {daysSinceLastGift}d ago
-                      </button>
-                    )}
+                    {daysSinceLastGift >= 60 && (() => {
+                      const meta = (activeDonor.meta || {}) as Record<string, unknown>;
+                      const ch = meta.preferred_channel;
+                      const safeChannel: 'whatsapp' | 'email' = (ch === 'whatsapp' || ch === 'email') ? ch : 'whatsapp';
+                      const lastProg = donorTransactions.find(t => t.programmeId)?.programmeId;
+                      const attentionMsg = lastProg
+                        ? `Namaste {name}! 🙏 We've been continuing our ${lastProg} programme and your past support has made a real difference. It's been a while since we last connected — we'd love to share an update and stay in touch. Reply to reconnect!`
+                        : WA_TEMPLATES.find(t => t.id === 'reactivate')?.body ?? '';
+                      return (
+                        <button
+                          className="needs-attention-btn"
+                          onClick={() => openSingleCompose(safeChannel, 'reactivate', attentionMsg)}
+                        >
+                          <BellRing size={11} /> Needs attention · {daysSinceLastGift}d ago
+                        </button>
+                      );
+                    })()}
                   </div>
                   {/* Suggested next action — derived from propensity band when available. */}
                   {(() => {
@@ -1214,6 +1265,37 @@ const CRM: React.FC = () => {
                       }}
                     />
                   </div>
+
+                  {/* Recent outreach touchpoint cards — delivery status flips sent→delivered */}
+                  {(() => {
+                    const donorLog = outreachLog.filter(e => e.donorId === String(activeDonor.id));
+                    if (donorLog.length === 0) return null;
+                    return (
+                      <div style={{ marginBottom: '1.25rem' }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Recent Outreach
+                        </div>
+                        {donorLog.slice(0, 5).map(entry => (
+                          <div key={entry.id} className="outreach-log-card">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
+                              {entry.channel === 'whatsapp'
+                                ? <MessageCircle size={14} color="#16a34a" />
+                                : <Mail size={14} color="var(--color-primary)" />}
+                              <div>
+                                <div style={{ fontSize: '0.8rem', fontWeight: 500 }}>{entry.template}</div>
+                                <div style={{ fontSize: '0.71rem', color: 'var(--color-text-tertiary)' }}>{entry.date} · {entry.channel}</div>
+                              </div>
+                            </div>
+                            <span className={`outreach-delivery-pill outreach-delivery-pill--${entry.status}`}>
+                              {entry.status === 'delivered'
+                                ? <><CheckCircle2 size={11} /> Delivered</>
+                                : <><Send size={11} /> Sent</>}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   <div className="stats-section">
                     <div className="stat-block">
@@ -1363,6 +1445,9 @@ const CRM: React.FC = () => {
                                     >
                                       <Download size={11} /> 80G
                                     </button>
+                                  </div>
+                                  <div style={{ marginTop: '0.25rem', fontSize: '0.7rem', color: 'var(--color-text-tertiary)', fontFamily: 'monospace' }}>
+                                    Receipt #{tx.id.slice(0, 8).toUpperCase()}
                                   </div>
                                   <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
                                     <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>{tx.campaignTitle}</span>

@@ -762,3 +762,16 @@
 .history-tx-row:last-child {
   border-bottom: none;
 }
+
+/* ── Recent Outreach touchpoint cards ────────────────────── */
+.outreach-log-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  margin-bottom: 0.375rem;
+}
