@@ -99,6 +99,16 @@ export interface Transaction {
   campaignTitle: string;
   date: string;
   timestamp: number;
+  /**
+   * Cross-module join: which grant this income receipt is associated with.
+   * Mirrors the `grant_id` column added to the backend `transactions` table.
+   */
+  grantId?: string;
+  /**
+   * Cross-module join: which programme this income receipt supports.
+   * Mirrors the `programme_id` column added to the backend `transactions` table.
+   */
+  programmeId?: string;
 }
 
 export interface CSRCard {

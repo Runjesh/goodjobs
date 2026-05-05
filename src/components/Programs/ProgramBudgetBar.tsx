@@ -36,11 +36,11 @@ const ProgramBudgetBar: React.FC<Props> = ({ programName, allowEdit }) => {
   );
 
   // Merge liveSpent into the budget object so classifyBudget and
-  // budgetUtilization see the real number. Fall back to budget.spent when no
-  // journal entries have been tagged yet (prevents erasing manually-recorded
-  // spend from previous sessions before journal tagging was adopted).
+  // budgetUtilization always see the authoritative journal-derived number.
+  // No fallback to budget.spent — spend is strictly computed from tagged
+  // journal entries to guarantee live accuracy.
   const effectiveBudget = budget
-    ? { ...budget, spent: liveSpent > 0 ? liveSpent : budget.spent }
+    ? { ...budget, spent: liveSpent }
     : undefined;
 
   const health = effectiveBudget ? classifyBudget(effectiveBudget) : 'no_budget';

@@ -86,6 +86,9 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS donor_name TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS campaign_id TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS campaign_title TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb;
+-- Cross-module join fields (Data Foundation — Task #34)
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS grant_id TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS programme_id TEXT;
 
 -- ── 3b. Fundraising: Campaigns (ngo_id scoped) ─────────────────────────────
 CREATE TABLE IF NOT EXISTS campaigns (

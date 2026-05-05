@@ -27,6 +27,7 @@ type BoardMember = { id: string; name: string; role: string; din: string; tenure
 
 const Compliance: React.FC = () => {
   const { complianceDocs, setComplianceDocs } = useStore();
+  const ngoDetails = useStore(s => s.ngoDetails);
   const [pageTab, setPageTab] = useState('vault');
   const [showDocModal, setShowDocModal] = useState(false);
   const [docForm, setDocForm] = useState({
@@ -356,6 +357,16 @@ const Compliance: React.FC = () => {
         <div>
           <h1 className="page-title text-gradient">Compliance HQ</h1>
           <p className="page-subtitle">Statutory registrations, filings, board governance & DPDP Act 2023 compliance.</p>
+          {/* NGO identity strip — reads from ngoDetails Zustand slice (single source of truth).
+              Shown so document metadata, filing headers and health-report PDFs all reflect the
+              same org identity without the user having to copy values from Settings. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', marginTop: '0.5rem', fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+            {ngoDetails.name && <span><strong style={{ color: 'var(--color-text)' }}>{ngoDetails.name}</strong></span>}
+            {ngoDetails.reg_no && <span>Reg: <strong>{ngoDetails.reg_no}</strong></span>}
+            {ngoDetails.pan && <span>PAN: <strong>{ngoDetails.pan}</strong></span>}
+            {ngoDetails.fcra_reg && <span>FCRA: <strong>{ngoDetails.fcra_reg}</strong></span>}
+            {ngoDetails.eighty_g_no && <span>80G: <strong>{ngoDetails.eighty_g_no}</strong></span>}
+          </div>
         </div>
         <div className="flex gap-4">
           <button

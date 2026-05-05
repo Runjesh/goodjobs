@@ -1283,11 +1283,19 @@ const Finance: React.FC = () => {
                   <datalist id="fin-donor-list">
                     {donors.map(d => <option key={d.id} value={d.name} />)}
                   </datalist>
-                  {entry.donorId && (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--color-success)', marginTop: 2 }}>
-                      Linked to CRM donor
-                    </div>
-                  )}
+                  {entry.donorId && (() => {
+                    const linked = donors.find(d => d.id === entry.donorId);
+                    return (
+                      <div style={{ fontSize: '0.7rem', marginTop: 2 }}>
+                        <span style={{ color: 'var(--color-success)' }}>Linked to CRM donor</span>
+                        {linked && entry.type === 'Income' && (
+                          <span style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>
+                            · Receipt: <strong>{linked.name}</strong>{linked.pan ? ` · PAN ${linked.pan}` : ''}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="input-group" style={{ marginBottom: 0 }}>
                   <label className="input-label">Programme (optional)</label>

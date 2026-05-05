@@ -103,13 +103,20 @@ export function selectGrantUtilisation(
 
   for (const e of expenses) {
     if (e.entryType !== 'Expense') continue;
-    const tag = e.grantTag;
-    if (!tag) continue;
-    if (String(tag.grantId) !== String(grantId)) continue;
     const amt = Math.abs(Number(e.amount) || 0);
-    if (headIds.has(tag.budgetHeadId)) {
-      spentByHead.set(tag.budgetHeadId, (spentByHead.get(tag.budgetHeadId) || 0) + amt);
-    } else {
+
+    const tag = e.grantTag;
+    if (tag && String(tag.grantId) === String(grantId)) {
+      // Fully-tagged expense: has both grantId + budgetHeadId via grantTag.
+      if (headIds.has(tag.budgetHeadId)) {
+        spentByHead.set(tag.budgetHeadId, (spentByHead.get(tag.budgetHeadId) || 0) + amt);
+      } else {
+        orphanSpent += amt;
+      }
+    } else if (!tag && e.grantId && String(e.grantId) === String(grantId)) {
+      // Partially-tagged expense: only the top-level grantId is set (no
+      // budget head selected). Count as orphan spend so the total is still
+      // accurate even when the user skips the budget-head step.
       orphanSpent += amt;
     }
   }
