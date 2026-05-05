@@ -14,6 +14,7 @@ import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradeP
 import MisReviewQueue from '../../components/AgentHQ/MisReviewQueue';
 import ComplianceCascadeQueue from '../../components/AgentHQ/ComplianceCascadeQueue';
 import { useStore } from '../../store/useStore';
+import { useAuth } from '../../context/AuthContext';
 
 type QueueItem = {
   id: string;
@@ -547,6 +548,7 @@ const AgentHQ: React.FC = () => {
   const { limits: tierLims, openUpgrade: openTierUpgrade } = useTier();
   const agentsEnabled = tierLims.aiAgents;
   const [aiUpgradeOpen, setAiUpgradeOpen] = useState(false);
+  const { user } = useAuth();
 
   // ── Store data for validation ───────────────────────────────────────────────
   const complianceDocs   = useStore(s => s.complianceDocs);
@@ -592,8 +594,8 @@ const AgentHQ: React.FC = () => {
   // ── Step 6: Edit intent modal ───────────────────────────────────────────────
   const [editModal, setEditModal]     = useState<EditModalState | null>(null);
   const [editCounts, setEditCounts]   = useState<Record<string, number>>({});
-  // intentEdits: directive/recipient overrides that are applied to the rendered cards after a save
-  const [intentEdits, setIntentEdits] = useState<Record<string, { directive: string; recipient?: string }>>({});
+  // intentEdits: directive/recipient/amount overrides applied to rendered cards after a save
+  const [intentEdits, setIntentEdits] = useState<Record<string, { directive: string; recipient?: string; amount?: number }>>({});
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   const appendAuditLog = (entry: Omit<AuditLogEntry, 'id' | 'created_at'>) => {
@@ -648,7 +650,14 @@ const AgentHQ: React.FC = () => {
         const res = await apiFetch('/agent-hq/audit');
         if (res.ok) {
           const data = await res.json();
-          setAuditLogs(Array.isArray(data.logs) ? data.logs : []);
+          const rawLogs: AuditLogEntry[] = Array.isArray(data.logs) ? data.logs : [];
+          // Normalize backend field names so filters work on legacy rows too
+          setAuditLogs(rawLogs.map(l => ({
+            ...l,
+            agent:   l.agent   ?? (l as any).agent_name ?? undefined,
+            risk:    l.risk    ?? (l as any).risk_level  ?? undefined,
+            outcome: l.outcome ?? (l as any).status      ?? undefined,
+          })));
         }
       } catch { /* ignore */ }
       setConfigs([]);
@@ -771,7 +780,7 @@ const AgentHQ: React.FC = () => {
         type: 'config_change',
         agent: 'System',
         outcome: 'applied',
-        payload: `Threshold changed from ${prevStr} to ₹${n.toLocaleString('en-IN')} at ${new Date().toLocaleString()}`,
+        payload: `Threshold changed from ${prevStr} to ₹${n.toLocaleString('en-IN')} by ${user?.name ?? 'unknown'} at ${new Date().toLocaleString()}`,
       });
       prevThresholdRef.current = n;
       toast.success('Auto-approve threshold saved (session).');
@@ -842,15 +851,23 @@ const AgentHQ: React.FC = () => {
   const handleSaveEdit = (updated: EditModalState) => {
     setEditCounts(prev => ({ ...prev, [updated.intentId]: (prev[updated.intentId] ?? 0) + 1 }));
     // Persist the edited directive so the card reflects the change immediately
+    const parsedAmount = updated.originalAmount != null
+      ? parseFloat(String(updated.originalAmount).replace(/,/g, ''))
+      : undefined;
     setIntentEdits(prev => ({
       ...prev,
-      [updated.intentId]: { directive: updated.directive, recipient: updated.recipient || undefined },
+      [updated.intentId]: {
+        directive: updated.directive,
+        recipient: updated.recipient || undefined,
+        amount: parsedAmount != null && !isNaN(parsedAmount) ? parsedAmount : undefined,
+      },
     }));
+    const amountNote = parsedAmount != null && !isNaN(parsedAmount) ? ` · amount: ₹${parsedAmount.toLocaleString('en-IN')}` : '';
     appendAuditLog({
       type: 'intent_edited',
       agent: 'User',
       outcome: 'applied',
-      payload: `Intent ${updated.intentId} edited: "${updated.directive}"${updated.recipient ? ` · recipient: ${updated.recipient}` : ''}`,
+      payload: `Intent ${updated.intentId} edited: "${updated.directive}"${updated.recipient ? ` · recipient: ${updated.recipient}` : ''}${amountNote}`,
     });
     toast.success('Intent parameters updated.');
     setEditModal(null);
@@ -875,7 +892,11 @@ const AgentHQ: React.FC = () => {
   const applyEdits = (intent: RichIntent): RichIntent => {
     const edit = intentEdits[intent.id];
     if (!edit) return intent;
-    return { ...intent, directive: edit.directive };
+    return {
+      ...intent,
+      directive: edit.directive,
+      ...(edit.amount != null ? { amount: edit.amount } : {}),
+    };
   };
 
   const auditScrollRef = useRef<HTMLDivElement>(null);
