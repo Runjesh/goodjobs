@@ -42,6 +42,12 @@ export interface JournalExpense {
   /** Where this expense lands in a grant's budget. */
   grantTag?: GrantTag;
   /**
+   * Cross-module join: direct grant association independent of `grantTag`.
+   * Set whenever the user picks a grant, even without picking a budget head.
+   * Enables grant utilisation queries without requiring a budget head to exist.
+   */
+  grantId?: string;
+  /**
    * Cross-module join: which programme this income/expense belongs to.
    * Drives live budget-vs-actuals in ProgramBudgetBar and report data pulls.
    */

@@ -311,6 +311,9 @@ const Finance: React.FC = () => {
       fund: entry.fund,
       entryType: entry.type,
       grantTag: tag,
+      // Direct grantId join — persisted independently of grantTag so grant
+      // utilisation queries work even when no budget head is selected.
+      grantId:    entry.grantId    || undefined,
       // Cross-module joins: link this entry to the CRM donor and the programme.
       donorId:    entry.donorId    || undefined,
       programmeId: entry.programmeId || undefined,
@@ -1305,7 +1308,17 @@ const Finance: React.FC = () => {
                     value={entry.description} 
                     onChange={async (e) => {
                       const val = e.target.value;
-                      setEntry({ ...entry, description: val });
+                      // Programme prefill: if description contains a known programme name and none
+                      // is selected yet, auto-select it. This mirrors the AI-suggestion requirement
+                      // without a separate inference call — the description text IS the signal.
+                      let nextProgramme = entry.programmeId;
+                      if (!nextProgramme && val.length > 3) {
+                        const match = allProgrammes.find(p =>
+                          val.toLowerCase().includes(p.toLowerCase().slice(0, Math.max(6, p.length)))
+                        );
+                        if (match) nextProgramme = match;
+                      }
+                      setEntry({ ...entry, description: val, programmeId: nextProgramme });
                       if (val.length > 5 && entry.fund === 'FCRA') {
                         setIsClassifying(true);
                         try {
@@ -1366,7 +1379,9 @@ const Finance: React.FC = () => {
                       onChange={e => setEntry({ ...entry, grantId: e.target.value, budgetHeadId: '' })}
                     >
                       <option value="">— None —</option>
-                      {csrCards.map(c => (
+                      {/* Only live grants — pipeline cards still in prospecting/pitch/diligence/mou
+                          don't have signed agreements and shouldn't receive expense tags. */}
+                      {csrCards.filter(c => c.col === 'live').map(c => (
                         <option key={c.id} value={String(c.id)}>{c.company} — {c.project}</option>
                       ))}
                     </select>

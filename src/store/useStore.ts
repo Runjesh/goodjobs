@@ -22,6 +22,8 @@ export interface NgoDetails {
   reg_no: string;
   fcra_reg: string;
   pan: string;
+  /** 80G certificate number — printed on donor deduction receipts. */
+  eighty_g_no: string;
   /** ISO state name, e.g. "Maharashtra". */
   state: string;
 }
@@ -342,6 +344,7 @@ const DEFAULT_NGO_DETAILS: NgoDetails = {
   reg_no: 'MH/2015/0012345',
   fcra_reg: '231650212',
   pan: 'AABCI1234C',
+  eighty_g_no: '80G/AABCI1234C/2023-24',
   state: 'Maharashtra',
 };
 

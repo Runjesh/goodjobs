@@ -103,6 +103,7 @@ const Settings: React.FC = () => {
   const [regNo, setRegNo] = useState(storedNgoDetails.reg_no || 'MH/2015/0012345');
   const [fcraReg, setFcraReg] = useState(storedNgoDetails.fcra_reg || '231650212');
   const [panNo, setPanNo] = useState(storedNgoDetails.pan || 'AABCI1234C');
+  const [eightyGNo, setEightyGNo] = useState(storedNgoDetails.eighty_g_no || '');
   const [ngoState, setNgoState] = useState(storedNgoDetails.state || 'Maharashtra');
   const [notifs, setNotifs] = useState({ agentApprovals: true, complianceDue: true, donorLapse: true, dailyBrief: false, weeklyReport: true });
   const [consentGiven, setConsentGiven] = useState(true);
@@ -126,7 +127,20 @@ const Settings: React.FC = () => {
         if (typeof data?.ngo?.reg_no !== 'undefined') setRegNo(data.ngo.reg_no || '');
         if (typeof data?.ngo?.fcra_reg !== 'undefined') setFcraReg(data.ngo.fcra_reg || '');
         if (typeof data?.ngo?.pan !== 'undefined') setPanNo(data.ngo.pan || '');
+        if (typeof data?.ngo?.eighty_g_no !== 'undefined') setEightyGNo(data.ngo.eighty_g_no || '');
         if (typeof data?.ngo?.state !== 'undefined') setNgoState(data.ngo.state || 'Maharashtra');
+        // Hydrate the global ngoDetails slice so Finance and Compliance get
+        // the same values without requiring the user to visit Settings first.
+        if (data?.ngo) {
+          setNgoDetails({
+            name:         data.ngo.name        ?? undefined,
+            reg_no:       data.ngo.reg_no      ?? undefined,
+            fcra_reg:     data.ngo.fcra_reg    ?? undefined,
+            pan:          data.ngo.pan         ?? undefined,
+            eighty_g_no:  data.ngo.eighty_g_no ?? undefined,
+            state:        data.ngo.state       ?? undefined,
+          });
+        }
         if (data?.notification_prefs && typeof data.notification_prefs === 'object') {
           setNotifs(prev => ({ ...prev, ...data.notification_prefs }));
         }
@@ -178,7 +192,7 @@ const Settings: React.FC = () => {
       const res = await apiFetch('/settings/ngo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: ngoName, reg_no: regNo || null, fcra_reg: fcraReg || null, pan: panNo || null, state: ngoState || null }),
+        body: JSON.stringify({ name: ngoName, reg_no: regNo || null, fcra_reg: fcraReg || null, pan: panNo || null, eighty_g_no: eightyGNo || null, state: ngoState || null }),
       });
       if (!res.ok) throw new Error('ngo');
       const data = await res.json().catch(() => ({}));
@@ -186,11 +200,12 @@ const Settings: React.FC = () => {
       // Single source of truth: write to Zustand so Finance, Compliance, and
       // every other module always reads the same canonical org identity.
       setNgoDetails({
-        name: data?.ngo?.name || ngoName,
-        reg_no: data?.ngo?.reg_no ?? regNo,
-        fcra_reg: data?.ngo?.fcra_reg ?? fcraReg,
-        pan: data?.ngo?.pan ?? panNo,
-        state: data?.ngo?.state ?? ngoState,
+        name:        data?.ngo?.name        || ngoName,
+        reg_no:      data?.ngo?.reg_no      ?? regNo,
+        fcra_reg:    data?.ngo?.fcra_reg    ?? fcraReg,
+        pan:         data?.ngo?.pan         ?? panNo,
+        eighty_g_no: data?.ngo?.eighty_g_no ?? eightyGNo,
+        state:       data?.ngo?.state       ?? ngoState,
       });
       toast.success('NGO details saved.');
     } catch {
@@ -479,8 +494,12 @@ const Settings: React.FC = () => {
                   <div className="input-group"><label className="input-label">FCRA Reg. No.</label>
                     <input className="input-field" value={fcraReg} onChange={e => setFcraReg(e.target.value)} /></div>
                 </div>
-                <div className="input-group"><label className="input-label">PAN / TAN</label>
-                  <input className="input-field" value={panNo} onChange={e => setPanNo(e.target.value)} /></div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="input-group"><label className="input-label">PAN / TAN</label>
+                    <input className="input-field" value={panNo} onChange={e => setPanNo(e.target.value)} /></div>
+                  <div className="input-group"><label className="input-label">80G Certificate No.</label>
+                    <input className="input-field" placeholder="e.g. 80G/AABCI1234C/2023-24" value={eightyGNo} onChange={e => setEightyGNo(e.target.value)} /></div>
+                </div>
                 <div className="input-group"><label className="input-label">State of Registration</label>
                   <select className="input-field" value={ngoState} onChange={e => setNgoState(e.target.value)}>
                     <option>Andhra Pradesh</option><option>Delhi</option><option>Gujarat</option><option>Karnataka</option>
