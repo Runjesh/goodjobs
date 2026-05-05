@@ -484,3 +484,38 @@ html.dark .snooze-menu { background: var(--color-bg-elevated); }
   padding: 2px 8px;
   white-space: nowrap;
 }
+
+/* ── Going Well section ─────────────────────────────────── */
+.going-well-section {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.going-well-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #059669;
+}
+.going-well-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.going-well-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  border-radius: 99px;
+  padding: 3px 10px;
+}

@@ -6,8 +6,12 @@ import {
   IndianRupee, Users, FileText, ShieldCheck, HeartHandshake,
   ClipboardList, Wallet, BarChart2, Cpu, CalendarCheck,
   TrendingUp, RefreshCw, BellOff, Clock, Trophy,
-  ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, X
+  ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, X,
+  Sparkles, Target, Activity, UserPlus, ClipboardCheck, PlusCircle,
+  ReceiptText, GitMerge
 } from 'lucide-react';
+import type { MisReviewIntent } from '../../store/useStore';
+import type { ProgramBudget } from '../../utils/programFinance';
 import { useStore } from '../../store/useStore';
 import { isVisibleToday, type Task } from '../../utils/tasks';
 import { useAuth, defaultPresetForRole } from '../../context/AuthContext';
@@ -140,35 +144,35 @@ function getQuickActions(
   transactions: any[],
   beneficiaries: any[],
   campaigns: any[],
+  pendingIntents: number,
 ): { label: string; icon: React.ElementType; path: string; color: string; badge?: number }[] {
   const pendingReceipts = transactions.filter((t: any) => t.receipt_status === 'pending' || !t.receipt_number).length;
-  const inactiveBen     = beneficiaries.filter((b: any) => b.status === 'inactive' || b.status === 'Inactive').length;
   const activeCamp      = campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active').length;
 
   const base: Record<string, { label: string; icon: React.ElementType; path: string; color: string; badge?: number }[]> = {
     ed: [
-      { label: pendingReceipts > 0 ? `Generate Receipts` : 'Funding Hub',     icon: Wallet,        path: '/funding',   color: '#0F766E', badge: pendingReceipts > 0 ? pendingReceipts : undefined },
-      { label: inactiveBen > 0 ? `Re-engage Beneficiaries` : 'Programs',      icon: ClipboardList, path: '/programs',  color: '#059669', badge: inactiveBen > 0 ? inactiveBen : undefined },
-      { label: 'Reports',                                                        icon: FileText,      path: '/reports',   color: '#7c3aed' },
-      { label: 'AI Copilot',                                                     icon: Cpu,           path: '/agent-hq',  color: '#7C3AED' },
+      { label: 'Review Intent Queue', icon: ClipboardCheck, path: '/agent-hq',             color: '#7C3AED', badge: pendingIntents > 0 ? pendingIntents : undefined },
+      { label: 'Grant Pipeline',       icon: GitMerge,       path: '/grants',                color: '#0891b2' },
+      { label: 'Reports',              icon: FileText,        path: '/reports',               color: '#7c3aed' },
+      { label: 'Funding Hub',          icon: Wallet,          path: '/funding',               color: '#0F766E', badge: pendingReceipts > 0 ? pendingReceipts : undefined },
     ],
     finance: [
-      { label: pendingReceipts > 0 ? `Generate Receipts` : 'Funding',  icon: Wallet,    path: '/funding',    color: '#0891b2', badge: pendingReceipts > 0 ? pendingReceipts : undefined },
-      { label: 'Reports',                                                icon: FileText,  path: '/reports',    color: '#7c3aed' },
-      { label: 'Insights',                                               icon: BarChart2, path: '/insights',   color: '#059669' },
-      { label: 'Compliance',                                             icon: ShieldCheck,path: '/compliance',color: '#d97706' },
+      { label: 'Log Transaction',   icon: PlusCircle,   path: '/finance',               color: '#0891b2' },
+      { label: 'Generate Receipts', icon: ReceiptText,  path: '/funding?action=receipts', color: '#0F766E', badge: pendingReceipts > 0 ? pendingReceipts : undefined },
+      { label: 'Reports',           icon: FileText,     path: '/reports',               color: '#7c3aed' },
+      { label: 'Compliance',        icon: ShieldCheck,  path: '/compliance',            color: '#d97706' },
     ],
     programs: [
-      { label: inactiveBen > 0 ? `Follow-up` : 'Programs', icon: ClipboardList, path: '/programs',  color: '#059669', badge: inactiveBen > 0 ? inactiveBen : undefined },
-      { label: 'Volunteers',                                 icon: CalendarCheck, path: '/volunteers', color: '#0891b2' },
-      { label: 'Insights',                                   icon: BarChart2,     path: '/insights',  color: '#7c3aed' },
-      { label: 'Reports',                                    icon: FileText,      path: '/reports',   color: '#0F766E' },
+      { label: 'Record Outcome',     icon: Target,        path: '/programs?tab=outcomes', color: '#059669' },
+      { label: 'View Programme MIS', icon: Activity,      path: '/programs?tab=mis',      color: '#0891b2' },
+      { label: 'Volunteers',         icon: CalendarCheck, path: '/volunteers',            color: '#7c3aed' },
+      { label: 'Insights',           icon: BarChart2,     path: '/insights',              color: '#0F766E' },
     ],
     field: [
-      { label: 'Programs',   icon: ClipboardList, path: '/programs',   color: '#059669' },
-      { label: 'Volunteers', icon: CalendarCheck, path: '/volunteers', color: '#0891b2' },
-      { label: 'Tasks',      icon: CheckCircle2,  path: '/tasks',      color: '#d97706' },
-      { label: 'Reports',    icon: FileText,      path: '/reports',    color: '#0F766E' },
+      { label: 'Log MIS Entry',       icon: ClipboardList, path: '/programs?action=mis',    color: '#059669' },
+      { label: 'Enroll Beneficiary',  icon: UserPlus,      path: '/programs?action=enroll', color: '#0891b2' },
+      { label: 'Tasks',               icon: CheckCircle2,  path: '/tasks',                  color: '#d97706' },
+      { label: 'Programs',            icon: Activity,      path: '/programs',               color: '#0F766E' },
     ],
     board: [
       { label: 'Insights',  icon: BarChart2,    path: '/insights',   color: '#7c3aed' },
@@ -182,7 +186,16 @@ function getQuickActions(
 }
 
 // ── Derive priorities from store ──────────────────────────────────────────────
-function deriveFromStore(role: string, donors: any[], transactions: any[], campaigns: any[], beneficiaries: any[], complianceDocs: any[], csrCards: any[] = []): PriorityItem[] {
+function deriveFromStore(
+  role: string,
+  donors: any[],
+  transactions: any[],
+  campaigns: any[],
+  beneficiaries: any[],
+  complianceDocs: any[],
+  csrCards: any[],
+  programBudgets: ProgramBudget[],
+): PriorityItem[] {
   const items: PriorityItem[] = [];
   const nowMs = Date.now();
 
@@ -199,7 +212,6 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
       }
     } catch { /* ignore */ }
     if (!nextDue) {
-      // Match GrantDetail's deterministic mock so T-7 actually fires for some demo cards
       const seed = String(g.id ?? '0').split('').reduce((s: number, c: string) => s + c.charCodeAt(0), 0);
       const days = 5 + (Math.abs((seed * 9301 + 49297) % 233280) % 30);
       nextDue = new Date(Date.now() + days * 86400000);
@@ -219,20 +231,46 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
     }
   }
 
+  // ── Clawback risk: live grants under-utilised past halfway point (ED only) ──
+  if (role === 'ed' && programBudgets.length > 0) {
+    const clawbackRisk = programBudgets.filter(b => {
+      if (!b.windowEnd || !b.restricted) return false;
+      const end = new Date(b.windowEnd).getTime();
+      const start = end - 180 * 86_400_000; // approximate 6-month window
+      const halfway = start + (end - start) / 2;
+      const utilRate = b.planned > 0 ? b.spent / b.planned : 1;
+      return nowMs >= halfway && utilRate < 0.5;
+    });
+    for (const b of clawbackRisk) {
+      const grantCard = csrCards.find((c: any) => String(c.id) === String(b.grantId));
+      const grantName = grantCard?.company ?? b.label;
+      const utilPct = b.planned > 0 ? Math.round((b.spent / b.planned) * 100) : 0;
+      items.push({
+        id: `clawback-${b.programId}`,
+        text: `Clawback risk: ${grantName} — only ${utilPct}% utilised past halfway mark`,
+        action: 'View grant finance',
+        path: b.grantId ? `/grants/${encodeURIComponent(String(b.grantId))}` : '/finance?filter=clawback',
+        level: 'urgent',
+        ageDays: 0,
+      });
+    }
+  }
 
   const expiringDocs = complianceDocs.filter(d => d.status === 'Expiring Soon' || d.status === 'Expired');
-  if (expiringDocs.length > 0)
-    items.push({ id: 'exp-docs', text: `${expiringDocs.length} compliance document${expiringDocs.length > 1 ? 's' : ''} expiring — renewal required`, action: 'Renew now', path: '/compliance', level: 'urgent', ageDays: 3 });
+  if (expiringDocs.length > 0) {
+    const firstExpiring = expiringDocs[0];
+    const docTypeSlug = firstExpiring?.type?.toLowerCase().replace(/\s+/g, '-') ?? 'doc';
+    items.push({ id: 'exp-docs', text: `${expiringDocs.length} compliance document${expiringDocs.length > 1 ? 's' : ''} expiring — renewal required`, action: 'Renew now', path: `/compliance?doc=${docTypeSlug}&alert=true`, level: 'urgent', ageDays: 3 });
+  }
 
   // Filings + board-tenure reminders persisted by the Compliance page.
-  // These keep the Today surface in lockstep with what the Compliance tab shows.
   const complianceReminders = readComplianceReminders();
   for (const r of complianceReminders) {
     items.push({
       id: r.id,
       text: r.text,
       action: 'Open Compliance',
-      path: r.path,
+      path: r.path ?? '/compliance?alert=true',
       level: r.level,
       ageDays: r.daysUntil < 0 ? Math.abs(r.daysUntil) : undefined,
     });
@@ -240,11 +278,13 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
 
   const pendingReceipts = transactions.filter((t: any) => t.receipt_status === 'pending' || !t.receipt_number);
   if (pendingReceipts.length > 3)
-    items.push({ id: 'receipts', text: `${pendingReceipts.length} donor receipts pending — 80G compliance at risk`, action: 'Bulk generate', path: '/funding', level: 'urgent', ageDays: 7, actionType: 'receipts' });
+    items.push({ id: 'receipts', text: `${pendingReceipts.length} donor receipts pending — 80G compliance at risk`, action: 'Bulk generate', path: '/funding?action=receipts', level: 'urgent', ageDays: 7, actionType: 'receipts' });
 
   const lapsedDonors = donors.filter((d: any) => d.lastGift && nowMs - new Date(d.lastGift).getTime() > 180 * 864e5);
-  if (lapsedDonors.length > 0 && (role === 'ed' || role === 'finance'))
-    items.push({ id: 'lapsed', text: `${lapsedDonors.length} donor${lapsedDonors.length > 1 ? 's' : ''} lapsed — no gift in 6+ months`, action: 'Follow up via WhatsApp', path: '/funding', level: 'urgent', ageDays: 14, actionType: 'whatsapp' });
+  if (lapsedDonors.length > 0 && (role === 'ed' || role === 'finance')) {
+    const firstId = lapsedDonors[0]?.id ? encodeURIComponent(lapsedDonors[0].id) : '';
+    items.push({ id: 'lapsed', text: `${lapsedDonors.length} donor${lapsedDonors.length > 1 ? 's' : ''} lapsed — no gift in 6+ months`, action: 'Follow up via WhatsApp', path: `/crm?filter=lapsed${firstId ? `&donor=${firstId}` : ''}`, level: 'urgent', ageDays: 14, actionType: 'whatsapp' });
+  }
 
   // ── Donor lifecycle: lapse-risk surface for fundraising-aligned roles ─────
   if (role === 'ed' || role === 'finance') {
@@ -254,14 +294,13 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
         id: 'donors-lapse-risk',
         text: `${lapseRisk.length} donor${lapseRisk.length > 1 ? 's' : ''} at lapse risk — no response in 14d after renewal touch`,
         action: 'Acknowledge',
-        path: '/crm',
+        path: '/crm?filter=lapse-risk',
         level: 'attention',
         ageDays: 14,
         actionType: 'ack-lapse-risk',
         donorIds: lapseRisk.map((d: any) => d.id),
       });
     }
-    // Touchpoint due today/overdue across all donors → single rollup item.
     const dueTouchpoints = donors.filter((d: any) => {
       const m = nextDueMilestone(d);
       return m && (m.state === 'due' || m.state === 'overdue');
@@ -271,7 +310,7 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
         id: 'donors-touchpoints-due',
         text: `${dueTouchpoints.length} donor touchpoint${dueTouchpoints.length > 1 ? 's' : ''} due — approve & send today`,
         action: 'Open nurture queue',
-        path: '/crm',
+        path: '/crm?filter=touchpoints-due',
         level: 'attention',
       });
     }
@@ -280,15 +319,15 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
   const activeCampaigns = campaigns.filter((c: any) => c.status === 'active' || c.status === 'Active');
   const nearGoal = activeCampaigns.filter((c: any) => c.goal > 0 && c.raised / c.goal > 0.8 && c.raised / c.goal < 1);
   if (nearGoal.length > 0)
-    items.push({ id: 'campaigns-near', text: `${nearGoal.length} campaign${nearGoal.length > 1 ? 's' : ''} within 20% of goal — push now`, action: 'Share campaign', path: '/funding', level: 'attention' });
+    items.push({ id: 'campaigns-near', text: `${nearGoal.length} campaign${nearGoal.length > 1 ? 's' : ''} within 20% of goal — push now`, action: 'Share campaign', path: '/funding?filter=near-goal', level: 'attention' });
 
   const inactive = beneficiaries.filter((b: any) => b.status === 'inactive' || b.status === 'Inactive');
   if (inactive.length > 0 && (role === 'ed' || role === 'programs' || role === 'field'))
-    items.push({ id: 'inactive-ben', text: `${inactive.length} beneficiar${inactive.length > 1 ? 'ies' : 'y'} inactive — re-engagement needed`, action: 'Review list', path: '/programs', level: 'attention' });
+    items.push({ id: 'inactive-ben', text: `${inactive.length} beneficiar${inactive.length > 1 ? 'ies' : 'y'} inactive — re-engagement needed`, action: 'Review list', path: '/programs?filter=inactive', level: 'attention' });
 
   const due90 = donors.filter((d: any) => { if (!d.lastGift) return false; const diff = nowMs - new Date(d.lastGift).getTime(); return diff > 90*864e5 && diff < 180*864e5; });
   if (due90.length > 0 && (role === 'ed' || role === 'finance'))
-    items.push({ id: 'donors-attention', text: `${due90.length} donor${due90.length > 1 ? 's' : ''} due for impact update — 90+ days since gift`, action: 'Draft update', path: '/funding', level: 'attention' });
+    items.push({ id: 'donors-attention', text: `${due90.length} donor${due90.length > 1 ? 's' : ''} due for impact update — 90+ days since gift`, action: 'Draft update', path: '/crm?filter=impact-due', level: 'attention' });
 
   const activeBen = beneficiaries.filter((b: any) => b.status !== 'inactive' && b.status !== 'Inactive');
   if (activeBen.length > 0) {
@@ -306,7 +345,7 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
   }
 
   if (activeCampaigns.length > 0)
-    items.push({ id: 'active-campaigns', text: `${activeCampaigns.length} active campaign${activeCampaigns.length > 1 ? 's' : ''} running`, action: 'View all', path: '/funding', level: 'well' });
+    items.push({ id: 'active-campaigns', text: `${activeCampaigns.length} active campaign${activeCampaigns.length > 1 ? 's' : ''} running`, action: 'View all', path: '/funding?stage=live', level: 'well' });
 
   const validDocs = complianceDocs.filter(d => d.status === 'Valid');
   if (validDocs.length > 0)
@@ -314,6 +353,68 @@ function deriveFromStore(role: string, donors: any[], transactions: any[], campa
 
   return items;
 }
+
+// ── Going Well section (live store wins) ──────────────────────────────────────
+interface GoingWellChip { id: string; label: string; icon: React.ElementType; color: string; }
+
+function computeGoingWell(
+  transactions: any[],
+  misReviewIntents: MisReviewIntent[],
+  csrCards: any[],
+): GoingWellChip[] {
+  const chips: GoingWellChip[] = [];
+  const since24h = Date.now() - 86_400_000;
+
+  const recentTx = transactions.filter((t: any) => Number(t.timestamp ?? 0) > since24h && Number(t.amount) > 0);
+  if (recentTx.length > 0) {
+    const total = recentTx.reduce((s: number, t: any) => s + Number(t.amount), 0);
+    const fmt = total >= 1e5 ? `₹${(total/1e5).toFixed(1)}L` : `₹${(total/1000).toFixed(0)}K`;
+    chips.push({ id: 'gw-donations', label: `${fmt} donated today (${recentTx.length} transaction${recentTx.length > 1 ? 's' : ''})`, icon: IndianRupee, color: '#059669' });
+  }
+
+  const approvedToday = misReviewIntents.filter((i: MisReviewIntent) => (i.status === 'approved' || i.status === 'edited') && i.decidedAt && new Date(i.decidedAt).getTime() > since24h);
+  if (approvedToday.length > 0)
+    chips.push({ id: 'gw-intents', label: `${approvedToday.length} MIS intent${approvedToday.length > 1 ? 's' : ''} approved today`, icon: CheckCircle2, color: '#0891b2' });
+
+  const recentlyAdvanced = csrCards.filter((c: any) => {
+    const upd = c.updated_at ?? c.last_activity_at;
+    return upd && new Date(upd).getTime() > since24h && (c.col === 'live' || c.col === 'mou');
+  });
+  if (recentlyAdvanced.length > 0)
+    chips.push({ id: 'gw-grants', label: `${recentlyAdvanced.length} grant${recentlyAdvanced.length > 1 ? 's' : ''} advanced in pipeline today`, icon: TrendingUp, color: '#d97706' });
+
+  return chips;
+}
+
+const GoingWellSection: React.FC<{
+  chips: GoingWellChip[];
+}> = ({ chips }) => {
+  if (chips.length === 0) return null;
+  return (
+    <motion.div
+      className="going-well-section"
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.09 }}
+    >
+      <div className="going-well-header">
+        <Sparkles size={13} style={{ color: '#059669' }} />
+        <span>Going well today</span>
+      </div>
+      <div className="going-well-chips">
+        {chips.map(chip => {
+          const Icon = chip.icon;
+          return (
+            <span key={chip.id} className="going-well-chip" style={{ color: chip.color, background: `${chip.color}14` }}>
+              <Icon size={12} />
+              {chip.label}
+            </span>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+};
 
 // ── Static fallback ───────────────────────────────────────────────────────────
 function getStaticFallback(role: string): PriorityItem[] {
@@ -577,9 +678,9 @@ const Dashboard: React.FC = () => {
   const navigate   = useNavigate();
   const { user }   = useAuth();
   const { donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards } = useStore();
-  // Today screen reads from the same cross-module Tasks slice that Tasks.tsx
-  // and per-record panels use, so a single source of truth drives all surfaces.
-  const sliceTasks = useStore(s => s.tasks);
+  const sliceTasks       = useStore(s => s.tasks);
+  const misReviewIntents = useStore(s => s.misReviewIntents);
+  const programBudgets   = useStore(s => s.programBudgets);
 
   const [briefItems,   setBriefItems]   = useState<PriorityItem[]>([]);
   const [briefLoading, setBriefLoading] = useState(true);
@@ -589,15 +690,32 @@ const Dashboard: React.FC = () => {
   const [showAllUrgent,setShowAllUrgent]= useState(false);
 
   const role         = user?.role ?? 'ed';
-  // Dashboard preset (Session 3) overrides the role used to lay out Today —
-  // permissions still come from `role`, but ordering/visibility on the home
-  // screen follows the user-selected preset (Field Officer / Programme Manager
-  // / Executive Director). Falls back to a sensible default per role.
   const preset       = user?.dashboardPreset ?? defaultPresetForRole(role);
-  const layoutRole   = preset; // preset values map 1:1 to the layout-role keys ('field' | 'programs' | 'ed')
+  const layoutRole   = preset;
   const greeting     = getGreeting();
-  const quickActions = useMemo(() => getQuickActions(layoutRole, transactions, beneficiaries, campaigns), [layoutRole, transactions, beneficiaries, campaigns]);
-  const roleStats    = useMemo(() => getRoleStats(layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns), [layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns]);
+
+  const pendingIntents = useMemo(() => misReviewIntents.filter(i => i.status === 'pending').length, [misReviewIntents]);
+  const quickActions   = useMemo(() => getQuickActions(layoutRole, transactions, beneficiaries, campaigns, pendingIntents), [layoutRole, transactions, beneficiaries, campaigns, pendingIntents]);
+  const roleStats      = useMemo(() => getRoleStats(layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns), [layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns]);
+  const goingWellChips = useMemo(() => computeGoingWell(transactions, misReviewIntents, csrCards), [transactions, misReviewIntents, csrCards]);
+
+  // ── Feature 4: Debounced store subscription — re-run brief within 2s of any
+  //    change to donors, transactions, beneficiaries, misReviewIntents, or csrCards ──
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const storeKey = useMemo(
+    () => [donors.length, transactions.length, beneficiaries.length, misReviewIntents.length, csrCards.length].join(','),
+    [donors.length, transactions.length, beneficiaries.length, misReviewIntents.length, csrCards.length],
+  );
+  const prevStoreKey = useRef(storeKey);
+  useEffect(() => {
+    if (storeKey === prevStoreKey.current) return;
+    prevStoreKey.current = storeKey;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setLastRefresh(new Date());
+    }, 2000);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [storeKey]);
 
   const handleSnooze = useCallback((id: string, hours: number) => {
     snoozeItem(id, hours);
@@ -691,10 +809,10 @@ const Dashboard: React.FC = () => {
 
   const allItems = useMemo(() => {
     void lifecycleTick;
-    const store = deriveFromStore(layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards);
+    const store = deriveFromStore(layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets);
     const combined = [...taskItems, ...briefItems, ...store];
     return combined.length === 0 ? getStaticFallback(layoutRole) : combined;
-  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, lifecycleTick]);
+  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets, lifecycleTick]);
 
   const isSnoozedFn = useCallback((id: string) => !woken.has(id) && isSnoozed(id, snoozed), [snoozed, woken]);
 
@@ -766,6 +884,7 @@ const Dashboard: React.FC = () => {
           snoozedItems={snoozedItems}
           yesterdayWins={yesterdayWins}
           quickActions={quickActions}
+          goingWellChips={goingWellChips}
           showAllUrgent={showAllUrgent}
           setShowAllUrgent={setShowAllUrgent}
           handleSnooze={handleSnooze}
@@ -790,6 +909,7 @@ interface DashboardActiveBodyProps {
   snoozedItems: PriorityItem[];
   yesterdayWins: ReturnType<typeof computeWins>;
   quickActions: ReturnType<typeof getQuickActions>;
+  goingWellChips: GoingWellChip[];
   showAllUrgent: boolean;
   setShowAllUrgent: (fn: (v: boolean) => boolean) => void;
   handleSnooze: (id: string, hours: number) => void;
@@ -803,7 +923,7 @@ interface DashboardActiveBodyProps {
 
 const DashboardActiveBody: React.FC<DashboardActiveBodyProps> = ({
   briefLoading, allItems, urgentItems, attentionItems, wellItems, snoozedItems,
-  yesterdayWins, quickActions, showAllUrgent, setShowAllUrgent,
+  yesterdayWins, quickActions, goingWellChips, showAllUrgent, setShowAllUrgent,
   handleSnooze, handleWake, navigate,
   beneficiariesCount, donorsCount, campaigns, complianceDocs,
 }) => {
@@ -834,6 +954,8 @@ const DashboardActiveBody: React.FC<DashboardActiveBodyProps> = ({
         ) : (
           <>
             <PrioritySection level="urgent"    items={urgentItems}    onAction={navigate} onSnooze={handleSnooze} showAll={showAllUrgent} onToggleAll={() => setShowAllUrgent(v => !v)} cap={5} />
+            {/* ── Going Well today — live computed wins from store ── */}
+            <GoingWellSection chips={goingWellChips} />
             <PrioritySection level="attention" items={attentionItems} onAction={navigate} onSnooze={handleSnooze} />
             <PrioritySection level="well"      items={wellItems}      onAction={navigate} onSnooze={handleSnooze} />
             <SnoozedDrawer items={snoozedItems} onWake={handleWake} />
