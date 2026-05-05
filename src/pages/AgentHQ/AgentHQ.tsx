@@ -236,7 +236,7 @@ function buildComplianceExpiryIntents(complianceDocs: ReturnType<typeof useStore
   return complianceDocs.flatMap(doc => {
     if (!doc.expiry) return [];
     const daysLeft = Math.ceil((new Date(doc.expiry).getTime() - nowMs) / 86_400_000);
-    if (daysLeft > 14) return [];
+    if (daysLeft > 14 || daysLeft < -90) return []; // <=14 days ahead; include overdue up to 90d back
     const dayText = daysLeft < 0
       ? `expired ${Math.abs(daysLeft)}d ago`
       : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;

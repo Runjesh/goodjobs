@@ -218,7 +218,7 @@ const Layout: React.FC = () => {
     for (const doc of complianceDocs) {
       if (!doc.expiry) continue;
       const daysLeft = Math.ceil((new Date(doc.expiry).getTime() - nowMs) / 86_400_000);
-      if (daysLeft > 14) continue;
+      if (daysLeft > 14 || daysLeft < -90) continue; // <=14 days ahead; overdue up to 90d back
       const dayText = daysLeft < 0
         ? `expired ${Math.abs(daysLeft)}d ago`
         : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;

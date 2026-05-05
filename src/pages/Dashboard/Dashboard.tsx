@@ -261,6 +261,7 @@ function deriveFromStore(
   // Documents expiring within 14 days get individual urgent brief items (per spec).
   // Documents expiring in 15–90 days (status 'Expiring Soon') get a grouped item.
   // Expired documents also get individual urgent items.
+  // Within-14-day window: 0 to 14 days ahead, plus overdue docs up to 90 days past expiry.
   const within14 = complianceDocs.filter(d => {
     if (!d.expiry) return false;
     const msLeft = new Date(d.expiry).getTime() - nowMs;
