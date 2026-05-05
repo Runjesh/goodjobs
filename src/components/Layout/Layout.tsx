@@ -187,6 +187,8 @@ const Layout: React.FC = () => {
   const { t, lang, setLanguage } = useTranslation();
   const { setDonors, setTransactions, setCampaigns, setCsrCards, setComplianceDocs } = useStore();
   const { setVolunteers, setBeneficiaries } = useStore();
+  const complianceDocs    = useStore(s => s.complianceDocs);
+  const upsertTaskByIntent = useStore(s => s.upsertTaskByIntent);
   const navigate       = useNavigate();
   const location       = useLocation();
   const reducedMotion  = useReducedMotion();
@@ -205,6 +207,38 @@ const Layout: React.FC = () => {
       navigate('/onboarding', { replace: true });
     }
   }, [user?.needsWizard, location.pathname, navigate]);
+
+  // ── Compliance expiry broadcast (global / store-level) ────────────────────
+  // This runs from Layout so Agent HQ intent cards are created regardless of
+  // whether the user ever visits the Compliance page. upsertTaskByIntent is
+  // idempotent via sourceIntentId so re-renders are safe.
+  useEffect(() => {
+    if (!complianceDocs.length) return;
+    const nowMs = Date.now();
+    for (const doc of complianceDocs) {
+      if (!doc.expiry) continue;
+      const daysLeft = Math.ceil((new Date(doc.expiry).getTime() - nowMs) / 86_400_000);
+      if (daysLeft > 14) continue;
+      const dayText = daysLeft < 0
+        ? `expired ${Math.abs(daysLeft)}d ago`
+        : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;
+      upsertTaskByIntent({
+        id:              `compliance-expiry-${doc.id}`,
+        sourceIntentId:  `compliance-expiry-${doc.id}`,
+        title:           `Renew ${doc.name} — ${dayText}`,
+        description:     `${doc.type} document "${doc.name}" ${dayText}. Renewal required to avoid grant compliance blocks.${doc.assigned_to ? ` Owner: ${doc.assigned_to}.` : ''}`,
+        status:          'open',
+        sourceType:      'agent',
+        priority:        'high',
+        relatedEntityType: 'compliance',
+        relatedEntityId:  doc.id,
+        createdAt:       new Date().toISOString(),
+        updatedAt:       new Date().toISOString(),
+        meta:            { risk: 'High', docType: doc.type, expiryDate: doc.expiry },
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [complianceDocs]);
 
   // ── Trial nudge cadence: day-21 warning toast + day-28 upgrade modal,
   // each fires at most once thanks to the persistent nudge marker on AuthUser.

@@ -232,10 +232,10 @@ const Finance: React.FC = () => {
   const ngoName = ngoDetails.name || 'GoodJobs NGO';
 
   // 80G registration number — single source of truth is the Donor Deduction doc
-  // in the Compliance registry. Falls back to ngoDetails.eighty_g_no so the
-  // receipt still populates if no doc has been uploaded yet.
+  // in the Compliance registry. No Settings fallback: if the registry is missing
+  // a doc with registration_number, receipts show '—' and a warning banner appears.
   const eightyGDoc = complianceDocs.find(d => d.type === 'Donor Deduction' && d.registration_number);
-  const eightyGRegNo = eightyGDoc?.registration_number || ngoDetails.eighty_g_no || '';
+  const eightyGRegNo = eightyGDoc?.registration_number ?? '';
   const eightyGMissing = !eightyGDoc;
   const [aaBannerDismissed, setAaBannerDismissed] = useState(() => {
     try {

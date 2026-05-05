@@ -29,7 +29,6 @@ const Compliance: React.FC = () => {
   const { complianceDocs, setComplianceDocs } = useStore();
   const ngoDetails = useStore(s => s.ngoDetails);
   const journalEntries  = useStore(s => s.journalEntries);
-  const upsertTaskByIntent = useStore(s => s.upsertTaskByIntent);
   const [pageTab, setPageTab] = useState('vault');
 
   // ── Deep-link query-param consumers ────────────────────────────────────────
@@ -115,6 +114,8 @@ const Compliance: React.FC = () => {
       status,
       expiry: String(d.expiry_date ?? ''),
       uploadedAt: String(d.created_at ?? '').slice(0, 10),
+      ...(d.registration_number ? { registration_number: String(d.registration_number) } : {}),
+      ...(d.assigned_to          ? { assigned_to: String(d.assigned_to) }                : {}),
       details:
         typeof det === 'object' && det !== null && !Array.isArray(det)
           ? (det as Record<string, unknown>)
@@ -361,7 +362,7 @@ const Compliance: React.FC = () => {
     type ProgramRow = { received: number; adminExpense: number; progExpense: number };
     const byProgramme: Record<string, ProgramRow> = {};
     for (const je of fcraEntries) {
-      const prog = (je as any).programmeId || je.grantTag?.grantId || 'General Administration';
+      const prog = je.programmeId || je.grantTag?.grantId || 'General Administration';
       if (!byProgramme[prog]) byProgramme[prog] = { received: 0, adminExpense: 0, progExpense: 0 };
       const amt = Math.abs(Number(je.amount) || 0);
       if (je.entryType === 'Income') {
@@ -431,37 +432,9 @@ const Compliance: React.FC = () => {
     toast.success('FCRA return data exported — verify figures before filing on the FCRA portal.');
   };
 
-  // ── 14-day expiry → Agent HQ tasks broadcast ──────────────────────────────
-  // For each compliance doc expiring within 14 days, upsert a High-priority
-  // task into the store. Agent HQ reads this same tasks list, so these appear
-  // in the intent queue automatically. We use sourceIntentId to deduplicate
-  // across renders so we don't flood the queue on every update.
-  useEffect(() => {
-    const nowMs = Date.now();
-    for (const doc of complianceDocs) {
-      if (!doc.expiry) continue;
-      const daysLeft = Math.ceil((new Date(doc.expiry).getTime() - nowMs) / 86_400_000);
-      if (daysLeft > 14) continue;
-      const dayText = daysLeft < 0
-        ? `expired ${Math.abs(daysLeft)}d ago`
-        : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;
-      upsertTaskByIntent({
-        id: `compliance-expiry-${doc.id}`,
-        sourceIntentId: `compliance-expiry-${doc.id}`,
-        title: `Renew ${doc.name} — ${dayText}`,
-        description: `${doc.type} document "${doc.name}" ${dayText}. Renewal required to avoid grant compliance blocks.${doc.assigned_to ? ` Owner: ${doc.assigned_to}.` : ''}`,
-        status: 'open',
-        sourceType: 'agent',
-        priority: 'high',
-        relatedEntityType: 'compliance',
-        relatedEntityId: doc.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        meta: { risk: 'High', docType: doc.type, expiryDate: doc.expiry },
-      });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [complianceDocs]);
+  // NOTE: 14-day expiry → Agent HQ tasks are now broadcast from Layout.tsx
+  // (always-mounted component) so reminders propagate even when this page
+  // is never visited. See Layout.tsx complianceExpiryBroadcast useEffect.
 
   const validDocs = complianceDocs.filter(d => d.status === 'Valid').length;
   const expiringSoon = complianceDocs.filter(d => d.status === 'Expiring Soon').length;

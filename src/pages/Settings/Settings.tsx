@@ -497,8 +497,19 @@ const Settings: React.FC = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div className="input-group"><label className="input-label">PAN / TAN</label>
                     <input className="input-field" value={panNo} onChange={e => setPanNo(e.target.value)} /></div>
-                  <div className="input-group"><label className="input-label">80G Certificate No.</label>
-                    <input className="input-field" placeholder="e.g. 80G/AABCI1234C/2023-24" value={eightyGNo} onChange={e => setEightyGNo(e.target.value)} /></div>
+                  <div className="input-group">
+                    <label className="input-label">80G Certificate No.</label>
+                    <input
+                      className="input-field"
+                      readOnly
+                      style={{ background: 'var(--color-bg-secondary)', cursor: 'default', color: 'var(--color-text-secondary)' }}
+                      value={eightyGNo || 'Set via Compliance HQ → upload 80G certificate'}
+                      title="Upload your 80G certificate in Compliance HQ to set this automatically"
+                    />
+                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)', marginTop: '0.25rem', display: 'block' }}>
+                      Managed in Compliance HQ — upload your 80G certificate there to update this value.
+                    </span>
+                  </div>
                 </div>
                 <div className="input-group"><label className="input-label">State of Registration</label>
                   <select className="input-field" value={ngoState} onChange={e => setNgoState(e.target.value)}>
