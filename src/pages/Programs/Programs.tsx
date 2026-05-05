@@ -467,20 +467,40 @@ const Programs: React.FC = () => {
   const inactiveMap = useMemo(() => {
     const map = new Map<string, number | null>();
     const now = Date.now();
+
+    const misDatesForName = new Map<string, string>();
+    for (const intent of misReviewIntents) {
+      if ((intent.status === 'approved' || intent.status === 'edited') && intent.extracted.beneficiary) {
+        const activityDate = intent.decidedAt?.slice(0, 10) ?? intent.reportDate;
+        if (activityDate) {
+          const key = intent.extracted.beneficiary.toLowerCase().trim();
+          const prev = misDatesForName.get(key);
+          if (!prev || activityDate > prev) misDatesForName.set(key, activityDate);
+        }
+      }
+    }
+
     for (const b of beneficiaries) {
-      const dates = beneficiaryOutcomes
+      const outcomeDates = beneficiaryOutcomes
         .filter(o => o.beneficiaryId === b.id && o.measuredAt)
         .map(o => o.measuredAt);
-      if (!dates.length) {
+
+      const nameLower = b.name.toLowerCase().trim();
+      const misDate = misDatesForName.get(nameLower)
+        ?? [...misDatesForName.entries()].find(([k]) => nameLower.includes(k) || k.includes(nameLower))?.[1];
+
+      const allDates = misDate ? [...outcomeDates, misDate] : outcomeDates;
+
+      if (!allDates.length) {
         map.set(b.id, null);
       } else {
-        const latest = dates.sort().reverse()[0];
+        const latest = allDates.sort().reverse()[0];
         const days = Math.floor((now - new Date(latest).getTime()) / 86400000);
         map.set(b.id, days);
       }
     }
     return map;
-  }, [beneficiaries, beneficiaryOutcomes]);
+  }, [beneficiaries, beneficiaryOutcomes, misReviewIntents]);
 
   const isInactive = (benId: string) => {
     const days = inactiveMap.get(benId);
@@ -738,7 +758,29 @@ const Programs: React.FC = () => {
                       <button
                         className="btn btn-secondary"
                         style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem', color: '#16A34A', border: '1px solid #86efac' }}
-                        onClick={() => { decideMisReviewIntent(intent.id, 'approved'); toast.success('MIS submission approved.'); }}
+                        onClick={() => {
+                          const ex = intent.extracted;
+                          const match = ex.beneficiary
+                            ? beneficiaries.find(b =>
+                                b.name.toLowerCase().includes(ex.beneficiary!.toLowerCase()) ||
+                                ex.beneficiary!.toLowerCase().includes(b.name.toLowerCase())
+                              )
+                            : undefined;
+                          if (match) {
+                            const patch: Partial<typeof match> = {};
+                            if (ex.location && !match.location) patch.location = ex.location;
+                            if (ex.program && !match.program) patch.program = ex.program;
+                            if (Object.keys(patch).length) {
+                              updateBeneficiary({ ...match, ...patch });
+                              toast.success(`MIS approved and ${Object.keys(patch).join(', ')} updated for ${match.name}.`);
+                            } else {
+                              toast.success(`MIS submission confirmed for ${match.name}.`);
+                            }
+                          } else {
+                            toast.success('MIS submission approved.');
+                          }
+                          decideMisReviewIntent(intent.id, 'approved');
+                        }}
                       >
                         ✓ Confirm
                       </button>

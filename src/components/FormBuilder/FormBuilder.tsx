@@ -5,6 +5,7 @@ import {
   List, Calendar, MapPin, Camera, CheckSquare
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useStore } from '../../store/useStore';
 
 // ── Field Type Definitions ────────────────────────────────────────────────────
 
@@ -68,6 +69,11 @@ const FormBuilder: React.FC = () => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [lang, setLang] = useState<'en' | 'hi' | 'mr' | 'ta'>('en');
   const [savedForms, setSavedForms] = useState<SavedForm[]>([]);
+  const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
+  const [previewBenId, setPreviewBenId] = useState<string>('');
+
+  const allBeneficiaries = useStore(s => s.beneficiaries);
+  const updateBeneficiary = useStore(s => s.updateBeneficiary);
 
   useEffect(() => {
     try {
@@ -300,46 +306,138 @@ const FormBuilder: React.FC = () => {
       {activeTab === 'preview' && (
         <div style={{ maxWidth: 440, margin: '0 auto' }}>
           <div className="card" style={{ padding: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
               <h3 style={{ fontWeight: 700 }}>{formName}</h3>
               <span className="badge badge-success">📱 Mobile Preview</span>
             </div>
+            <div className="input-group" style={{ marginBottom: '1rem' }}>
+              <label className="input-label">Filling out for beneficiary (optional)</label>
+              <select
+                className="input-field"
+                value={previewBenId}
+                onChange={e => setPreviewBenId(e.target.value)}
+              >
+                <option value="">— select beneficiary —</option>
+                {allBeneficiaries.map(b => (
+                  <option key={b.id} value={b.id}>{b.name} · {b.program}</option>
+                ))}
+              </select>
+              {previewBenId && fields.some(f => f.mapsToField) && (
+                <div style={{ fontSize: '0.7rem', color: '#0369a1', marginTop: 3 }}>
+                  Submitting will write {fields.filter(f => f.mapsToField).length} mapped field{fields.filter(f => f.mapsToField).length > 1 ? 's' : ''} to this beneficiary's record.
+                </div>
+              )}
+            </div>
             {fields.map(f => (
               <div key={f.id} className="input-group">
-                <label className="input-label">{f.label}{f.required && <span style={{ color: 'var(--color-danger)' }}> *</span>}</label>
-                {f.type === 'text' && <input type="text" className="input-field" placeholder={f.placeholder || ''} />}
-                {f.type === 'number' && <input type="number" className="input-field" placeholder={f.placeholder || '0'} />}
-                {f.type === 'date' && <input type="date" className="input-field" />}
+                <label className="input-label">
+                  {f.label}{f.required && <span style={{ color: 'var(--color-danger)' }}> *</span>}
+                  {f.mapsToField && <span style={{ fontSize: '0.65rem', color: '#0369a1', marginLeft: 5 }}>→ {f.mapsToField}</span>}
+                </label>
+                {f.type === 'text' && (
+                  <input type="text" className="input-field" placeholder={f.placeholder || ''}
+                    value={previewValues[f.id] ?? ''}
+                    onChange={e => setPreviewValues(prev => ({ ...prev, [f.id]: e.target.value }))} />
+                )}
+                {f.type === 'number' && (
+                  <input type="number" className="input-field" placeholder={f.placeholder || '0'}
+                    value={previewValues[f.id] ?? ''}
+                    onChange={e => setPreviewValues(prev => ({ ...prev, [f.id]: e.target.value }))} />
+                )}
+                {f.type === 'date' && (
+                  <input type="date" className="input-field"
+                    value={previewValues[f.id] ?? ''}
+                    onChange={e => setPreviewValues(prev => ({ ...prev, [f.id]: e.target.value }))} />
+                )}
                 {f.type === 'boolean' && (
                   <div className="flex gap-3" style={{ paddingTop: '0.25rem' }}>
-                    <label className="flex items-center gap-2"><input type="radio" name={f.id} /> Yes</label>
-                    <label className="flex items-center gap-2"><input type="radio" name={f.id} /> No</label>
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name={f.id} checked={previewValues[f.id] === 'yes'} onChange={() => setPreviewValues(prev => ({ ...prev, [f.id]: 'yes' }))} /> Yes
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name={f.id} checked={previewValues[f.id] === 'no'} onChange={() => setPreviewValues(prev => ({ ...prev, [f.id]: 'no' }))} /> No
+                    </label>
                   </div>
                 )}
                 {f.type === 'select' && (
-                  <select className="input-field">
+                  <select className="input-field"
+                    value={previewValues[f.id] ?? ''}
+                    onChange={e => setPreviewValues(prev => ({ ...prev, [f.id]: e.target.value }))}>
                     <option value="">Select…</option>
                     {f.options?.map(o => <option key={o}>{o}</option>)}
                   </select>
                 )}
                 {f.type === 'location' && (
-                  <button className="btn btn-secondary" style={{ width: '100%' }} onClick={() => toast('📍 GPS captured: 18.9220° N, 72.8347° E', { duration: 2000 })}>
-                    <MapPin size={14} /> Capture GPS Location
+                  <button className="btn btn-secondary" style={{ width: '100%' }} onClick={() => {
+                    const gps = '18.9220° N, 72.8347° E';
+                    setPreviewValues(prev => ({ ...prev, [f.id]: gps }));
+                    toast('📍 GPS captured: ' + gps, { duration: 2000 });
+                  }}>
+                    <MapPin size={14} /> {previewValues[f.id] ? `📍 ${previewValues[f.id]}` : 'Capture GPS Location'}
                   </button>
                 )}
                 {f.type === 'photo' && (
-                  <button className="btn btn-secondary" style={{ width: '100%' }} onClick={() => toast('📷 Photo captured and geotagged!', { duration: 2000 })}>
-                    <Camera size={14} /> Take Photo
+                  <button className="btn btn-secondary" style={{ width: '100%' }} onClick={() => {
+                    setPreviewValues(prev => ({ ...prev, [f.id]: 'photo_captured' }));
+                    toast('📷 Photo captured and geotagged!', { duration: 2000 });
+                  }}>
+                    <Camera size={14} /> {previewValues[f.id] ? '✓ Photo captured' : 'Take Photo'}
                   </button>
                 )}
                 {f.type === 'checkbox' && (
                   <div className="flex flex-col gap-2" style={{ paddingTop: '0.25rem' }}>
-                    {f.options?.map(o => <label key={o} className="flex items-center gap-2"><input type="checkbox" /> {o}</label>)}
+                    {f.options?.map(o => (
+                      <label key={o} className="flex items-center gap-2">
+                        <input type="checkbox"
+                          checked={(previewValues[f.id] ?? '').split(',').filter(Boolean).includes(o)}
+                          onChange={e => {
+                            const cur = (previewValues[f.id] ?? '').split(',').filter(Boolean);
+                            const next = e.target.checked ? [...cur, o] : cur.filter(v => v !== o);
+                            setPreviewValues(prev => ({ ...prev, [f.id]: next.join(',') }));
+                          }} /> {o}
+                      </label>
+                    ))}
                   </div>
                 )}
               </div>
             ))}
-            <button className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} onClick={() => toast.success('Form submitted! Data synced to MIS.')}>
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', marginTop: '1rem' }}
+              onClick={() => {
+                let writtenCount = 0;
+                if (previewBenId) {
+                  const ben = allBeneficiaries.find(b => b.id === previewBenId);
+                  if (ben) {
+                    const details: Record<string, unknown> = { ...(ben.details || {}) };
+                    const topLevel: Partial<typeof ben> = {};
+                    for (const f of fields) {
+                      const val = previewValues[f.id];
+                      if (!f.mapsToField || val === undefined || val === '') continue;
+                      const target = f.mapsToField;
+                      if (target === 'name') { topLevel.name = val; }
+                      else if (target === 'location') { topLevel.location = val; }
+                      else if (target === 'familySize') { topLevel.familySize = Number(val) || ben.familySize; }
+                      else if (target === 'aadhaar') { topLevel.aadhaar = val === 'yes'; }
+                      else if (target === 'referral_source') { details['referral_source'] = val; }
+                      else if (target === 'referral_detail') { details['referral_detail'] = val; }
+                      else if (target === 'vulnerability_flags') { details['vulnerability_flags'] = val; }
+                      else { details[target] = val; }
+                      writtenCount++;
+                    }
+                    if (writtenCount > 0) {
+                      updateBeneficiary({ ...ben, ...topLevel, details });
+                    }
+                  }
+                }
+                setPreviewValues({});
+                if (writtenCount > 0) {
+                  toast.success(`Form submitted! ${writtenCount} field${writtenCount > 1 ? 's' : ''} written to beneficiary record.`);
+                } else {
+                  toast.success('Form submitted! Data synced to MIS.');
+                }
+              }}
+            >
               Submit
             </button>
           </div>
