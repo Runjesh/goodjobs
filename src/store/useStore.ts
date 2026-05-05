@@ -183,6 +183,14 @@ export interface ComplianceDocument {
   uploadedAt: string;
   /** Authority, registration ref, review notes — JSON from API. */
   details?: Record<string, unknown>;
+  /**
+   * For 80G / 12A docs: the certificate / registration number printed on
+   * donor receipts. Single source of truth — Finance reads this field
+   * instead of ngoDetails.eighty_g_no so the number is always doc-registry-backed.
+   */
+  registration_number?: string;
+  /** Team member responsible for renewing this document. */
+  assigned_to?: string;
 }
 
 /** A single outreach touchpoint logged when the CRM sends via WhatsApp or email.
@@ -376,10 +384,10 @@ const initialVolunteers: Volunteer[] = [
 ];
 
 const initialComplianceDocs: ComplianceDocument[] = [
-  { id: 'doc-1', name: '12A Registration', type: 'Tax Exemption', status: 'Valid', expiry: '2028-03-31', uploadedAt: '2023-04-01' },
-  { id: 'doc-2', name: '80G Certificate', type: 'Donor Deduction', status: 'Expiring Soon', expiry: '2026-09-30', uploadedAt: '2023-10-01' },
-  { id: 'doc-3', name: 'FCRA Registration', type: 'Foreign Contribution', status: 'Valid', expiry: '2028-11-15', uploadedAt: '2023-11-20' },
-  { id: 'doc-4', name: 'CSR-1 Filing', type: 'CSR Eligibility', status: 'Valid', expiry: '2027-03-31', uploadedAt: '2024-04-10' },
+  { id: 'doc-1', name: '12A Registration', type: 'Tax Exemption', status: 'Valid', expiry: '2028-03-31', uploadedAt: '2023-04-01', assigned_to: 'Priya Patel' },
+  { id: 'doc-2', name: '80G Certificate', type: 'Donor Deduction', status: 'Expiring Soon', expiry: '2026-09-30', uploadedAt: '2023-10-01', registration_number: '80G/AABCI1234C/2023-24', assigned_to: 'Priya Patel' },
+  { id: 'doc-3', name: 'FCRA Registration', type: 'Foreign Contribution', status: 'Valid', expiry: '2028-11-15', uploadedAt: '2023-11-20', registration_number: '231650212', assigned_to: 'Rohan Sharma' },
+  { id: 'doc-4', name: 'CSR-1 Filing', type: 'CSR Eligibility', status: 'Valid', expiry: '2027-03-31', uploadedAt: '2024-04-10', assigned_to: 'Rohan Sharma' },
 ];
 
 // ── Local-storage persistence for cross-module state ───────────────────────

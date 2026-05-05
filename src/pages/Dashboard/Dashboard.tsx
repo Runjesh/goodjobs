@@ -258,11 +258,40 @@ function deriveFromStore(
     }
   }
 
-  const expiringDocs = complianceDocs.filter(d => d.status === 'Expiring Soon' || d.status === 'Expired');
-  if (expiringDocs.length > 0) {
-    const firstExpiring = expiringDocs[0];
+  // Documents expiring within 14 days get individual urgent brief items (per spec).
+  // Documents expiring in 15–90 days (status 'Expiring Soon') get a grouped item.
+  // Expired documents also get individual urgent items.
+  const within14 = complianceDocs.filter(d => {
+    if (!d.expiry) return false;
+    const msLeft = new Date(d.expiry).getTime() - nowMs;
+    const daysLeft = msLeft / 86_400_000;
+    return daysLeft <= 14; // includes already-expired (negative)
+  });
+  const farExpiring = complianceDocs.filter(d => {
+    if (!d.expiry) return false;
+    const msLeft = new Date(d.expiry).getTime() - nowMs;
+    const daysLeft = msLeft / 86_400_000;
+    return daysLeft > 14 && (d.status === 'Expiring Soon' || d.status === 'Expired');
+  });
+
+  for (const d of within14) {
+    const daysLeft = Math.ceil((new Date(d.expiry).getTime() - nowMs) / 86_400_000);
+    const dayText = daysLeft < 0
+      ? `expired ${Math.abs(daysLeft)}d ago`
+      : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;
+    items.push({
+      id: `exp-doc-14d-${d.id}`,
+      text: `${d.name} (${d.type}) — ${dayText} — renewal required`,
+      action: 'Renew now',
+      path: `/compliance?focus=${encodeURIComponent(d.id)}&alert=true`,
+      level: 'urgent',
+      ageDays: daysLeft < 0 ? Math.abs(daysLeft) : 0,
+    });
+  }
+  if (farExpiring.length > 0) {
+    const firstExpiring = farExpiring[0];
     const docTypeSlug = firstExpiring?.type?.toLowerCase().replace(/\s+/g, '-') ?? 'doc';
-    items.push({ id: 'exp-docs', text: `${expiringDocs.length} compliance document${expiringDocs.length > 1 ? 's' : ''} expiring — renewal required`, action: 'Renew now', path: `/compliance?doc=${docTypeSlug}&alert=true`, level: 'urgent', ageDays: 3 });
+    items.push({ id: 'exp-docs-far', text: `${farExpiring.length} compliance document${farExpiring.length > 1 ? 's' : ''} expiring soon — renewal needed`, action: 'Open Compliance', path: `/compliance?doc=${docTypeSlug}&alert=true`, level: 'attention', ageDays: 14 });
   }
 
   // Filings + board-tenure reminders persisted by the Compliance page.

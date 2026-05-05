@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ShieldCheck, Upload, Calendar, Users, X, CheckCircle2, AlertTriangle, Download, Plus, Shield, Trash2, RefreshCw, CheckSquare } from 'lucide-react';
+import { ShieldCheck, Upload, Calendar, Users, X, CheckCircle2, AlertTriangle, Download, Plus, Shield, Trash2, RefreshCw, CheckSquare, FileSpreadsheet } from 'lucide-react';
 import { useStore, type ComplianceDocument } from '../../store/useStore';
 import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
 import { isVisibleToday } from '../../utils/tasks';
@@ -28,6 +28,8 @@ type BoardMember = { id: string; name: string; role: string; din: string; tenure
 const Compliance: React.FC = () => {
   const { complianceDocs, setComplianceDocs } = useStore();
   const ngoDetails = useStore(s => s.ngoDetails);
+  const journalEntries  = useStore(s => s.journalEntries);
+  const upsertTaskByIntent = useStore(s => s.upsertTaskByIntent);
   const [pageTab, setPageTab] = useState('vault');
 
   // ── Deep-link query-param consumers ────────────────────────────────────────
@@ -58,6 +60,7 @@ const Compliance: React.FC = () => {
     expiry: '',
     issuing_authority: '',
     registration_ref: '',
+    registration_number: '',
     review_notes: '',
   });
   const [vaultFiles, setVaultFiles] = useState<{ key: string; filename: string; size: number; last_modified: string }[]>([]);
@@ -265,6 +268,7 @@ const Compliance: React.FC = () => {
           status: docForm.status,
           expiry_date: docForm.expiry || null,
           s3_key: presign.key,
+          ...(docForm.registration_number.trim() ? { registration_number: docForm.registration_number.trim() } : {}),
           details: {
             ...(docForm.issuing_authority.trim() ? { issuing_authority: docForm.issuing_authority.trim() } : {}),
             ...(docForm.registration_ref.trim() ? { registration_ref: docForm.registration_ref.trim() } : {}),
@@ -289,6 +293,7 @@ const Compliance: React.FC = () => {
         expiry: '',
         issuing_authority: '',
         registration_ref: '',
+        registration_number: '',
         review_notes: '',
       });
       setSelectedFile(null);
@@ -344,6 +349,120 @@ const Compliance: React.FC = () => {
     }
   };
 
+  // ── FCRA Return data compiler (FC-4 format) ───────────────────────────────
+  const handleFcraReturn = () => {
+    const fcraEntries = journalEntries.filter(je => je.fund === 'FCRA');
+    if (fcraEntries.length === 0) {
+      toast('No FCRA journal entries found. Add income/expense entries tagged to FCRA fund first.', { icon: 'ℹ️' });
+      return;
+    }
+
+    // Group by programme (blank entries fall under "General Administration")
+    type ProgramRow = { received: number; adminExpense: number; progExpense: number };
+    const byProgramme: Record<string, ProgramRow> = {};
+    for (const je of fcraEntries) {
+      const prog = (je as any).programmeId || je.grantTag?.grantId || 'General Administration';
+      if (!byProgramme[prog]) byProgramme[prog] = { received: 0, adminExpense: 0, progExpense: 0 };
+      const amt = Math.abs(Number(je.amount) || 0);
+      if (je.entryType === 'Income') {
+        byProgramme[prog].received += amt;
+      } else if (je.entryType === 'Expense') {
+        if (je.isAdminOverhead) byProgramme[prog].adminExpense += amt;
+        else byProgramme[prog].progExpense += amt;
+      }
+    }
+
+    // FC-4 columns: SR No, Programme/Project, Purpose, Foreign Received (₹),
+    // Admin Expenses (₹), Programme Expenses (₹), Total Spent (₹), Admin %
+    const rows: string[] = [
+      'SR No,Programme / Project,Purpose,Foreign Received (INR),Admin Expenses (INR),Programme Expenses (INR),Total Spent (INR),Admin % of Total Received',
+    ];
+    let sr = 1;
+    const programmes = Object.entries(byProgramme);
+    let totalReceived = 0, totalAdmin = 0, totalProg = 0;
+    for (const [prog, vals] of programmes) {
+      const totalSpent = vals.adminExpense + vals.progExpense;
+      const adminPct = vals.received > 0 ? ((vals.adminExpense / vals.received) * 100).toFixed(2) : '0.00';
+      rows.push([
+        sr++,
+        `"${prog}"`,
+        '"Foreign Contribution utilised for charitable purposes"',
+        vals.received.toFixed(0),
+        vals.adminExpense.toFixed(0),
+        vals.progExpense.toFixed(0),
+        totalSpent.toFixed(0),
+        adminPct,
+      ].join(','));
+      totalReceived += vals.received;
+      totalAdmin    += vals.adminExpense;
+      totalProg     += vals.progExpense;
+    }
+    // Summary row
+    const totalSpent = totalAdmin + totalProg;
+    const overallAdminPct = totalReceived > 0 ? ((totalAdmin / totalReceived) * 100).toFixed(2) : '0.00';
+    rows.push([
+      '',
+      '"TOTAL"',
+      '""',
+      totalReceived.toFixed(0),
+      totalAdmin.toFixed(0),
+      totalProg.toFixed(0),
+      totalSpent.toFixed(0),
+      overallAdminPct,
+    ].join(','));
+
+    // FC-4 header metadata
+    const meta = [
+      `# FC-4 Annual Return — ${ngoDetails.name || 'NGO'}`,
+      `# FCRA Reg No: ${ngoDetails.fcra_reg || '—'}   PAN: ${ngoDetails.pan || '—'}`,
+      `# Generated: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+      `# IMPORTANT: Verify all figures against audited accounts before filing on the FCRA portal.`,
+      '',
+    ];
+
+    const csv = [...meta, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `FCRA_FC4_Return_${new Date().getFullYear()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('FCRA return data exported — verify figures before filing on the FCRA portal.');
+  };
+
+  // ── 14-day expiry → Agent HQ tasks broadcast ──────────────────────────────
+  // For each compliance doc expiring within 14 days, upsert a High-priority
+  // task into the store. Agent HQ reads this same tasks list, so these appear
+  // in the intent queue automatically. We use sourceIntentId to deduplicate
+  // across renders so we don't flood the queue on every update.
+  useEffect(() => {
+    const nowMs = Date.now();
+    for (const doc of complianceDocs) {
+      if (!doc.expiry) continue;
+      const daysLeft = Math.ceil((new Date(doc.expiry).getTime() - nowMs) / 86_400_000);
+      if (daysLeft > 14) continue;
+      const dayText = daysLeft < 0
+        ? `expired ${Math.abs(daysLeft)}d ago`
+        : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;
+      upsertTaskByIntent({
+        id: `compliance-expiry-${doc.id}`,
+        sourceIntentId: `compliance-expiry-${doc.id}`,
+        title: `Renew ${doc.name} — ${dayText}`,
+        description: `${doc.type} document "${doc.name}" ${dayText}. Renewal required to avoid grant compliance blocks.${doc.assigned_to ? ` Owner: ${doc.assigned_to}.` : ''}`,
+        status: 'open',
+        sourceType: 'agent',
+        priority: 'high',
+        relatedEntityType: 'compliance',
+        relatedEntityId: doc.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        meta: { risk: 'High', docType: doc.type, expiryDate: doc.expiry },
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [complianceDocs]);
+
   const validDocs = complianceDocs.filter(d => d.status === 'Valid').length;
   const expiringSoon = complianceDocs.filter(d => d.status === 'Expiring Soon').length;
 
@@ -397,6 +516,13 @@ const Compliance: React.FC = () => {
           </div>
         </div>
         <div className="flex gap-4">
+          <button
+            className="btn btn-secondary"
+            onClick={handleFcraReturn}
+            title="Download pre-filled FC-4 return CSV from your FCRA journal entries"
+          >
+            <FileSpreadsheet size={16} /> Prepare FCRA Return
+          </button>
           <button
             className="btn btn-secondary"
             onClick={async () => {
@@ -851,6 +977,13 @@ const Compliance: React.FC = () => {
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Registration / certificate ref (optional)</label>
                 <input type="text" className="input-field" value={docForm.registration_ref} onChange={e => setDocForm({ ...docForm, registration_ref: e.target.value })} />
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">
+                  Registration number (80G / 12A / FCRA certificate No.)
+                  <span style={{ marginLeft: 6, fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>Used on donor receipts — single source of truth</span>
+                </label>
+                <input type="text" className="input-field" placeholder="e.g. 80G/AABCI1234C/2026-27" value={docForm.registration_number} onChange={e => setDocForm({ ...docForm, registration_number: e.target.value })} />
               </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Internal review notes (optional)</label>

@@ -190,6 +190,7 @@ const Finance: React.FC = () => {
   const csrCards         = useStore(s => s.csrCards);
   const donors           = useStore(s => s.donors);
   const ngoDetails       = useStore(s => s.ngoDetails);
+  const complianceDocs   = useStore(s => s.complianceDocs);
   const beneficiaries    = useStore(s => s.beneficiaries);
   const customPrograms   = useStore(s => s.customPrograms);
 
@@ -229,6 +230,13 @@ const Finance: React.FC = () => {
   // ngoName is now read from the Zustand ngoDetails slice (single source of truth).
   // The local useState fallback is kept only for the rare moment before store hydrates.
   const ngoName = ngoDetails.name || 'GoodJobs NGO';
+
+  // 80G registration number — single source of truth is the Donor Deduction doc
+  // in the Compliance registry. Falls back to ngoDetails.eighty_g_no so the
+  // receipt still populates if no doc has been uploaded yet.
+  const eightyGDoc = complianceDocs.find(d => d.type === 'Donor Deduction' && d.registration_number);
+  const eightyGRegNo = eightyGDoc?.registration_number || ngoDetails.eighty_g_no || '';
+  const eightyGMissing = !eightyGDoc;
   const [aaBannerDismissed, setAaBannerDismissed] = useState(() => {
     try {
       return localStorage.getItem('gj_finance_aa_banner_dismiss') === '1';
@@ -574,7 +582,7 @@ const Finance: React.FC = () => {
         description:  entryToSave.description,
         ngoName:      ngoName,
         ngoPan:       ngoDetails.pan || '',
-        eighty_g_no:  ngoDetails.eighty_g_no || '',
+        eighty_g_no:  eightyGRegNo,
       });
       const blob = new Blob([html], { type: 'text/html' });
       const url  = URL.createObjectURL(blob);
@@ -713,7 +721,7 @@ const Finance: React.FC = () => {
           description: je.description,
           ngoName,
           ngoPan:      ngoDetails.pan || '',
-          eighty_g_no: ngoDetails.eighty_g_no || '',
+          eighty_g_no: eightyGRegNo,
         });
         const safeName = receiptNo.replace(/\//g, '_');
         zipFiles.push({ name: `${safeName}.html`, content: html });
@@ -988,6 +996,14 @@ const Finance: React.FC = () => {
           </PermissionGate>
         </div>
       </div>
+
+      {/* 80G Registry Warning — shown when no Donor Deduction doc in the Compliance registry */}
+      {eightyGMissing && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 1rem', marginBottom: '1rem', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', color: '#713f12' }}>
+          <AlertCircle size={15} color="#ca8a04" />
+          <span>No 80G certificate found in the Compliance Registry — receipts will use the Settings fallback number. <strong>Upload your 80G document in Compliance HQ</strong> to ensure receipts use the authoritative registration number.</span>
+        </div>
+      )}
 
       {/* Tally Sync Banner */}
       <div className="tally-sync-banner">

@@ -1,14 +1,36 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldAlert, ArrowRight } from 'lucide-react';
+import { ShieldAlert, ArrowRight, User, ListChecks } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { selectAtRiskGrants } from '../../utils/complianceGrant';
 
-/**
- * HITL queue entries for the Compliance → Grant cascade. Each entry pairs a
- * grant with its expiring/expired compliance doc and offers a single
- * "Renew first" CTA that deep-links to the Compliance page.
- */
+const RENEWAL_STEPS: Record<string, string[]> = {
+  'Donor Deduction': [
+    'Download Form 10BD from Income Tax portal',
+    'File with PCIT/CIT online before expiry',
+    'Upload renewed certificate to Compliance Vault',
+  ],
+  'Tax Exemption': [
+    'File application to PCIT/CIT (Form 10A)',
+    'Attach audited financials for last 3 years',
+    'Allow 3–6 months for ministry review',
+  ],
+  'Foreign Contribution': [
+    'Log in to FCRA online portal (MHA)',
+    'Ensure all FC-4 annual returns are filed',
+    'Submit renewal application — ministry review takes 6–8 weeks',
+  ],
+  'CSR Eligibility': [
+    'File CSR-1 on MCA21 portal',
+    'Attach board resolution on CSR spend',
+    'Update MCA record within 30 days of new FY',
+  ],
+};
+
+function renewalSteps(docType: string): string[] {
+  return RENEWAL_STEPS[docType] ?? ['Contact issuing authority for renewal procedure'];
+}
+
 const ComplianceCascadeQueue: React.FC = () => {
   const navigate = useNavigate();
   const links   = useStore(s => s.complianceGrantLinks);
@@ -35,37 +57,59 @@ const ComplianceCascadeQueue: React.FC = () => {
           {items.length}
         </span>
       </header>
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
         {items.map(it => {
           const isRed = it.tone === 'red';
           const dayLabel = isRed
             ? (it.daysToExpiry < 0 ? `expired ${Math.abs(it.daysToExpiry)}d ago` : 'expired today')
             : `expires in ${it.daysToExpiry}d`;
+          const owner = it.doc.assigned_to;
+          const steps = renewalSteps(it.doc.type);
           return (
             <li
               key={it.link.id}
               style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem',
-                padding: '0.55rem 0.75rem',
+                padding: '0.65rem 0.75rem',
                 borderRadius: 'var(--radius-md)',
                 background: 'var(--color-bg-main)',
                 borderLeft: `3px solid ${isRed ? 'var(--color-danger)' : 'var(--color-warning)'}`,
               }}
             >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{it.grant.company} — {it.grant.project}</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
-                  {it.doc.name} · {dayLabel}{it.link.reason ? ` · ${it.link.reason}` : ''}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: owner || steps.length > 0 ? '0.5rem' : 0 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{it.grant.company} — {it.grant.project}</div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
+                    {it.doc.name} · {dayLabel}{it.link.reason ? ` · ${it.link.reason}` : ''}
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem', flexShrink: 0 }}
+                  onClick={() => navigate(`/compliance?focus=${encodeURIComponent(it.doc.id)}`)}
+                >
+                  Renew first <ArrowRight size={12} />
+                </button>
               </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem' }}
-                onClick={() => navigate(`/compliance?focus=${encodeURIComponent(it.doc.id)}`)}
-              >
-                Renew first <ArrowRight size={12} />
-              </button>
+              {/* Compliance owner + renewal process */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.35rem' }}>
+                {owner && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: 'var(--color-text-secondary)', background: 'var(--color-bg-card)', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)', padding: '2px 7px' }}>
+                    <User size={11} />
+                    <span>Owner: <strong>{owner}</strong></span>
+                  </div>
+                )}
+                <details style={{ fontSize: '0.72rem' }}>
+                  <summary style={{ cursor: 'pointer', color: 'var(--color-primary)', fontWeight: 600, listStyle: 'none', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <ListChecks size={11} /> Renewal steps
+                  </summary>
+                  <ol style={{ margin: '0.35rem 0 0 1rem', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                    {steps.map((s, i) => (
+                      <li key={i} style={{ color: 'var(--color-text-secondary)', marginTop: '0.15rem' }}>{s}</li>
+                    ))}
+                  </ol>
+                </details>
+              </div>
             </li>
           );
         })}
