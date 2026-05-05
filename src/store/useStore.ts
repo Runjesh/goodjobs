@@ -426,6 +426,10 @@ const seedBudgets: ProgramBudget[] = SEED_DEMO_CONNECTIONS ? [
   { programId: 'women-livelihood-center', label: 'Women Livelihood Center', planned: 1_500_000, spent: 420_000, grantId: '3', windowEnd: new Date(Date.now() + 35 * 86_400_000).toISOString().slice(0, 10), restricted: true },
   { programId: 'digital-literacy-2026',   label: 'Digital Literacy 2026',   planned:   800_000, spent: 610_000, grantId: '2', windowEnd: new Date(Date.now() + 50 * 86_400_000).toISOString().slice(0, 10), restricted: true },
   { programId: 'healthcare-camp',         label: 'Healthcare Camp',         planned:   300_000, spent:  80_000 },
+  // Farmer Support Initiative (Mahindra Finance — grant id 5, live).
+  // Only 18 % spent past the grant halfway point → triggers clawback-risk brief
+  // for the ED in the Today dashboard's morning brief.
+  { programId: 'farmer-support-init',     label: 'Farmer Support Init',     planned: 4_500_000, spent: 810_000, grantId: '5', windowEnd: new Date(Date.now() + 45 * 86_400_000).toISOString().slice(0, 10), restricted: true },
 ] : [];
 
 const seedVolAssignments: VolunteerAssignment[] = SEED_DEMO_CONNECTIONS ? [
@@ -478,6 +482,8 @@ const seedProgramGrantLinks: ProgramGrantLink[] = SEED_DEMO_CONNECTIONS ? [
   { id: 'pgl-2-dl',  programId: programIdFromName('Digital Literacy 2026'),   grantId: '2', role: 'primary',   allocationPct: 90, createdAt: new Date(Date.now() - 45 * 86_400_000).toISOString() },
   // HDFC also co-funds Digital Literacy 2026 to demonstrate co-funding
   { id: 'pgl-3-dl',  programId: programIdFromName('Digital Literacy 2026'),   grantId: '3', role: 'co-funder', allocationPct: 10, createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString() },
+  // Mahindra Finance (id 5, live) funds Farmer Support Initiative
+  { id: 'pgl-5-fsi', programId: programIdFromName('Farmer Support Init'),     grantId: '5', role: 'primary',   allocationPct: 100, createdAt: new Date(Date.now() - 90 * 86_400_000).toISOString() },
 ] : [];
 
 // Demo budget heads — give a couple of grants a real 4-head budget so the

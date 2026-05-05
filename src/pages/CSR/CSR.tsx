@@ -186,6 +186,7 @@ const CSR: React.FC = () => {
   const grantTranches = useStore(s => s.grantTranches);
   const addTask = useStore(s => s.addTask);
   const addComplianceDoc = useStore(s => s.addComplianceDoc);
+  const addComplianceGrantLink = useStore(s => s.addComplianceGrantLink);
   const { can } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [dragId, setDragId] = useState<number | string | null>(null);
@@ -236,12 +237,23 @@ const CSR: React.FC = () => {
           const dueDate = new Date(now.getTime() + 30 * 86_400_000);
           const expiryIso = dueDate.toISOString().slice(0, 10);
 
-          // 1) Compliance record — shows in Compliance HQ + AtRiskGrantsBanner
+          // 1) Compliance record — shows in Compliance HQ + AtRiskGrantsBanner.
+          //    We pre-compute the same timestamp the store action uses so we can
+          //    immediately link the new doc to this grant in complianceGrantLinks.
+          const docTs = Date.now();
+          const newDocId = `doc-${docTs}`;
           addComplianceDoc({
             name: `${card.company} — CSR-1 Filing`,
             type: 'CSR Eligibility',
             status: 'Expiring Soon',
             expiry: expiryIso,
+          });
+          // 1b) Link the new doc to the grant so compliance panels can join the two.
+          addComplianceGrantLink({
+            id: `cgl-mou-live-${String(card.id)}-${docTs}`,
+            grantId: String(card.id),
+            complianceDocId: newDocId,
+            reason: 'Auto-created on MoU → Live transition; CSR-1 filing required',
           });
 
           // 2) High-priority task for the finance / ED team
@@ -773,7 +785,7 @@ const CSR: React.FC = () => {
 
           // Build a KPI map keyed by card id for this column (only mou/live).
           const kpiByCard = showKpi
-            ? new Map<string, CardKpi>(colCards.map(card => {
+            ? new Map<string, CardKpi | null>(colCards.map(card => {
                 const rollups = selectGrantProgramRollups(String(card.id), {
                   links: programGrantLinks as ProgramGrantLink[],
                   beneficiaries,
@@ -781,7 +793,7 @@ const CSR: React.FC = () => {
                   periodDays: 90,
                 });
                 const primary = rollups.find(r => r.role !== 'co-funder') ?? rollups[0];
-                if (!primary) return [String(card.id), null as unknown as CardKpi];
+                if (!primary) return [String(card.id), null];
                 const health = grantHealthForProgram(primary.programId, String(card.id), {
                   budgets: programBudgets,
                   tranches: grantTranches,
@@ -798,7 +810,7 @@ const CSR: React.FC = () => {
                 };
                 return [String(card.id), kpi];
               }))
-            : new Map<string, CardKpi>();
+            : new Map<string, CardKpi | null>();
 
           return (
             <div key={col.id} className={`kanban-column ${col.class}`}
