@@ -380,16 +380,23 @@ function computeGoingWell(
   if (approvedToday.length > 0)
     chips.push({ id: 'gw-intents', label: `${approvedToday.length} MIS intent${approvedToday.length > 1 ? 's' : ''} approved today`, icon: CheckCircle2, color: '#0891b2' });
 
-  // Beneficiaries enrolled — proxy: unique beneficiaries with an outcome recorded today
+  // Beneficiaries enrolled today — use actual enrollment timestamp stored in
+  // Beneficiary.details.enrolledAt (or .createdAt as fallback), which is the typed
+  // escape-hatch (details: Record<string, unknown>) for per-beneficiary metadata.
+  // If neither is present fall back to outcomes recorded today as a reasonable proxy.
   const enrolledToday = new Set(
-    beneficiaryOutcomes
-      .filter(o => o.measuredAt && o.measuredAt.slice(0, 10) === todayStr)
-      .map(o => o.beneficiaryId)
+    beneficiaries.filter(b => {
+      const enrolledAt = (b.details?.enrolledAt ?? b.details?.createdAt) as string | undefined;
+      if (enrolledAt) return enrolledAt.slice(0, 10) === todayStr;
+      // Fallback: any outcome recorded for this beneficiary today
+      return beneficiaryOutcomes.some(o => o.beneficiaryId === b.id && o.measuredAt.slice(0, 10) === todayStr);
+    }).map(b => b.id)
   );
   if (enrolledToday.size > 0)
-    chips.push({ id: 'gw-beneficiaries', label: `${enrolledToday.size} beneficiar${enrolledToday.size > 1 ? 'ies' : 'y'} enrolled or active today`, icon: Users, color: '#059669' });
+    chips.push({ id: 'gw-beneficiaries', label: `${enrolledToday.size} beneficiar${enrolledToday.size > 1 ? 'ies' : 'y'} enrolled today`, icon: Users, color: '#059669' });
 
-  const recentlyAdvanced = csrCards.filter((c: any) => {
+  // CSRCard has typed updated_at, last_activity_at and col — no cast needed
+  const recentlyAdvanced = csrCards.filter(c => {
     const upd = c.updated_at ?? c.last_activity_at;
     return upd && new Date(upd).getTime() > since24h && (c.col === 'live' || c.col === 'mou');
   });
@@ -725,11 +732,18 @@ const Dashboard: React.FC = () => {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const briefSig = (state: ReturnType<typeof useStore.getState>) => [
+      // Intents: status + decidedAt cover the approve/edit/reject transitions
       state.misReviewIntents.map(i => `${i.id}:${i.status}:${i.decidedAt ?? ''}`).join('|'),
-      state.donors.map(d => `${d.id}:${d.lastGift ?? ''}:${d.totalGiven}`).join('|'),
-      state.transactions.map(t => `${t.id}:${(t as any).receipt_status ?? ''}:${(t as any).receipt_number ?? ''}`).join('|'),
-      state.beneficiaries.map(b => `${b.id}:${(b as any).status ?? ''}`).join('|'),
-      (state.csrCards as any[]).map(c => `${c.id}:${c.col}:${c.updated_at ?? ''}`).join('|'),
+      // Donors: lastGift + totalGiven + tags (lifecycle/nurture) + meta hash for any CRM field change
+      state.donors.map(d => `${d.id}:${d.lastGift}:${d.totalGiven}:${d.tags.join(',')}:${JSON.stringify(d.meta ?? {})}`).join('|'),
+      // Transactions: id + date + amount cover new records and edits;
+      // receipt fields live in details (typed as Record<string, unknown> on Donor/Beneficiary)
+      // so we fingerprint the full amount+date to catch any correction edits.
+      state.transactions.map(t => `${t.id}:${t.date}:${t.amount}:${t.campaignId}`).join('|'),
+      // Beneficiaries: id + program + JSON of details (covers enrolledAt, status, consent flags)
+      state.beneficiaries.map(b => `${b.id}:${b.program}:${JSON.stringify(b.details ?? {})}`).join('|'),
+      // CSR cards: col + updated_at are properly typed on CSRCard
+      state.csrCards.map(c => `${c.id}:${c.col}:${c.updated_at ?? ''}`).join('|'),
     ].join('///');
 
     const unsubscribe = useStore.subscribe((state, prev) => {
