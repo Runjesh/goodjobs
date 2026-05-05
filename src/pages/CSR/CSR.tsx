@@ -87,8 +87,11 @@ interface CardKpi {
   programLabel: string;
   beneficiaryCount: number;
   /** % of enrolled beneficiaries with at least one outcome recorded in the
-   *  last 90 days — "outcomes recorded vs enrolled" per spec. */
+   *  last 90 days — "outcomes recorded vs enrolled". */
   outcomeAchievementPct: number;
+  /** % of enrolled beneficiaries with a recent outcome measurement —
+   *  data readiness for the upcoming grant report. */
+  dataReadinessPct: number;
   nextReportDue: string | null;
   healthStatus: 'healthy' | 'at_risk' | 'overdue';
 }
@@ -817,6 +820,7 @@ const CSR: React.FC = () => {
               programLabel: primary.programLabel,
               beneficiaryCount: primary.beneficiaryCount,
               outcomeAchievementPct: primary.reportReadinessPct,
+              dataReadinessPct: primary.reportReadinessPct,
               nextReportDue: health.nextReportDue,
               healthStatus: health.status,
             };
@@ -909,10 +913,17 @@ const CSR: React.FC = () => {
                         title="Override AI win probability (0–100; clear to revert to AI)"
                         value={card.win_probability != null ? card.win_probability : ''}
                         onClick={e => e.stopPropagation()}
-                        onChange={e => {
+                        onChange={async e => {
                           e.stopPropagation();
                           const v = e.target.value === '' ? undefined : Math.min(100, Math.max(0, Number(e.target.value)));
                           updateCSRCard(card.id, { win_probability: v });
+                          try {
+                            await apiFetch(`/csr/cards/${String(card.id)}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ win_probability: v ?? null }),
+                            });
+                          } catch { /* best-effort; local store already updated */ }
                         }}
                         style={{ width: 38, fontSize: '0.55rem', border: '1px solid #d1d5db', borderRadius: 3, padding: '1px 3px', textAlign: 'center' }}
                       />
@@ -932,10 +943,18 @@ const CSR: React.FC = () => {
                         )}
                         {kpi.outcomeAchievementPct > 0 && (
                           <span
-                            title="% of enrolled beneficiaries with an outcome recorded in the last 90 days (outcomes recorded vs enrolled)"
+                            title="% of enrolled beneficiaries with an outcome recorded in the last 90 days"
                             style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.outcomeAchievementPct >= 70 ? '#f0fdf4' : kpi.outcomeAchievementPct >= 30 ? '#fef9c3' : '#fee2e2', color: kpi.outcomeAchievementPct >= 70 ? '#166534' : kpi.outcomeAchievementPct >= 30 ? '#854d0e' : '#991b1b', borderRadius: 4, padding: '1px 5px' }}
                           >
                             {kpi.outcomeAchievementPct}% outcomes
+                          </span>
+                        )}
+                        {kpi.dataReadinessPct > 0 && (
+                          <span
+                            title="Data readiness: % of beneficiaries with recent outcome data for upcoming report"
+                            style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.dataReadinessPct >= 70 ? '#f0fdf4' : '#fef9c3', color: kpi.dataReadinessPct >= 70 ? '#166534' : '#854d0e', borderRadius: 4, padding: '1px 5px' }}
+                          >
+                            {kpi.dataReadinessPct}% data
                           </span>
                         )}
                         {kpi.nextReportDue && (
