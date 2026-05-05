@@ -29,6 +29,101 @@ function nextReceiptNumber(ngoName: string): string {
   return `${prefix}/80G/${fy}/${String(seq).padStart(5, '0')}`;
 }
 
+// ── Pure-JS ZIP creator (STORE/no-compression) ───────────────────────────────
+// Builds a valid ZIP binary in memory without any external library dependency.
+// Each file is stored uncompressed (method 0 = STORED). Compliant with
+// ZIP specification APPNOTE.TXT 6.3.10 and readable by all major extractors.
+function createZip(files: Array<{ name: string; content: string }>): Uint8Array {
+  const enc = new TextEncoder();
+  const u16 = (n: number) => { const a = new Uint8Array(2); new DataView(a.buffer).setUint16(0, n >>> 0, true); return a; };
+  const u32 = (n: number) => { const a = new Uint8Array(4); new DataView(a.buffer).setUint32(0, n >>> 0, true); return a; };
+
+  // CRC-32 lookup table
+  const crcTab = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    crcTab[i] = c;
+  }
+  const crc32 = (data: Uint8Array): number => {
+    let c = 0xFFFFFFFF;
+    for (const b of data) c = crcTab[(c ^ b) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  };
+
+  const now = new Date();
+  const dosDate = (((now.getFullYear() - 1980) & 0x7F) << 9) | (((now.getMonth() + 1) & 0x0F) << 5) | (now.getDate() & 0x1F);
+  const dosTime = ((now.getHours() & 0x1F) << 11) | ((now.getMinutes() & 0x3F) << 5) | (Math.floor(now.getSeconds() / 2) & 0x1F);
+
+  interface ZipEntry { nameBytes: Uint8Array; dataBytes: Uint8Array; crc: number; localOff: number; }
+  const entries: ZipEntry[] = [];
+  const parts: Uint8Array[] = [];
+  let off = 0;
+
+  for (const f of files) {
+    const nameBytes = enc.encode(f.name);
+    const dataBytes = enc.encode(f.content);
+    const crc = crc32(dataBytes);
+    const localOff = off;
+
+    const lh = new Uint8Array([
+      0x50, 0x4B, 0x03, 0x04,  // local file header signature
+      0x14, 0x00,               // version needed (2.0)
+      0x00, 0x00,               // general purpose bit flag
+      0x00, 0x00,               // compression method: STORED
+      ...u16(dosTime), ...u16(dosDate),
+      ...u32(crc),
+      ...u32(dataBytes.length), // compressed size
+      ...u32(dataBytes.length), // uncompressed size
+      ...u16(nameBytes.length),
+      0x00, 0x00,               // extra field length
+    ]);
+    parts.push(lh, nameBytes, dataBytes);
+    off += lh.length + nameBytes.length + dataBytes.length;
+    entries.push({ nameBytes, dataBytes, crc, localOff });
+  }
+
+  const cdStart = off;
+  for (const e of entries) {
+    const cdh = new Uint8Array([
+      0x50, 0x4B, 0x01, 0x02,  // central directory file header signature
+      0x14, 0x00,               // version made by (2.0)
+      0x14, 0x00,               // version needed (2.0)
+      0x00, 0x00,               // general purpose bit flag
+      0x00, 0x00,               // compression method: STORED
+      ...u16(dosTime), ...u16(dosDate),
+      ...u32(e.crc),
+      ...u32(e.dataBytes.length),
+      ...u32(e.dataBytes.length),
+      ...u16(e.nameBytes.length),
+      0x00, 0x00,               // extra field length
+      0x00, 0x00,               // file comment length
+      0x00, 0x00,               // disk number start
+      0x00, 0x00,               // internal file attributes
+      0x00, 0x00, 0x00, 0x00,   // external file attributes
+      ...u32(e.localOff),
+    ]);
+    parts.push(cdh, e.nameBytes);
+    off += cdh.length + e.nameBytes.length;
+  }
+
+  const cdSize = off - cdStart;
+  const eocd = new Uint8Array([
+    0x50, 0x4B, 0x05, 0x06,    // end of central directory signature
+    0x00, 0x00, 0x00, 0x00,
+    ...u16(entries.length), ...u16(entries.length),
+    ...u32(cdSize), ...u32(cdStart),
+    0x00, 0x00,                 // ZIP file comment length
+  ]);
+  parts.push(eocd);
+
+  const total = parts.reduce((s, p) => s + p.length, 0);
+  const result = new Uint8Array(total);
+  let pos = 0;
+  for (const p of parts) { result.set(p, pos); pos += p.length; }
+  return result;
+}
+
 // ── 80G receipt HTML generator ────────────────────────────────────────────────
 function generate80GReceiptHtml(opts: {
   receiptNo: string;
@@ -149,6 +244,7 @@ const Finance: React.FC = () => {
   // When an FCRA expense would breach 18%, we park the pending entry here and
   // show a blocking confirm. The user can "Save anyway" or dismiss.
   const [fcraGuardEntry, setFcraGuardEntry] = useState<null | {
+    currentPct: number;
     projectedPct: number;
     remainingHeadroom: number;
     onConfirm: () => void;
@@ -407,6 +503,8 @@ const Finance: React.FC = () => {
       grantId:    entryToSave.grantId    || undefined,
       donorId:    entryToSave.donorId    || undefined,
       programmeId: entryToSave.programmeId || undefined,
+      // Persist the receipt number so bulk generation can skip already-receipted entries.
+      receiptNo: receiptNo || undefined,
     });
 
     // Feature 2: If income, auto-download the receipt HTML.
@@ -457,9 +555,11 @@ const Finance: React.FC = () => {
       const projectedPct = (projected / fcraTotal) * 100;
       const CAP = 18;
       if (projectedPct > CAP) {
+        const currentPct = (currentFcraAdminSpent / fcraTotal) * 100;
         const remaining = fcraTotal * (CAP / 100) - currentFcraAdminSpent;
         const capturedEntry = { ...entry };
         setFcraGuardEntry({
+          currentPct,
           projectedPct,
           remainingHeadroom: Math.max(0, remaining),
           onConfirm: () => {
@@ -474,29 +574,36 @@ const Finance: React.FC = () => {
     await doSaveJournalEntry(entry);
   };
 
-  // Feature 5: Bulk 80G receipt generation — finds income journal entries in
-  // the current month that have a linked donor and generates receipts for them,
-  // bundling all into a single multi-receipt HTML file for download.
+  // Feature 5: Bulk 80G receipt generation.
+  // Finds income journal entries in the current calendar month that have a
+  // linked donor AND no receipt number yet (deduplication: already-receipted
+  // entries are skipped). Generates one HTML file per receipt and bundles them
+  // into a real ZIP archive (pure-JS STORE method, no external dependency).
   const handleBulkReceiptGeneration = async () => {
     setBulkReceiptBusy(true);
     try {
       const now = new Date();
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-      const monthEnd   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-31`;
+      const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
       const pending = journalEntries.filter(je => {
         if (je.entryType !== 'Income') return false;
         if (!je.donorId) return false;
-        const d = je.date || '';
-        return d >= monthStart && d <= monthEnd;
+        if (je.receiptNo) return false; // already receipted — skip
+        const d = (je.date || '').slice(0, 7);
+        return d === monthStr;
       });
 
       if (pending.length === 0) {
-        toast.error('No income entries with a linked donor found for this month.');
+        toast(
+          journalEntries.some(je => je.entryType === 'Income' && je.receiptNo)
+            ? 'All income entries for this month already have receipts.'
+            : 'No income entries with a linked donor found for this month.',
+          { icon: 'ℹ️' }
+        );
         return;
       }
 
-      const parts: string[] = [];
+      const zipFiles: Array<{ name: string; content: string }> = [];
       for (const je of pending) {
         const donor = donors.find(d => d.id === je.donorId);
         const receiptNo = nextReceiptNumber(ngoName);
@@ -505,39 +612,30 @@ const Finance: React.FC = () => {
           donorName:   donor?.name  || je.description || 'Donor',
           donorPan:    donor?.pan   || '',
           amount:      Math.abs(Number(je.amount) || 0),
-          date:        je.date || now.toLocaleDateString('en-IN'),
+          date:        je.date ? new Date(je.date).toLocaleDateString('en-IN') : now.toLocaleDateString('en-IN'),
           description: je.description,
           ngoName,
           ngoPan:      ngoDetails.pan || '',
           eighty_g_no: ngoDetails.eighty_g_no || '',
         });
-        // Strip the outer HTML wrapper so we can embed multiple receipts.
-        const body = html.replace(/<!DOCTYPE[^>]*>[\s\S]*?<body[^>]*>/i, '')
-                         .replace(/<\/body>[\s\S]*$/i, '');
-        parts.push(`<div class="receipt-page">${body}</div>`);
+        const safeName = receiptNo.replace(/\//g, '_');
+        zipFiles.push({ name: `${safeName}.html`, content: html });
+        // Mark the entry as receipted so future bulk runs skip it.
+        upsertJournalEntry({ ...je, receiptNo });
       }
 
-      const bundle = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>80G Receipts — ${now.toLocaleDateString('en-IN')}</title>
-<style>
-  body{font-family:Arial,sans-serif;margin:0;padding:0}
-  .receipt-page{max-width:700px;margin:40px auto;padding:20px;border:2px solid #333;page-break-after:always}
-  .receipt-page:last-child{page-break-after:auto}
-  h2{text-align:center;margin:0 0 4px}p{margin:4px 0}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
-  .row{display:flex;gap:8px}.label{font-weight:600;min-width:160px}
-  .footer{margin-top:32px;font-size:0.85em;color:#555;border-top:1px solid #999;padding-top:8px}
-  @media print{.receipt-page{border:none;page-break-after:always}}
-</style></head><body>${parts.join('\n')}</body></html>`;
-
-      const blob = new Blob([bundle], { type: 'text/html' });
+      const zipBytes = createZip(zipFiles);
+      const blob = new Blob([zipBytes], { type: 'application/zip' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href     = url;
-      a.download = `80G_Receipts_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}.html`;
+      a.download = `80G_Receipts_${monthStr}.zip`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success(`Generated ${pending.length} receipt${pending.length > 1 ? 's' : ''} — open the HTML file to print or save as PDF.`, { duration: 6000 });
+      toast.success(
+        `Generated ${pending.length} receipt${pending.length > 1 ? 's' : ''} — extract the ZIP to get individual HTML files.`,
+        { duration: 7000 }
+      );
     } catch (err) {
       toast.error('Failed to generate receipts.');
     } finally {
@@ -1550,88 +1648,103 @@ const Finance: React.FC = () => {
               </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Description</label>
-                <div style={{ position: 'relative' }}>
-                  <input required type="text" className="input-field" placeholder="e.g. Staff salary disbursement" 
-                    value={entry.description} 
-                    onChange={async (e) => {
-                      const val = e.target.value;
-                      // Programme prefill: if description contains a known programme name and none
-                      // is selected yet, auto-select it. This mirrors the AI-suggestion requirement
-                      // without a separate inference call — the description text IS the signal.
-                      let nextProgramme = entry.programmeId;
-                      if (!nextProgramme && val.length > 3) {
-                        const match = allProgrammes.find(p =>
-                          val.toLowerCase().includes(p.toLowerCase().slice(0, Math.max(6, p.length)))
-                        );
-                        if (match) nextProgramme = match;
-                      }
-                      setEntry({ ...entry, description: val, programmeId: nextProgramme });
-                      if (val.length > 5) {
-                        setIsClassifying(true);
-                        try {
-                          const res = await apiFetch(`/workflows/classify-transaction?description=${encodeURIComponent(val)}`, { method: 'POST' });
-                          if (res.ok) {
-                            const data = await res.json();
-                            setClassification(data);
-                            // Feature 4: AI pre-fill — write AI category result into form fields.
-                            // Map AI category string to fund type + entry type + programme.
-                            if (data?.category) {
-                              const cat = String(data.category).toLowerCase();
-                              // Fund classification mapping
-                              let aiFund = entry.fund;
-                              if (cat.includes('fcra') || cat.includes('foreign')) aiFund = 'FCRA';
-                              else if (cat.includes('csr')) aiFund = 'CSR';
-                              else if (cat.includes('restricted') || cat.includes('grant')) aiFund = 'Restricted Grant';
-                              else if (cat.includes('general') || cat.includes('admin') || cat.includes('overhead')) aiFund = 'General';
-                              // Entry type mapping
-                              let aiType = entry.type as 'Expense' | 'Income' | 'Transfer';
-                              if (cat.includes('income') || cat.includes('donation') || cat.includes('receipt')) aiType = 'Income';
-                              else if (cat.includes('transfer')) aiType = 'Transfer';
-                              else if (cat.includes('expense') || cat.includes('salary') || cat.includes('beneficiary') || cat.includes('program')) aiType = 'Expense';
-                              // Programme mapping — exact or prefix match
-                              let aiProg = entry.programmeId;
-                              if (!aiProg) {
-                                const mapped = allProgrammes.find(p =>
-                                  p.toLowerCase() === cat ||
-                                  p.toLowerCase().startsWith(cat.slice(0, Math.max(5, cat.length))) ||
-                                  cat.startsWith(p.toLowerCase().slice(0, Math.max(5, p.length)))
-                                );
-                                if (mapped) aiProg = mapped;
-                              }
-                              // Amount parsing from description (bank statement paste)
-                              // e.g. "₹12,500" or "Rs 12500" or "INR 12500"
-                              let aiAmount = entry.amount;
-                              const amtMatch = val.match(/(?:₹|Rs\.?\s*|INR\s*)([\d,]+)/i);
-                              if (amtMatch) {
-                                const parsed = parseInt(amtMatch[1].replace(/,/g, ''), 10);
-                                if (!isNaN(parsed) && parsed > 0) aiAmount = parsed;
-                              }
-                              setEntry(prev => ({
-                                ...prev,
-                                fund: aiFund,
-                                type: aiType,
-                                programmeId: aiProg,
-                                amount: aiAmount,
-                              }));
-                            }
+                {/* Feature 4: AI pre-fill via explicit "Categorise" button.
+                    Paste a bank statement line or type a description, then click
+                    "Categorise" to have the AI populate fund type, entry type,
+                    programme, and amount (if a ₹/Rs/INR amount is detected). */}
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    <input
+                      required
+                      type="text"
+                      className="input-field"
+                      placeholder="Paste a bank line or type a description…"
+                      value={entry.description}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        // Light programme name pre-fill from description text (no API call).
+                        let nextProgramme = entry.programmeId;
+                        if (!nextProgramme && val.length > 3) {
+                          const match = allProgrammes.find(p =>
+                            val.toLowerCase().includes(p.toLowerCase().slice(0, Math.max(6, p.length)))
+                          );
+                          if (match) nextProgramme = match;
+                        }
+                        setEntry(prev => ({ ...prev, description: val, programmeId: nextProgramme }));
+                        // Clear stale classification chip when the description changes.
+                        if (classification) setClassification(null);
+                      }}
+                    />
+                    {(classification || isClassifying) && (
+                      <div style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--color-bg-card)', padding: '0.2rem 0.45rem', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '0.7rem', zIndex: 5, pointerEvents: 'none' }}>
+                        {isClassifying ? (
+                          <span style={{ color: 'var(--color-text-tertiary)' }}>Classifying…</span>
+                        ) : (
+                          <>
+                            <Bot size={12} color="var(--color-primary)" />
+                            <span style={{ fontWeight: 600 }}>{classification?.category}</span>
+                            <span style={{ color: (classification?.confidence || 0) > 0.8 ? 'var(--color-success)' : 'var(--color-warning)' }}>
+                              {Math.round((classification?.confidence || 0) * 100)}%
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ padding: '0.45rem 0.7rem', fontSize: '0.78rem', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                    disabled={isClassifying || !entry.description.trim()}
+                    title="Use AI to categorise and pre-fill all form fields"
+                    onClick={async () => {
+                      const val = entry.description.trim();
+                      if (!val) return;
+                      setIsClassifying(true);
+                      try {
+                        const res = await apiFetch(`/workflows/classify-transaction?description=${encodeURIComponent(val)}`, { method: 'POST' });
+                        if (!res.ok) { toast.error('Categorisation failed.'); return; }
+                        const data = await res.json();
+                        setClassification(data);
+                        if (data?.category) {
+                          const cat = String(data.category).toLowerCase();
+                          // Fund classification
+                          let aiFund = entry.fund;
+                          if (cat.includes('fcra') || cat.includes('foreign')) aiFund = 'FCRA';
+                          else if (cat.includes('csr')) aiFund = 'CSR';
+                          else if (cat.includes('restricted') || cat.includes('grant')) aiFund = 'Restricted Grant';
+                          else if (cat.includes('general') || cat.includes('admin') || cat.includes('overhead')) aiFund = 'General';
+                          // Entry type
+                          let aiType = entry.type as 'Expense' | 'Income' | 'Transfer';
+                          if (cat.includes('income') || cat.includes('donation') || cat.includes('receipt')) aiType = 'Income';
+                          else if (cat.includes('transfer')) aiType = 'Transfer';
+                          else if (cat.includes('expense') || cat.includes('salary') || cat.includes('beneficiary') || cat.includes('program')) aiType = 'Expense';
+                          // Programme
+                          let aiProg = entry.programmeId;
+                          if (!aiProg) {
+                            const mapped = allProgrammes.find(p =>
+                              p.toLowerCase() === cat ||
+                              p.toLowerCase().startsWith(cat.slice(0, Math.max(5, cat.length))) ||
+                              cat.startsWith(p.toLowerCase().slice(0, Math.max(5, p.length)))
+                            );
+                            if (mapped) aiProg = mapped;
                           }
-                        } catch (err) {} finally { setIsClassifying(false); }
-                      }
-                    }} 
-                  />
-                  {entry.fund === 'FCRA' && (classification || isClassifying) && (
-                    <div style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--color-bg-card)', padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid var(--color-border)', fontSize: '0.7rem', zIndex: 5 }}>
-                      {isClassifying ? 'Classifying...' : (
-                        <>
-                          <Bot size={12} color="var(--color-primary)" />
-                          <span style={{ fontWeight: 600 }}>{classification?.category}</span>
-                          <span style={{ color: (classification?.confidence || 0) > 0.8 ? 'var(--color-success)' : 'var(--color-warning)' }}>
-                            {Math.round((classification?.confidence || 0) * 100)}%
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  )}
+                          // Amount from bank statement paste (₹12,500 / Rs 12500 / INR 12500)
+                          let aiAmount = entry.amount;
+                          const amtMatch = val.match(/(?:₹|Rs\.?\s*|INR\s*)([\d,]+)/i);
+                          if (amtMatch) {
+                            const parsed = parseInt(amtMatch[1].replace(/,/g, ''), 10);
+                            if (!isNaN(parsed) && parsed > 0) aiAmount = parsed;
+                          }
+                          setEntry(prev => ({ ...prev, fund: aiFund, type: aiType, programmeId: aiProg, amount: aiAmount }));
+                          toast.success('Fields pre-filled from AI categorisation.', { duration: 3000 });
+                        }
+                      } catch { toast.error('Categorisation failed.'); }
+                      finally { setIsClassifying(false); }
+                    }}
+                  >
+                    <Bot size={14} /> {isClassifying ? 'Classifying…' : 'Categorise'}
+                  </button>
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -1844,12 +1957,23 @@ const Finance: React.FC = () => {
               </div>
             </div>
             <div style={{ fontSize: '0.875rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-              <p style={{ margin: '0 0 0.5rem' }}>
-                Saving this entry would project FCRA admin overhead to{' '}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <div style={{ background: '#f8fafc', borderRadius: 6, padding: '0.5rem 0.75rem', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Current %</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#374151' }}>{fcraGuardEntry.currentPct.toFixed(1)}%</div>
+                </div>
+                <div style={{ background: '#FEE2E2', borderRadius: 6, padding: '0.5rem 0.75rem', border: '1px solid #FECACA' }}>
+                  <div style={{ fontSize: '0.7rem', color: '#92400E', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>After save</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#DC2626' }}>{fcraGuardEntry.projectedPct.toFixed(1)}%</div>
+                </div>
+              </div>
+              <p style={{ margin: '0 0 0.4rem' }}>
+                This expense would push FCRA admin overhead from{' '}
+                <strong>{fcraGuardEntry.currentPct.toFixed(1)}%</strong> to{' '}
                 <strong style={{ color: '#DC2626' }}>{fcraGuardEntry.projectedPct.toFixed(1)}%</strong>
-                {' '}of total FCRA funds — above the 18% pre-save threshold.
+                {' '}— exceeding the 18% pre-save threshold.
               </p>
-              <p style={{ margin: 0 }}>
+              <p style={{ margin: 0, color: '#374151' }}>
                 Rupee headroom before 18% cap:{' '}
                 <strong>₹{Math.round(fcraGuardEntry.remainingHeadroom).toLocaleString('en-IN')}</strong>
               </p>

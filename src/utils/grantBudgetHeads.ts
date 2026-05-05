@@ -57,6 +57,12 @@ export interface JournalExpense {
    * Enables giving-history tab on the donor profile and 80G auto-fill.
    */
   donorId?: string;
+  /**
+   * 80G receipt number assigned when this income entry was saved.
+   * Presence means a receipt has already been issued; bulk generation skips
+   * entries that already have a receiptNo to avoid duplicates.
+   */
+  receiptNo?: string;
 }
 
 export interface BudgetHeadUtilisation {
