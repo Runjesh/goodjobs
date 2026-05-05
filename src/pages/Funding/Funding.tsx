@@ -97,7 +97,7 @@ const Funding: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const navigate = useNavigate();
   const { can } = useAuth();
-  const { donors, transactions, campaigns, csrCards, complianceDocs } = useStore();
+  const { donors, transactions, campaigns, csrCards, complianceDocs, ngoDetails } = useStore();
 
   // ── Deep-link query-param consumers ────────────────────────────────────────
   // Dashboard brief links navigate here with context params to pre-open the
@@ -298,6 +298,39 @@ const Funding: React.FC = () => {
           <div style={{ marginTop: '1rem' }}>
             <AtRiskGrantsBanner />
           </div>
+
+          {/* Cause-area AI grant matching hint — shown when ngoDetails.causeArea is set
+              and no explicit search has been entered. Pre-filters the CSR Prospect DB. */}
+          {ngoDetails.causeArea && (
+            <div
+              style={{
+                marginTop: '1rem',
+                padding: '0.75rem 1rem',
+                background: 'linear-gradient(135deg, #f0fdf4, #ecfdf5)',
+                border: '1px solid #6ee7b7',
+                borderRadius: 'var(--radius-md)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ fontSize: '0.82rem', color: '#065f46' }}>
+                <span style={{ fontWeight: 700 }}>Grant matching active</span>
+                {' '}— funders aligned with your cause area{' '}
+                <strong style={{ color: '#0F766E' }}>{ngoDetails.causeArea}</strong>
+                {' '}are pre-filtered in the CSR Prospect DB.
+              </div>
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem', borderColor: '#0F766E', color: '#0F766E', whiteSpace: 'nowrap' }}
+                onClick={() => navigate('/csr')}
+              >
+                Open Prospect DB <ArrowRight size={12} />
+              </button>
+            </div>
+          )}
 
           {/* Active grants quick-links */}
           {csrCards.length > 0 && (() => {

@@ -15,12 +15,19 @@ interface PermissionGateProps {
 
 const ROLE_ORDER: UserRole[] = ['ed', 'finance', 'programs', 'field', 'board'];
 
+/**
+ * Find the minimum-privilege role that CAN perform the action —
+ * i.e. the last role in the hierarchy (lowest privilege) that still has
+ * the permission. This gives "Requires Finance access" rather than the
+ * misleading "Requires Executive Director access" when both roles qualify.
+ */
 function inferRequiredRole(module: string, action: keyof Omit<Permission, 'module'>): UserRole {
+  let found: UserRole = 'ed';
   for (const role of ROLE_ORDER) {
     const perm = ROLE_PERMISSIONS[role]?.find((p) => p.module === module);
-    if (perm && perm[action]) return role;
+    if (perm && perm[action]) found = role;
   }
-  return 'ed';
+  return found;
 }
 
 /**
