@@ -595,7 +595,7 @@ const Settings: React.FC = () => {
                     <div
                       key={inv.email}
                       style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        display: 'flex', alignItems: 'center',
                         padding: '0.65rem 0.85rem',
                         borderBottom: '1px solid var(--color-border-light)',
                         fontSize: '0.85rem', gap: '0.75rem',
@@ -604,15 +604,34 @@ const Settings: React.FC = () => {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inv.email}</div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
-                          {ROLE_META[inv.role as keyof typeof ROLE_META]?.label ?? inv.role} · invited {new Date(inv.invitedAt).toLocaleDateString('en-IN')}
+                          invited {new Date(inv.invitedAt).toLocaleDateString('en-IN')}
                         </div>
                       </div>
+                      <select
+                        className="input-field"
+                        style={{ width: 'auto', minWidth: 140, fontSize: '0.8rem', padding: '4px 8px', height: 34, flexShrink: 0 }}
+                        value={inv.role}
+                        onChange={e => {
+                          const newRole = e.target.value;
+                          const next = (user!.pendingInvites!).map(p =>
+                            p.email === inv.email ? { ...p, role: newRole } : p
+                          );
+                          updateUser({ pendingInvites: next });
+                          toast.success(`${inv.email.split('@')[0]}'s role updated to ${ROLE_META[newRole as keyof typeof ROLE_META]?.label ?? newRole}.`);
+                        }}
+                      >
+                        <option value="ED">Executive Director</option>
+                        <option value="PROGRAM_HEAD">Program Head</option>
+                        <option value="FUNDRAISER">Fundraiser</option>
+                        <option value="FINANCE">Finance Officer</option>
+                        <option value="FIELD_OPS">Field Officer</option>
+                      </select>
                       <button
                         type="button"
                         onClick={() => revokeInvite(inv.email)}
                         title="Revoke invite"
                         aria-label={`Revoke invite to ${inv.email}`}
-                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: 'var(--color-text-tertiary)' }}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: 'var(--color-text-tertiary)', flexShrink: 0 }}
                       >
                         <XIcon size={16} />
                       </button>
