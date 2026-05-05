@@ -152,7 +152,7 @@ function getQuickActions(
   const base: Record<string, { label: string; icon: React.ElementType; path: string; color: string; badge?: number }[]> = {
     ed: [
       { label: 'Review Intent Queue', icon: ClipboardCheck, path: '/agent-hq',             color: '#7C3AED', badge: pendingIntents > 0 ? pendingIntents : undefined },
-      { label: 'Grant Pipeline',       icon: GitMerge,       path: '/grants',                color: '#0891b2' },
+      { label: 'Grant Pipeline',       icon: GitMerge,       path: '/csr',                   color: '#0891b2' },
       { label: 'Reports',              icon: FileText,        path: '/reports',               color: '#7c3aed' },
       { label: 'Funding Hub',          icon: Wallet,          path: '/funding',               color: '#0F766E', badge: pendingReceipts > 0 ? pendingReceipts : undefined },
     ],

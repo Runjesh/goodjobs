@@ -33,13 +33,17 @@ const Compliance: React.FC = () => {
   // ── Deep-link query-param consumers ────────────────────────────────────────
   // Dashboard brief links navigate here with ?doc=<type>&alert=true so the
   // right tab opens and expiring/expired documents are visually highlighted.
+  // Tracks which doc type to highlight when arriving via deep link
+  const [deepLinkDocType, setDeepLinkDocType] = useState<string | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const alert  = params.get('alert');
+    const doc    = params.get('doc');  // e.g. 'fcra', '80g', 'csr'
     const docTab = params.get('tab');
-    if (alert === 'true') {
-      // Vault is the default tab; nothing to switch, but mark for banner display.
+    if (alert === 'true' || doc) {
+      // Vault is where registered docs live; set highlighted doc type for filter/scroll.
       setPageTab('vault');
+      if (doc) setDeepLinkDocType(doc.toLowerCase());
     }
     if (docTab && ['vault', 'board', 'filings', 'dpdp'].includes(docTab)) {
       setPageTab(docTab);
@@ -534,6 +538,13 @@ const Compliance: React.FC = () => {
                         alignItems: 'center',
                         fontSize: '0.82rem',
                         borderBottom: '1px solid var(--color-border-light)',
+                        // Highlight rows whose type matches the ?doc= deep-link param
+                        ...(deepLinkDocType && doc.type.toLowerCase().includes(deepLinkDocType) ? {
+                          background: '#fffbeb',
+                          outline: '2px solid #f59e0b',
+                          outlineOffset: '-2px',
+                          borderRadius: '4px',
+                        } : {}),
                       }}
                     >
                       <span
