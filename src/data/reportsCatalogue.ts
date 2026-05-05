@@ -14,6 +14,10 @@ export interface ReportRecord {
   status: 'draft' | 'review' | 'submitted' | 'overdue';
   date: string;
   funder?: string;
+  /** Programme this report covers — used for live data readiness computation. */
+  programmeId?: string;
+  /** Programme display name matching the Beneficiary.program field. */
+  programmeName?: string;
 }
 
 // Demo reports are only seeded in dev builds. In production the catalogue is
@@ -24,9 +28,9 @@ const SEED_DEMO_REPORTS = (() => {
 })();
 
 export const REPORTS_CATALOGUE: ReportRecord[] = SEED_DEMO_REPORTS ? [
-  { id: '1', title: 'Q2 Progress Report — Tata Trusts',     type: 'funder', status: 'review',    date: '2026-05-15', funder: 'Tata Trusts'  },
-  { id: '2', title: 'Annual Impact Report 2025–26',          type: 'impact', status: 'draft',     date: '2026-04-30'  },
-  { id: '3', title: 'Donor Impact Update — April 2026',      type: 'donor',  status: 'submitted', date: '2026-04-10'  },
-  { id: '4', title: 'Board Brief — Q1 FY 2026–27',           type: 'board',  status: 'submitted', date: '2026-04-01'  },
-  { id: '5', title: 'UC Report — CSR Fund Education',         type: 'funder', status: 'overdue',   date: '2026-03-31', funder: 'HDFC Bank CSR' },
+  { id: '1', title: 'Q2 Progress Report — Tata Trusts', type: 'funder', status: 'review',    date: '2026-05-15', funder: 'Tata Trusts',   programmeName: 'Women Livelihood Center', programmeId: 'women-livelihood-center' },
+  { id: '2', title: 'Annual Impact Report 2025–26',      type: 'impact', status: 'draft',     date: '2026-04-30',                           programmeName: 'Digital Literacy 2026',  programmeId: 'digital-literacy-2026'  },
+  { id: '3', title: 'Donor Impact Update — April 2026',  type: 'donor',  status: 'submitted', date: '2026-04-10',                           programmeName: 'Healthcare Camp',        programmeId: 'healthcare-camp'        },
+  { id: '4', title: 'Board Brief — Q1 FY 2026–27',       type: 'board',  status: 'submitted', date: '2026-04-01' },
+  { id: '5', title: 'UC Report — CSR Fund Education',    type: 'funder', status: 'overdue',   date: '2026-03-31', funder: 'HDFC Bank CSR', programmeName: 'Digital Literacy 2026',  programmeId: 'digital-literacy-2026'  },
 ] : [];

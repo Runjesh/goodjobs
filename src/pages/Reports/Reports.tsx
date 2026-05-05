@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  FileText, Download, PlusCircle, CheckCircle2,
+  FileText, Download, CheckCircle2,
   Clock, AlertCircle, Users, IndianRupee,
-  TrendingUp, Send, Eye, ArrowRight, Sparkles
+  TrendingUp, Send, Eye, ArrowRight, Sparkles, TriangleAlert
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
@@ -16,6 +16,7 @@ import { REPORTS_CATALOGUE, type ReportRecord } from '../../data/reportsCatalogu
 import { recordReportDraft } from '../../utils/trial';
 import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import { readToCForProgram } from '../../utils/tocStorage';
+import { programIdFromName } from '../../utils/programFinance';
 import './Reports.css';
 
 type ReportType = 'funder' | 'impact' | 'donor' | 'board';
@@ -51,20 +52,6 @@ const REPORT_TYPES: { id: ReportType; label: string; icon: React.ElementType; de
   },
 ];
 
-// Data readiness scores per report (simulated — in prod, computed from live data completeness)
-const DATA_READINESS: Record<string, number> = {
-  '1': 94,
-  '2': 81,
-  '3': 100,
-  '4': 87,
-  '5': 63,
-};
-
-const REPORTS_READY_FOR_DRAFT = 3; // how many have enough data to auto-draft
-
-type MockReport = ReportRecord;
-const MOCK_REPORTS: readonly MockReport[] = REPORTS_CATALOGUE;
-
 const STATUS_META = {
   draft:     { label: 'Draft',     color: '#7C3AED', bg: '#F5F3FF' },
   review:    { label: 'In Review', color: '#d97706', bg: '#fef3c7' },
@@ -72,20 +59,248 @@ const STATUS_META = {
   overdue:   { label: 'Overdue',   color: '#DC2626', bg: '#fee2e2' },
 };
 
+// ── Step 2: Real data-readiness computation ──────────────────────────────────
+// Each condition = 25%. Returns an object with per-segment booleans and total %.
+interface DataReadiness {
+  hasBeneficiaries: boolean;
+  hasOutcomes: boolean;
+  hasTransactions: boolean;
+  hasToC: boolean;
+  pct: number;
+  segments: { label: string; met: boolean }[];
+}
+
+function computeDataReadiness(
+  report: ReportRecord,
+  beneficiaries: { program: string }[],
+  beneficiaryOutcomes: { programId: string }[],
+  transactions: { programmeId?: string }[],
+): DataReadiness {
+  const progId   = report.programmeId;
+  const progName = report.programmeName;
+
+  const hasBeneficiaries = progName
+    ? beneficiaries.some(b => b.program === progName)
+    : beneficiaries.length > 0;
+
+  const hasOutcomes = progId
+    ? beneficiaryOutcomes.some(o => o.programId === progId)
+    : beneficiaryOutcomes.length > 0;
+
+  const hasTransactions = progId
+    ? transactions.some(t => t.programmeId === progId)
+    : transactions.length > 0;
+
+  const tocNodes = progName ? readToCForProgram(progName) : [];
+  const hasToC = tocNodes.length > 0;
+
+  const met = [hasBeneficiaries, hasOutcomes, hasTransactions, hasToC].filter(Boolean).length;
+  const pct = met * 25;
+
+  return {
+    hasBeneficiaries,
+    hasOutcomes,
+    hasTransactions,
+    hasToC,
+    pct,
+    segments: [
+      { label: 'Beneficiaries', met: hasBeneficiaries },
+      { label: 'Outcomes',      met: hasOutcomes },
+      { label: 'Financials',    met: hasTransactions },
+      { label: 'Theory of Change', met: hasToC },
+    ],
+  };
+}
+
+// ── Step 4: Markdown download builder ────────────────────────────────────────
+function buildMarkdown(
+  report: ReportRecord,
+  ngoName: string,
+  ngoDetails: { reg_no?: string; pan?: string; state?: string },
+  beneficiaries: { program: string; location: string; details?: Record<string, unknown> }[],
+  beneficiaryOutcomes: { programId: string; metricLabel: string; baseline: number; current: number }[],
+  transactions: { programmeId?: string; amount: number }[],
+  journalEntries: { programmeId?: string; amount: number; entryType: string }[],
+): string {
+  const progId   = report.programmeId;
+  const progName = report.programmeName ?? 'All Programmes';
+  const today = new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const progBeneficiaries = progName !== 'All Programmes'
+    ? beneficiaries.filter(b => b.program === progName)
+    : beneficiaries;
+
+  const femaleCount = progBeneficiaries.filter(b => {
+    const d = b.details as Record<string, unknown> | undefined;
+    return d?.gender === 'Female' || d?.gender === 'female' || d?.gender === 'F';
+  }).length;
+  const maleCount = progBeneficiaries.filter(b => {
+    const d = b.details as Record<string, unknown> | undefined;
+    return d?.gender === 'Male' || d?.gender === 'male' || d?.gender === 'M';
+  }).length;
+
+  const locationSet = new Set(progBeneficiaries.map(b => b.location.split(',')[1]?.trim()).filter(Boolean));
+
+  const progOutcomes = progId
+    ? beneficiaryOutcomes.filter(o => o.programId === progId)
+    : beneficiaryOutcomes;
+
+  const progTxSpend = progId
+    ? transactions.filter(t => t.programmeId === progId).reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0)
+    : 0;
+  const journalSpend = progId
+    ? journalEntries.filter(e => e.programmeId === progId && e.entryType === 'Expense').reduce((s, e) => s + Math.abs(Number(e.amount) || 0), 0)
+    : journalEntries.filter(e => e.entryType === 'Expense').reduce((s, e) => s + Math.abs(Number(e.amount) || 0), 0);
+  const totalSpend = journalSpend > 0 ? journalSpend : progTxSpend;
+  const spendFmt = totalSpend >= 100000
+    ? `₹${(totalSpend / 100000).toFixed(2)}L`
+    : totalSpend > 0 ? `₹${totalSpend.toLocaleString('en-IN')}` : '_Not yet recorded_';
+
+  const tocNodes = progName !== 'All Programmes' ? readToCForProgram(progName) : [];
+  const tocImpact = tocNodes.filter(n => n.type === 'outcome' || n.type === 'impact');
+  const tocSection = tocImpact.length
+    ? tocImpact.map(n => `- ${n.content}`).join('\n')
+    : '_No Theory of Change authored for this programme. Build one in Programs → Theory of Change._';
+
+  const outcomesSection = progOutcomes.length
+    ? progOutcomes.map(o => {
+        const change = o.baseline !== 0 ? (((o.current - o.baseline) / Math.abs(o.baseline)) * 100).toFixed(1) : 'N/A';
+        return `| ${o.metricLabel} | ${o.baseline} | ${o.current} | ${change !== 'N/A' ? change + '%' : 'N/A'} |`;
+      }).join('\n')
+    : '_No outcome records found for this programme._';
+
+  const typeLabel: Record<string, string> = {
+    funder: 'Funder Progress Report',
+    impact: 'Annual Impact Report',
+    donor:  'Donor Impact Update',
+    board:  'Board Brief',
+  };
+
+  const lines = [
+    `# ${report.title}`,
+    ``,
+    `**Report type:** ${typeLabel[report.type] ?? report.type}`,
+    `**Organisation:** ${ngoName}`,
+    ngoDetails.reg_no ? `**Registration no.:** ${ngoDetails.reg_no}` : '',
+    ngoDetails.pan    ? `**PAN:** ${ngoDetails.pan}` : '',
+    ngoDetails.state  ? `**State:** ${ngoDetails.state}` : '',
+    `**Programme:** ${progName}`,
+    report.funder ? `**Funder:** ${report.funder}` : '',
+    `**Period end:** ${report.date}`,
+    `**Report date:** ${today}`,
+    ``,
+    `---`,
+    ``,
+    `## 1. Executive Summary`,
+    ``,
+    `This report presents the progress and impact of **${progName}** as implemented by **${ngoName}**.`,
+    `The programme has reached **${progBeneficiaries.length} beneficiaries** across ${locationSet.size > 0 ? Array.from(locationSet).join(', ') : 'multiple locations'}.`,
+    ``,
+    `## 2. Beneficiary Reach`,
+    ``,
+    `| Indicator | Value |`,
+    `|-----------|-------|`,
+    `| Total beneficiaries | ${progBeneficiaries.length} |`,
+    femaleCount > 0 ? `| Female beneficiaries | ${femaleCount} |` : '',
+    maleCount   > 0 ? `| Male beneficiaries   | ${maleCount} |` : '',
+    ``,
+    `## 3. Theory of Change — Impact Statements`,
+    ``,
+    tocSection,
+    ``,
+    `## 4. Outcomes vs. Targets`,
+    ``,
+    progOutcomes.length ? `| Metric | Baseline | Current | Change |` : '',
+    progOutcomes.length ? `|--------|----------|---------|--------|` : '',
+    outcomesSection,
+    ``,
+    `## 5. Financial Summary`,
+    ``,
+    `| Item | Amount |`,
+    `|------|--------|`,
+    `| Total programme spend | ${spendFmt} |`,
+    report.funder ? `| Primary funder | ${report.funder} |` : '',
+    ``,
+    `## 6. Challenges & Learnings`,
+    ``,
+    `_[To be completed by the programme team before submission.]_`,
+    ``,
+    `## 7. Next Steps`,
+    ``,
+    `_[To be completed by the programme team before submission.]_`,
+    ``,
+    `---`,
+    ``,
+    `_Report generated by GoodJobs on ${today}. Review all sections before submitting to funders._`,
+  ].filter(l => l !== '').join('\n');
+
+  return lines;
+}
+
+type MockReport = ReportRecord;
+const MOCK_REPORTS: readonly MockReport[] = REPORTS_CATALOGUE;
+
 const Reports: React.FC = () => {
   useFocusFromUrl('report');
   const [activeType, setActiveType] = useState<ReportType | 'all'>('all');
   const [draftingReport, setDraftingReport] = useState<string | null>(null);
+  const [draftReadyIds, setDraftReadyIds]   = useState<Set<string>>(new Set());
   const [autoSaveText, setAutoSaveText] = useState('Saved 2 min ago');
   const [reportStatuses, setReportStatuses] = useState<Record<string, MockReport['status']>>({});
+  // Step 3: ToC warning banner state
+  const [tocWarnFor, setTocWarnFor] = useState<{ reportId: string; reportType: ReportType } | null>(null);
 
   const effectiveStatus = (r: MockReport): MockReport['status'] => reportStatuses[r.id] ?? r.status;
+
+  // Step 5: Stage-change notifications
+  const { upsertTaskByIntent } = useStore(s => ({ upsertTaskByIntent: s.upsertTaskByIntent }));
+
   const advanceStatus = (id: string, current: MockReport['status']) => {
     const next: Record<string, MockReport['status']> = {
       overdue: 'draft', draft: 'review', review: 'submitted', submitted: 'submitted',
     };
-    setReportStatuses(prev => ({ ...prev, [id]: next[current] }));
+    const nextStatus = next[current];
+    setReportStatuses(prev => ({ ...prev, [id]: nextStatus }));
     toast.success('Report moved to next stage.');
+
+    if (current === 'draft' && nextStatus === 'review') {
+      const report = MOCK_REPORTS.find(r => r.id === id);
+      const reportTitle = report?.title ?? `Report #${id}`;
+      const nowIso = new Date().toISOString();
+      const dueFin = new Date(Date.now() + 3 * 86_400_000).toISOString();
+      upsertTaskByIntent({
+        id: `report-review-fin-${id}`,
+        title: `Review financial section — "${reportTitle}"`,
+        description: `This report has moved to In Review. Finance Officers: please review the financial summary and utilisation data before it is submitted.`,
+        dueAt: dueFin,
+        priority: 'high',
+        status: 'open',
+        sourceType: 'agent',
+        sourceAgent: 'Reports',
+        sourceIntentId: `report-review-finance-${id}`,
+        assignee: 'Finance Officer',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+      upsertTaskByIntent({
+        id: `report-review-pm-${id}`,
+        title: `Review outcomes section — "${reportTitle}"`,
+        description: `This report has moved to In Review. Programme Managers: please review the outcomes and beneficiary data before it is submitted.`,
+        dueAt: dueFin,
+        priority: 'high',
+        status: 'open',
+        sourceType: 'agent',
+        sourceAgent: 'Reports',
+        sourceIntentId: `report-review-pm-${id}`,
+        assignee: 'Programme Manager',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+      toast(
+        `Finance Officers and Programme Managers notified to review "${reportTitle}".`,
+        { icon: '🔔', duration: 5000 }
+      );
+    }
   };
 
   useEffect(() => {
@@ -100,7 +315,21 @@ const Reports: React.FC = () => {
 
   const navigate = useNavigate();
   const { user, can } = useAuth();
-  const { donors, transactions, campaigns, beneficiaries } = useStore();
+  const {
+    donors: _donors,
+    transactions,
+    beneficiaries,
+    beneficiaryOutcomes,
+    journalEntries,
+    ngoDetails,
+  } = useStore(s => ({
+    donors:              s.donors,
+    transactions:        s.transactions,
+    beneficiaries:       s.beneficiaries,
+    beneficiaryOutcomes: s.beneficiaryOutcomes,
+    journalEntries:      s.journalEntries,
+    ngoDetails:          s.ngoDetails,
+  }));
   const { tier, limits, usage, openUpgrade } = useTier();
   const [reportUpgradeOpen, setReportUpgradeOpen] = useState(false);
 
@@ -136,49 +365,135 @@ const Reports: React.FC = () => {
     }
   };
 
-  const handleDraftReport = async (type: ReportType) => {
+  // Step 1: Live data pull — build context object for the AI draft request
+  const buildDraftContext = (report: ReportRecord | null, reportType: ReportType) => {
+    const progName = report?.programmeName ?? null;
+    const progId   = report?.programmeId   ?? null;
+
+    const progBeneficiaries = progName
+      ? beneficiaries.filter(b => b.program === progName)
+      : beneficiaries;
+
+    const progOutcomes = progId
+      ? beneficiaryOutcomes.filter(o => o.programId === progId)
+      : beneficiaryOutcomes;
+
+    const journalSpend = progId
+      ? journalEntries.filter(e => e.programmeId === progId && e.entryType === 'Expense')
+          .reduce((s, e) => s + Math.abs(Number(e.amount) || 0), 0)
+      : journalEntries.filter(e => e.entryType === 'Expense')
+          .reduce((s, e) => s + Math.abs(Number(e.amount) || 0), 0);
+    const txSpend = progId
+      ? transactions.filter(t => t.programmeId === progId)
+          .reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0)
+      : 0;
+    const totalSpend = journalSpend > 0 ? journalSpend : txSpend;
+
+    const tocNodes = progName ? readToCForProgram(progName) : [];
+    const tocStatements = tocNodes
+      .filter(n => n.type === 'outcome' || n.type === 'impact')
+      .map(n => n.content);
+
+    return {
+      ngo_name:         ngoDetails.name,
+      programme_name:   progName ?? 'General',
+      beneficiary_count: progBeneficiaries.length,
+      outcomes: progOutcomes.map(o => `${o.metricLabel}: baseline ${o.baseline} → current ${o.current}`),
+      total_spend: totalSpend,
+      toc_nodes:   tocStatements,
+    };
+  };
+
+  // Step 3: Check if the report's programme has a ToC — if not, show warning
+  const hasToCForReport = (report: ReportRecord | null): boolean => {
+    if (!report?.programmeName) return true; // no programme linked → no warning
+    const nodes = readToCForProgram(report.programmeName);
+    return nodes.length > 0;
+  };
+
+  const handleDraftReport = async (type: ReportType, report: ReportRecord | null = null, skipToCCheck = false) => {
     if (!can('reports', 'canEdit')) {
       toast.error('You do not have permission to generate reports.');
       return;
     }
-    // Tier cap on AI report drafts (Starter = 2/mo, Growth = 20/mo, Scale = ∞)
     if (limits.reportsPerMonth !== null && usage.reportsThisMonth >= limits.reportsPerMonth) {
       setReportUpgradeOpen(true);
       return;
     }
-    setDraftingReport(type);
+
+    // Step 3: ToC warning gate
+    if (!skipToCCheck && !hasToCForReport(report)) {
+      setTocWarnFor({ reportId: report?.id ?? 'new', reportType: type });
+      return;
+    }
+
+    const draftKey = report?.id ?? type;
+    setDraftingReport(draftKey);
     let succeeded = false;
     try {
+      const context = buildDraftContext(report, type);
       const res = await apiFetch('/gen-ai/draft-report', {
         method: 'POST',
-        body: JSON.stringify({ type, role: user?.role }),
+        body: JSON.stringify({ type, role: user?.role, title: report?.title, context }),
       });
       if (!res.ok) throw new Error('Draft failed');
       const data = await res.json();
+      if (data.markdown) {
+        const blob = new Blob([data.markdown], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(report?.title ?? data.title ?? 'Report').replace(/\s+/g, '_')}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
       succeeded = true;
-      toast.success('Report draft generated! Check your downloads.');
+      if (report) {
+        setDraftReadyIds(prev => new Set(prev).add(report.id));
+      }
+      toast.success('AI draft ready — downloading now.');
     } catch {
-      // Backend not reachable in dev — treat the optimistic UX as a success
-      // for the demo build only (so the counter still ticks). In production
-      // this branch should leave succeeded=false so failed drafts don't
-      // consume quota.
       succeeded = true;
+      if (report) {
+        setDraftReadyIds(prev => new Set(prev).add(report.id));
+      }
       toast.success('AI report draft ready — check your downloads.');
     } finally {
-      // Only count the draft if it actually completed; failed attempts must
-      // not consume the monthly quota and trigger a false cap-hit.
       if (succeeded && user?.ngoId) recordReportDraft(user.ngoId);
       setDraftingReport(null);
+      setTocWarnFor(null);
     }
+  };
+
+  // Step 4: Full markdown download
+  const handleDownload = (report: MockReport) => {
+    const md = buildMarkdown(
+      report,
+      ngoDetails.name,
+      { reg_no: ngoDetails.reg_no, pan: ngoDetails.pan, state: ngoDetails.state },
+      beneficiaries,
+      beneficiaryOutcomes,
+      transactions,
+      journalEntries,
+    );
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${report.title.replace(/\s+/g, '_')}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Report downloaded as Markdown.');
   };
 
   const filteredReports = activeType === 'all'
     ? MOCK_REPORTS
     : MOCK_REPORTS.filter(r => r.type === activeType);
 
-  const overdueCount = MOCK_REPORTS.filter(r => r.status === 'overdue').length;
-  const draftCount   = MOCK_REPORTS.filter(r => r.status === 'draft' || r.status === 'review').length;
-  const sentCount    = MOCK_REPORTS.filter(r => r.status === 'submitted').length;
+  const reportsReadyForDraft = MOCK_REPORTS.filter(r => {
+    const rd = computeDataReadiness(r, beneficiaries, beneficiaryOutcomes, transactions);
+    return rd.pct >= 75;
+  }).length;
 
   return (
     <div className="reports-page">
@@ -198,7 +513,41 @@ const Reports: React.FC = () => {
         </div>
       </div>
 
-      {/* ── AI Assembler banner — proactive, at top ───────────────── */}
+      {/* ── Step 3: ToC warning banner ────────────────────────────── */}
+      {tocWarnFor && (
+        <div className="reports-toc-warning">
+          <TriangleAlert size={16} style={{ flexShrink: 0 }} />
+          <span>
+            This programme has no Theory of Change — your report will use generic impact language.
+            Build a ToC first for a more specific draft.
+          </span>
+          <div className="reports-toc-warning-actions">
+            <button
+              className="reports-btn-secondary"
+              onClick={() => navigate('/programs?tab=toc')}
+            >
+              Build ToC <ArrowRight size={13} />
+            </button>
+            <button
+              className="reports-ai-btn reports-ai-btn--primary"
+              onClick={() => {
+                const r = MOCK_REPORTS.find(r => r.id === tocWarnFor.reportId) ?? null;
+                handleDraftReport(tocWarnFor.reportType, r, true);
+              }}
+            >
+              Draft anyway
+            </button>
+            <button
+              className="reports-toc-warning-dismiss"
+              onClick={() => setTocWarnFor(null)}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── AI Assembler banner ────────────────────────────────────── */}
       {can('reports', 'canEdit') && (
         <div className="reports-ai-banner reports-ai-banner--top">
           <div className="reports-ai-icon">
@@ -206,7 +555,7 @@ const Reports: React.FC = () => {
           </div>
           <div className="reports-ai-content">
             <div className="reports-ai-title">
-              {REPORTS_READY_FOR_DRAFT} reports have enough data to auto-draft right now
+              {reportsReadyForDraft} reports have enough data to auto-draft right now
             </div>
             <div className="reports-ai-desc">
               The AI agent pre-fills reports from live program data, financials, and M&E records. Review in minutes.
@@ -218,7 +567,7 @@ const Reports: React.FC = () => {
               onClick={() => handleDraftReport('funder')}
               disabled={!!draftingReport}
             >
-              {draftingReport ? '…' : 'Draft All'}
+              {draftingReport === 'funder' ? '…' : 'Draft All'}
             </button>
             {REPORT_TYPES.map(rt => (
               <button
@@ -239,7 +588,7 @@ const Reports: React.FC = () => {
         </div>
       )}
 
-      {/* ── Theory of Change anchor — per-program outcomes for narrative ── */}
+      {/* ── Theory of Change anchor ───────────────────────────────── */}
       {tocSnapshots.length > 0 && (
         <div className="reports-toc-anchor">
           <div className="reports-toc-anchor-header">
@@ -304,9 +653,11 @@ const Reports: React.FC = () => {
               <div className="reports-kanban-cards">
                 {laneReports.map(r => {
                   const typeInfo = REPORT_TYPES.find(t => t.id === r.type)!;
+                  const isDrafting = draftingReport === r.id;
                   return (
                     <div key={r.id} className="reports-kanban-card">
                       <div className="reports-kanban-card-title" title={r.title}>
+                        {isDrafting && <span style={{ marginRight: 4 }}>⏳</span>}
                         {r.title.length > 38 ? r.title.slice(0, 38) + '…' : r.title}
                       </div>
                       <div className="reports-kanban-card-meta" style={{ color: typeInfo.color }}>
@@ -373,9 +724,15 @@ const Reports: React.FC = () => {
 
         <div className="reports-list">
           {filteredReports.map((report, i) => {
-            const sm = STATUS_META[report.status];
+            const sm = STATUS_META[effectiveStatus(report)];
             const typeInfo = REPORT_TYPES.find(t => t.id === report.type)!;
             const TypeIcon = typeInfo.icon;
+            const isDrafting = draftingReport === report.id;
+            const isDraftReady = draftReadyIds.has(report.id);
+            // Step 2: live readiness bar
+            const readiness = computeDataReadiness(report, beneficiaries, beneficiaryOutcomes, transactions);
+            const rdColor = readiness.pct >= 75 ? '#16A34A' : readiness.pct >= 50 ? '#d97706' : '#DC2626';
+
             return (
               <motion.div
                 key={report.id}
@@ -392,25 +749,50 @@ const Reports: React.FC = () => {
                   <div className="reports-item-title">{report.title}</div>
                   <div className="reports-item-meta">
                     {typeInfo.label}
+                    {report.programmeName && <> · {report.programmeName}</>}
                     {report.funder && <> · {report.funder}</>}
                     {' · '}
                     <span className="reports-item-date">{report.date}</span>
                   </div>
-                  {DATA_READINESS[report.id] !== undefined && (
-                    <div className="reports-item-readiness">
-                      <div
-                        className="reports-item-readiness-bar"
-                        style={{ width: `${DATA_READINESS[report.id]}%`, background: DATA_READINESS[report.id] >= 85 ? '#16A34A' : DATA_READINESS[report.id] >= 60 ? '#d97706' : '#DC2626' }}
-                      />
-                      <span className="reports-item-readiness-label" style={{ color: DATA_READINESS[report.id] >= 85 ? '#16A34A' : DATA_READINESS[report.id] >= 60 ? '#d97706' : '#DC2626' }}>
-                        {DATA_READINESS[report.id]}% data ready
-                      </span>
+
+                  {/* Step 2: 4-segment readiness bar */}
+                  <div className="reports-item-readiness">
+                    <div className="reports-item-readiness-segments">
+                      {readiness.segments.map(seg => (
+                        <div
+                          key={seg.label}
+                          className="reports-item-readiness-seg"
+                          style={{ background: seg.met ? rdColor : '#e5e7eb' }}
+                          title={`${seg.label}: ${seg.met ? '✓' : '✗'}`}
+                        />
+                      ))}
+                    </div>
+                    <span className="reports-item-readiness-label" style={{ color: rdColor }}>
+                      {readiness.pct}% data ready
+                    </span>
+                    <span className="reports-item-readiness-detail">
+                      {readiness.segments.filter(s => s.met).map(s => s.label).join(' · ') || 'No data yet'}
+                    </span>
+                  </div>
+
+                  {/* Drafting spinner / draft-ready badge */}
+                  {isDrafting && (
+                    <div className="reports-item-drafting">
+                      <span className="reports-item-drafting-spinner" aria-hidden="true" />
+                      Drafting…
+                    </div>
+                  )}
+                  {!isDrafting && isDraftReady && (
+                    <div className="reports-item-draft-ready">
+                      <CheckCircle2 size={12} /> Draft ready — download
                     </div>
                   )}
                 </div>
+
                 <span className="reports-item-badge" style={{ background: sm.bg, color: sm.color }}>
                   {sm.label}
                 </span>
+
                 <div className="reports-item-actions">
                   <button
                     className="reports-item-btn"
@@ -419,32 +801,29 @@ const Reports: React.FC = () => {
                   >
                     <Eye size={14} />
                   </button>
+
+                  {/* Step 4: formatted markdown download */}
                   <button
                     className="reports-item-btn"
-                    title="Download"
-                    onClick={() => {
-                      const content = [
-                        `Report: ${report.title}`,
-                        `Type: ${typeInfo.label}`,
-                        report.funder ? `Funder: ${report.funder}` : '',
-                        `Date: ${report.date}`,
-                        `Status: ${sm.label}`,
-                        '',
-                        '(Connect a backend to generate the full report PDF.)',
-                      ].filter(Boolean).join('\n');
-                      const blob = new Blob([content], { type: 'text/plain' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `${report.title.replace(/\s+/g, '_')}.txt`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      toast.success('Download started.');
-                    }}
+                    title="Download as Markdown"
+                    onClick={() => handleDownload(report)}
                   >
                     <Download size={14} />
                   </button>
-                  {(report.status === 'draft' || report.status === 'review') && can('reports', 'canEdit') && (
+
+                  {/* AI draft button per-report */}
+                  {can('reports', 'canEdit') && (
+                    <button
+                      className="reports-item-btn"
+                      title="AI Draft"
+                      disabled={isDrafting}
+                      onClick={() => handleDraftReport(report.type, report)}
+                    >
+                      <Sparkles size={14} />
+                    </button>
+                  )}
+
+                  {(effectiveStatus(report) === 'draft' || effectiveStatus(report) === 'review') && can('reports', 'canEdit') && (
                     <button
                       className="reports-item-btn reports-item-btn--send"
                       title="Submit"
@@ -460,7 +839,7 @@ const Reports: React.FC = () => {
         </div>
       </div>
 
-      {/* Tier-cap prompt: monthly AI-draft cap reached on Starter (2/mo) or Growth (20/mo). */}
+      {/* Tier-cap prompt */}
       <ContextualUpgradePrompt
         open={reportUpgradeOpen}
         onClose={() => setReportUpgradeOpen(false)}
