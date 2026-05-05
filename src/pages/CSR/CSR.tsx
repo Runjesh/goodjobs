@@ -272,10 +272,16 @@ const CSR: React.FC = () => {
     }
   };
 
-  const searchProspectDb = async () => {
+  /**
+   * Run prospect DB search. Accepts an explicit `overrideQuery` so callers
+   * can bypass the (potentially stale) `dbQuery` closure — e.g. when the
+   * cause-area is injected immediately on modal open.
+   */
+  const searchProspectDb = async (overrideQuery?: string) => {
+    const q = overrideQuery !== undefined ? overrideQuery : dbQuery;
     setDbLoading(true);
     try {
-      const res = await apiFetch(`/csr/prospect-db/search?q=${encodeURIComponent(dbQuery)}`);
+      const res = await apiFetch(`/csr/prospect-db/search?q=${encodeURIComponent(q)}`);
       if (!res.ok) throw new Error('search failed');
       const data = await res.json();
       setDbResults(Array.isArray(data.results) ? data.results : []);
@@ -329,13 +335,13 @@ const CSR: React.FC = () => {
   // Grant AI matching: when the Prospect DB modal opens with no explicit query,
   // pre-seed the search with the org's cause area and auto-run it so funders
   // aligned to that cause appear immediately — no user action required.
+  // We pass the cause area directly to searchProspectDb() to avoid stale closure.
   useEffect(() => {
     if (!showProspectDb) return;
-    if (!dbQuery && ngoDetails.causeArea) {
-      setDbQuery(ngoDetails.causeArea);
-      // Auto-run the search so funders appear without the user clicking "Search".
-      // setTimeout ensures dbQuery state has settled before the fetch runs.
-      setTimeout(() => searchProspectDb(), 0);
+    const ca = ngoDetails.causeArea;
+    if (!dbQuery && ca) {
+      setDbQuery(ca);
+      searchProspectDb(ca);
     }
     // Only run when the modal opens — not on every dbQuery change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -490,7 +496,7 @@ const CSR: React.FC = () => {
                   onChange={(e) => setDbQuery(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') searchProspectDb(); }}
                 />
-                <button className="btn btn-primary" onClick={searchProspectDb} disabled={dbLoading}>
+                <button className="btn btn-primary" onClick={() => searchProspectDb()} disabled={dbLoading}>
                   {dbLoading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
                   Search
                 </button>

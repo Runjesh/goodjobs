@@ -4,14 +4,20 @@ import { useAuth, ROLE_META, ROLE_PERMISSIONS, type UserRole } from '../../conte
 import type { Permission } from '../../context/AuthContext';
 
 interface PermissionGateProps {
-  /** Module to check permission on (e.g. "finance", "programs"). */
   module: string;
-  /** Permission action required (default: "canEdit"). */
   action?: keyof Omit<Permission, 'module'>;
-  /** Role label shown in the tooltip — inferred from the first role that has the permission if omitted. */
   requiredRole?: UserRole;
   children: React.ReactElement;
 }
+
+type ChildProps = {
+  disabled?: boolean;
+  tabIndex?: number;
+  'aria-disabled'?: boolean | 'true' | 'false';
+  style?: React.CSSProperties;
+  onKeyDown?: React.KeyboardEventHandler<HTMLElement>;
+  onClick?: React.MouseEventHandler<HTMLElement>;
+};
 
 const ROLE_ORDER: UserRole[] = ['ed', 'finance', 'programs', 'field', 'board'];
 
@@ -32,8 +38,8 @@ function inferRequiredRole(module: string, action: keyof Omit<Permission, 'modul
 
 /**
  * Wraps a single child element. When the current user lacks the specified
- * permission, the child is rendered disabled and a tooltip on hover explains
- * which role is required.
+ * permission, the child is rendered disabled (pointer + keyboard blocked)
+ * and a tooltip on hover/focus explains which role is required.
  *
  * Usage:
  *   <PermissionGate module="finance" action="canEdit">
@@ -67,32 +73,35 @@ const PermissionGate: React.FC<PermissionGateProps> = ({
   const role: UserRole = requiredRole ?? inferRequiredRole(module, action);
   const roleLabel = ROLE_META[role]?.label ?? role;
 
+  const intercept = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowTip(true);
+  };
+
+  const disabledProps: ChildProps = {
+    disabled: true,
+    tabIndex: -1,
+    'aria-disabled': true,
+    style: { ...(children.props as ChildProps).style, opacity: 0.45, cursor: 'not-allowed' },
+    onClick: intercept as React.MouseEventHandler<HTMLElement>,
+    onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
+      if (e.key === 'Enter' || e.key === ' ') intercept(e);
+    },
+  };
+
+  const child = React.cloneElement(children as React.ReactElement<ChildProps>, disabledProps);
+
   return (
     <span
       ref={wrapRef}
       style={{ position: 'relative', display: 'inline-flex' }}
       onMouseEnter={() => setShowTip(true)}
       onMouseLeave={() => setShowTip(false)}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setShowTip((v) => !v);
-      }}
-      aria-disabled="true"
+      onFocus={() => setShowTip(true)}
+      onBlur={() => setShowTip(false)}
     >
-      {/* Overlay absorbs pointer events so the child can't fire its own click. */}
-      <span
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          zIndex: 1,
-          cursor: 'not-allowed',
-        }}
-      />
-      <span style={{ opacity: 0.45, pointerEvents: 'none', display: 'contents' }}>
-        {children}
-      </span>
+      {child}
       {showTip && (
         <span
           role="tooltip"
