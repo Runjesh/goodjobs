@@ -4,6 +4,7 @@ import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, 
 import toast from 'react-hot-toast';
 import './Finance.css';
 import { apiFetch } from '../../api/client';
+import { isMockEnabled } from '../../api/mockBackend';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
 import { resolvePersistedJournalEntryId } from '../../utils/journalEntryId';
@@ -212,7 +213,11 @@ const Finance: React.FC = () => {
     grantId: string; budgetHeadId: string; donorId: string; programmeId: string;
     /** Income-receipt auto-fill fields — populated from the linked CRM donor. */
     receiptDonorName: string; receiptDonorPan: string;
-  }>({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '', receiptDonorName: '', receiptDonorPan: '' });
+    /** AI-returned category label; shown in form + stored on the entry for audit. */
+    category: string;
+    /** FCRA admin overhead flag — only admin-flagged FCRA expenses count toward the 18% cap. */
+    isAdminOverhead: boolean;
+  }>({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '', receiptDonorName: '', receiptDonorPan: '', category: '', isAdminOverhead: false });
   const [donorSearch, setDonorSearch] = useState('');
   const [classification, setClassification] = useState<{category: string, confidence: number} | null>(null);
   const [isClassifying, setIsClassifying] = useState(false);
@@ -459,8 +464,13 @@ const Finance: React.FC = () => {
 
   // Core save logic — called directly OR after user confirms the FCRA guard.
   const doSaveJournalEntry = async (entryToSave: typeof entry) => {
-    // Feature 2: Generate a persistent receipt number for income entries.
-    const receiptNo = entryToSave.type === 'Income'
+    // Feature 2: Persistent receipt numbering.
+    // Production path: use the receipt_number returned by the server (DB sequence).
+    // Mock / offline path: fall back to the localStorage counter so the UI stays
+    // functional without a running FastAPI backend.
+    // The client-side number is generated BEFORE the POST so it can be included in
+    // the request body; the server response overrides it if available.
+    const clientReceiptNo = entryToSave.type === 'Income'
       ? nextReceiptNumber(ngoName)
       : undefined;
 
@@ -480,13 +490,25 @@ const Finance: React.FC = () => {
           programme_id: entryToSave.programmeId || null,
           receipt_donor_name: entryToSave.receiptDonorName || null,
           receipt_donor_pan:  entryToSave.receiptDonorPan  || null,
-          receipt_number:     receiptNo || null,
+          // Send the client-side number so the server can record it in the DB.
+          // A real backend may return its own authoritative DB-sequence number instead.
+          receipt_number:     clientReceiptNo || null,
+          is_admin_overhead:  entryToSave.isAdminOverhead || false,
+          category:           entryToSave.category || null,
         }),
       });
       if (res.ok) {
         try { payload = await res.json(); } catch { /* empty body */ }
       }
     } catch { /* offline/no backend */ }
+
+    // Resolve the authoritative receipt number:
+    //   1. Use receipt_number returned by a real backend (DB sequence).
+    //   2. Fall back to the client-generated localStorage number when in mock / offline mode.
+    const serverReceiptNo = (payload as any)?.receipt_number as string | undefined;
+    const receiptNo: string | undefined = entryToSave.type === 'Income'
+      ? (serverReceiptNo || (isMockEnabled() ? clientReceiptNo : clientReceiptNo))
+      : undefined;
 
     const { source, id } = resolvePersistedJournalEntryId(payload);
     const tag = entryToSave.grantId && entryToSave.budgetHeadId
@@ -500,11 +522,12 @@ const Finance: React.FC = () => {
       fund: entryToSave.fund,
       entryType: entryToSave.type,
       grantTag: tag,
-      grantId:    entryToSave.grantId    || undefined,
-      donorId:    entryToSave.donorId    || undefined,
-      programmeId: entryToSave.programmeId || undefined,
-      // Persist the receipt number so bulk generation can skip already-receipted entries.
-      receiptNo: receiptNo || undefined,
+      grantId:       entryToSave.grantId       || undefined,
+      donorId:       entryToSave.donorId       || undefined,
+      programmeId:   entryToSave.programmeId   || undefined,
+      receiptNo:     receiptNo                 || undefined,
+      isAdminOverhead: entryToSave.isAdminOverhead || undefined,
+      category:      entryToSave.category      || undefined,
     });
 
     // Feature 2: If income, auto-download the receipt HTML.
@@ -537,7 +560,7 @@ const Finance: React.FC = () => {
       toast.success(`Saved locally: ₹${Number(entryToSave.amount).toLocaleString()} (${entryToSave.type})${tagSuffix}${receiptSuffix}. Will sync when the server is reachable.`);
     }
     setShowEntryModal(false);
-    setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '', receiptDonorName: '', receiptDonorPan: '' });
+    setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '', receiptDonorName: '', receiptDonorPan: '', category: '', isAdminOverhead: false });
     setDonorSearch('');
     setClassification(null);
   };
@@ -546,10 +569,12 @@ const Finance: React.FC = () => {
     e.preventDefault();
 
     // Feature 3: FCRA admin 18% cap guard — block before save if an FCRA
-    // expense would push total admin spend above 18% of FCRA foreign funds.
-    if (entry.type === 'Expense' && entry.fund === 'FCRA' && fcraTotal > 0) {
+    // admin-overhead expense would push total admin spend above 18% of FCRA
+    // foreign funds. Only fires when the user has checked "Admin overhead?" on
+    // the form — programme delivery expenses are NOT counted toward the cap.
+    if (entry.type === 'Expense' && entry.fund === 'FCRA' && entry.isAdminOverhead && fcraTotal > 0) {
       const currentFcraAdminSpent = journalEntries
-        .filter(je => je.entryType === 'Expense' && je.fund === 'FCRA')
+        .filter(je => je.entryType === 'Expense' && je.fund === 'FCRA' && je.isAdminOverhead)
         .reduce((s, je) => s + Math.abs(Number(je.amount) || 0), 0);
       const projected = currentFcraAdminSpent + Number(entry.amount);
       const projectedPct = (projected / fcraTotal) * 100;
@@ -1736,7 +1761,11 @@ const Finance: React.FC = () => {
                             const parsed = parseInt(amtMatch[1].replace(/,/g, ''), 10);
                             if (!isNaN(parsed) && parsed > 0) aiAmount = parsed;
                           }
-                          setEntry(prev => ({ ...prev, fund: aiFund, type: aiType, programmeId: aiProg, amount: aiAmount }));
+                          // Also set admin overhead flag if the AI says this is admin / overhead.
+                          const aiAdminOverhead = entry.fund === 'FCRA'
+                            ? (cat.includes('admin') || cat.includes('overhead') || cat.includes('management'))
+                            : false;
+                          setEntry(prev => ({ ...prev, fund: aiFund, type: aiType, programmeId: aiProg, amount: aiAmount, category: data.category, isAdminOverhead: aiAdminOverhead }));
                           toast.success('Fields pre-filled from AI categorisation.', { duration: 3000 });
                         }
                       } catch { toast.error('Categorisation failed.'); }
@@ -1763,13 +1792,41 @@ const Finance: React.FC = () => {
               </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Fund Classification</label>
-                <select className="input-field" value={entry.fund} onChange={e => setEntry({ ...entry, fund: e.target.value })}>
+                <select className="input-field" value={entry.fund} onChange={e => setEntry({ ...entry, fund: e.target.value, isAdminOverhead: false })}>
                   <option>General</option>
                   <option>FCRA</option>
                   <option>CSR</option>
                   <option>Restricted Grant</option>
                 </select>
               </div>
+              {/* FCRA admin overhead flag — only shown for FCRA expenses.
+                  Must be checked for the entry to count toward the 18% admin cap. */}
+              {entry.type === 'Expense' && entry.fund === 'FCRA' && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none', padding: '0.4rem 0.6rem', background: entry.isAdminOverhead ? '#FEF3C7' : 'var(--color-bg-card)', border: `1px solid ${entry.isAdminOverhead ? '#FCD34D' : 'var(--color-border)'}`, borderRadius: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={entry.isAdminOverhead}
+                    onChange={e => setEntry(prev => ({ ...prev, isAdminOverhead: e.target.checked }))}
+                    style={{ accentColor: '#D97706', width: 16, height: 16 }}
+                  />
+                  <span>
+                    <strong>Admin overhead?</strong>
+                    <span style={{ color: 'var(--color-text-secondary)', marginLeft: '0.4rem' }}>
+                      (counts toward the 18% FCRA admin cap — leave unchecked for programme delivery)
+                    </span>
+                  </span>
+                </label>
+              )}
+              {/* AI category badge — shows the category returned by "Categorise".
+                  Stored on the journal entry for audit trail + future re-classification. */}
+              {entry.category && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', padding: '0.35rem 0.65rem', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 6 }}>
+                  <Bot size={13} color="var(--color-primary)" />
+                  <span style={{ color: 'var(--color-text-secondary)' }}>AI Category:</span>
+                  <strong>{entry.category}</strong>
+                  <button type="button" style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1 }} onClick={() => setEntry(prev => ({ ...prev, category: '' }))} aria-label="Clear category"><X size={12} /></button>
+                </div>
+              )}
               {/* Income receipt fields — auto-filled from the linked CRM donor.
                   Both fields are editable so the user can correct auto-fill.
                   These values are sent to the backend for 80G receipt generation. */}

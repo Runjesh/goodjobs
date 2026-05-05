@@ -63,6 +63,18 @@ export interface JournalExpense {
    * entries that already have a receiptNo to avoid duplicates.
    */
   receiptNo?: string;
+  /**
+   * FCRA-specific flag: true when this FCRA expense is classified as admin /
+   * overhead (salaries, rent, utilities, etc.). Only admin-flagged entries
+   * count toward the 18% FCRA administrative expense cap check.
+   */
+  isAdminOverhead?: boolean;
+  /**
+   * Raw AI-assigned category label (e.g. "Programme Expense", "Admin",
+   * "FCRA Admin"). Set when the user clicks "Categorise" in the journal entry
+   * form. Stored for audit trail and future re-classification workflows.
+   */
+  category?: string;
 }
 
 export interface BudgetHeadUtilisation {
