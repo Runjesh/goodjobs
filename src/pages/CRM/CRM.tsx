@@ -623,25 +623,25 @@ const CRM: React.FC = () => {
           setSelectedIds(new Set());
           setBulkMode(false);
           setLastOutreachStatus('sent');
-          if (!bulkMode && activeDonor) {
-            const now = Date.now();
-            const entry: OutreachEntry = {
-              id: now.toString(),
-              donorId: String(activeDonor.id),
+          const sentDonorIds = bulkMode
+            ? sendableIds.filter(id => !failed.some(n => n === donorMap.get(String(id))?.name))
+            : (activeDonor ? [String(activeDonor.id)] : []);
+          const now = Date.now();
+          sentDonorIds.forEach((did, i) => {
+            const entryId = `${now}-${i}`;
+            addOutreachEntry({
+              id: entryId,
+              donorId: String(did),
               timestamp: now,
               date: new Date(now).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
               channel: 'email',
               template: selectedTemplate.label,
               status: 'sent',
-            };
-            addOutreachEntry(entry);
-            setTimeout(() => {
-              updateOutreachEntry(entry.id, { status: 'delivered' });
-              setLastOutreachStatus('delivered');
-            }, 2000);
-          } else {
-            setTimeout(() => setLastOutreachStatus('delivered'), 2000);
-          }
+            });
+            setTimeout(() => updateOutreachEntry(entryId, { status: 'delivered' }), 2000);
+          });
+          setLastOutreachStatus('sent');
+          setTimeout(() => setLastOutreachStatus('delivered'), 2000);
         }
         return;
       }
@@ -678,26 +678,25 @@ const CRM: React.FC = () => {
         setShowComposer(false);
         setSelectedIds(new Set());
         setBulkMode(false);
-        setLastOutreachStatus('sent');
-        if (!bulkMode && activeDonor) {
-          const now = Date.now();
-          const entry: OutreachEntry = {
-            id: now.toString(),
-            donorId: String(activeDonor.id),
+        const sentDonorIds = bulkMode
+          ? donorIds.filter(id => !failed.some(n => n === donorMap.get(String(id))?.name))
+          : (activeDonor ? [String(activeDonor.id)] : []);
+        const now = Date.now();
+        sentDonorIds.forEach((did, i) => {
+          const entryId = `${now}-${i}`;
+          addOutreachEntry({
+            id: entryId,
+            donorId: String(did),
             timestamp: now,
             date: new Date(now).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
             channel: 'whatsapp',
             template: selectedTemplate.label,
             status: 'sent',
-          };
-          addOutreachEntry(entry);
-          setTimeout(() => {
-            updateOutreachEntry(entry.id, { status: 'delivered' });
-            setLastOutreachStatus('delivered');
-          }, 2000);
-        } else {
-          setTimeout(() => setLastOutreachStatus('delivered'), 2000);
-        }
+          });
+          setTimeout(() => updateOutreachEntry(entryId, { status: 'delivered' }), 2000);
+        });
+        setLastOutreachStatus('sent');
+        setTimeout(() => setLastOutreachStatus('delivered'), 2000);
       }
     } catch {
       toast.error('Failed to send (backend not reachable).');
@@ -1134,15 +1133,15 @@ const CRM: React.FC = () => {
                         <div className="propensity-tooltip">
                           <div style={{ fontWeight: 700, fontSize: '0.78rem', marginBottom: '0.5rem' }}>Score breakdown</div>
                           <div className="propensity-tooltip-row">
-                            <span>Recency</span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Clock size={11} />Recency</span>
                             <span className="propensity-tooltip-val">{propensity.insights?.recency ?? Math.round((propensity.score ?? 0) * 0.4)}%</span>
                           </div>
                           <div className="propensity-tooltip-row">
-                            <span>Frequency</span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}><History size={11} />Frequency</span>
                             <span className="propensity-tooltip-val">{propensity.insights?.frequency ?? Math.round((propensity.score ?? 0) * 0.35)}%</span>
                           </div>
                           <div className="propensity-tooltip-row">
-                            <span>Channel fit</span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}><MessageCircle size={11} />Channel fit</span>
                             <span className="propensity-tooltip-val">{propensity.insights?.channel ?? Math.round((propensity.score ?? 0) * 0.25)}%</span>
                           </div>
                           <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--color-border-light)', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
@@ -1481,7 +1480,7 @@ const CRM: React.FC = () => {
                                   <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
                                     <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>{tx.campaignTitle}</span>
                                     {tx.programmeId && (
-                                      <span className="programme-impact-pill" style={{ fontSize: '0.68rem' }}>{tx.programmeId}</span>
+                                      <span className="programme-impact-pill" style={{ fontSize: '0.68rem' }}>{formatProgId(tx.programmeId)}</span>
                                     )}
                                     {tx.grantId && (
                                       <span className="badge badge-outline" style={{ fontSize: '0.68rem' }}>Grant: {tx.grantId}</span>
