@@ -18,6 +18,8 @@ export interface BeneficiaryOutcome {
   measuredAt: string;
   /** Optional supervisor note. */
   note?: string;
+  /** ToC node this outcome is linked to (from OutcomeForm node selector). */
+  tocNodeId?: string;
 }
 
 export interface OutcomeAggregate {

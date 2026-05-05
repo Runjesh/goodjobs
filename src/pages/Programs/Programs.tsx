@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck, Plus } from 'lucide-react';
+import { Users, Smartphone, MapPin, CheckCircle2, UserCheck, ShieldCheck, Activity, Target, Download, Upload, X, ClipboardList, MessageCircle, Send, Bot, Loader2, Edit, Trash2, ListFilter, ClipboardCheck, Plus, Briefcase, Clock } from 'lucide-react';
 import { useStore, initialBeneficiaries } from '../../store/useStore';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import { useAuth } from '../../context/AuthContext';
@@ -23,6 +23,22 @@ import OutcomeForm from '../../components/Programs/OutcomeForm';
 import ProgramGrantsPanel from '../../components/Programs/ProgramGrantsPanel';
 
 const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize,phone,email,gender,dob,referral_source,referral_detail,vulnerability,id_doc_type,id_doc_ref,notes\nSita Devi,Health,"Pune, MH",false,4,+9198***01,,female,1992-03-01,shg,Block 4 AWC,"woman_headed,pwd",aadhaar_masked,****8212,\nRavi K,Education,Delhi,true,3,,,male,,camp,,,election_id,ABC1234567,\n';
+
+function computeMissingBenFields(ben: { aadhaar: boolean }, extra: BenExtraForm): Set<string> {
+  const missing = new Set<string>();
+  if (!extra.phone.trim()) missing.add('phone');
+  if (!extra.email.trim()) missing.add('email');
+  if (!extra.dob) missing.add('dob');
+  if (!extra.gender) missing.add('gender');
+  if (!extra.referralSource) missing.add('referralSource');
+  if (!extra.referralDetail.trim()) missing.add('referralDetail');
+  if (!extra.vulnerabilityTags.trim()) missing.add('vulnerabilityTags');
+  if (!extra.idDocType) missing.add('idDocType');
+  if (!extra.idDocRef.trim()) missing.add('idDocRef');
+  if (!extra.notes.trim()) missing.add('notes');
+  if (!ben.aadhaar) missing.add('aadhaar');
+  return missing;
+}
 
 function extractFirstMatch(text: string, re: RegExp): string | undefined {
   const m = text.match(re);
@@ -133,7 +149,12 @@ const DEFAULT_PROGRAMS = [
 
 const Programs: React.FC = () => {
   const { beneficiaries, addBeneficiary, updateBeneficiary, deleteBeneficiary } = useStore();
-  const addMisReviewIntent = useStore(s => s.addMisReviewIntent);
+  const addMisReviewIntent      = useStore(s => s.addMisReviewIntent);
+  const decideMisReviewIntent   = useStore(s => s.decideMisReviewIntent);
+  const misReviewIntents        = useStore(s => s.misReviewIntents);
+  const beneficiaryOutcomes     = useStore(s => s.beneficiaryOutcomes);
+  const addEffortEntry          = useStore(s => s.addEffortEntry);
+  const volunteers              = useStore(s => s.volunteers);
   const [outcomeFor, setOutcomeFor] = useState<{ id: string; name: string; program: string } | null>(null);
   const { user } = useAuth();
   const { tier: effectiveTierVal, openUpgrade, inTrial } = useTier();
@@ -185,10 +206,21 @@ const Programs: React.FC = () => {
   const benFileRef = useRef<HTMLInputElement>(null);
 
   const [benSort, setBenSort] = useState<'attention' | 'alpha'>('attention');
+  const [activeProgFilter, setActiveProgFilter] = useState<string | null>(null);
+  const [benStatusFilter, setBenStatusFilter] = useState<'all' | 'inactive'>('all');
   const [showLogService, setShowLogService] = useState(false);
   const [logServiceSearch, setLogServiceSearch] = useState('');
   const [logServiceType, setLogServiceType] = useState('service_visit');
   const [logServiceNotes, setLogServiceNotes] = useState('');
+  const [showLogEffort, setShowLogEffort] = useState(false);
+  const [effortForm, setEffortForm] = useState({
+    staffName: '',
+    date: new Date().toISOString().slice(0, 10),
+    hours: 2,
+    type: 'field_visit' as 'office' | 'field_visit',
+    programme: '',
+  });
+  const [editMissingFields, setEditMissingFields] = useState<Set<string>>(new Set());
 
   const refreshBeneficiaries = async () => {
     try {
@@ -432,8 +464,39 @@ const Programs: React.FC = () => {
 
   const aadhaarVerifiedPct = Math.round((beneficiaries.filter(b => b.aadhaar).length / Math.max(beneficiaries.length, 1)) * 100);
 
+  const inactiveMap = useMemo(() => {
+    const map = new Map<string, number | null>();
+    const now = Date.now();
+    for (const b of beneficiaries) {
+      const dates = beneficiaryOutcomes
+        .filter(o => o.beneficiaryId === b.id && o.measuredAt)
+        .map(o => o.measuredAt);
+      if (!dates.length) {
+        map.set(b.id, null);
+      } else {
+        const latest = dates.sort().reverse()[0];
+        const days = Math.floor((now - new Date(latest).getTime()) / 86400000);
+        map.set(b.id, days);
+      }
+    }
+    return map;
+  }, [beneficiaries, beneficiaryOutcomes]);
+
+  const isInactive = (benId: string) => {
+    const days = inactiveMap.get(benId);
+    return days === null || days > 30;
+  };
+
+  const inactiveCount = useMemo(
+    () => beneficiaries.filter(b => isInactive(b.id)).length,
+    [inactiveMap, beneficiaries],
+  );
+
   const sortedBeneficiaries = useMemo(() => {
-    const withScore = [...beneficiaries].map(b => {
+    let list = [...beneficiaries];
+    if (activeProgFilter) list = list.filter(b => b.program === activeProgFilter);
+    if (benStatusFilter === 'inactive') list = list.filter(b => isInactive(b.id));
+    const withScore = list.map(b => {
       const d = b.details || {};
       let score = 0;
       if (!b.aadhaar) score += 2;
@@ -447,7 +510,7 @@ const Programs: React.FC = () => {
       withScore.sort((x, y) => x.b.name.localeCompare(y.b.name));
     }
     return withScore.map(x => x.b);
-  }, [beneficiaries, benSort]);
+  }, [beneficiaries, benSort, activeProgFilter, benStatusFilter, inactiveMap]);
 
   const benScrollRef = useRef<HTMLDivElement>(null);
   const benVirtualizer = useVirtualizer({
@@ -475,9 +538,19 @@ const Programs: React.FC = () => {
           <h1 className="page-title text-gradient">Programs MIS</h1>
           <p className="page-subtitle">Track beneficiaries, measure outcomes, and monitor field operations.</p>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-secondary" style={{ border: '1px solid #16a34a', color: '#16a34a' }} onClick={() => setShowConversationalModal(true)}>
             <MessageCircle size={16} /> Conversational MIS
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ border: '1px solid #0F766E', color: '#0F766E' }}
+            onClick={() => {
+              setEffortForm(prev => ({ ...prev, programme: programs[0] || '', staffName: '' }));
+              setShowLogEffort(true);
+            }}
+          >
+            <Briefcase size={16} /> Log Effort
           </button>
           <button className="btn btn-secondary" onClick={() => { setBenCsvRows([]); setShowBenImport(true); }}>
             <Upload size={16} /> Import CSV
@@ -555,50 +628,174 @@ const Programs: React.FC = () => {
         </div>
       </div>
 
-      {/* Program chips — always visible so newly added programs show immediately */}
+      {/* Program chips — clickable to toggle filter */}
       <div className="card" style={{ marginBottom: '1rem', padding: '0.9rem 1.1rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
           <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>
             Active Programs ({programs.length})
+            {activeProgFilter && (
+              <span style={{ marginLeft: 8, fontWeight: 400, color: '#0F766E', fontSize: '0.78rem' }}>
+                · filtering by "{activeProgFilter}"
+              </span>
+            )}
           </span>
-          <button
-            className="btn btn-secondary"
-            style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem', border: '1px solid #0F766E', color: '#0F766E' }}
-            onClick={() => { setNewProgramName(''); setShowAddProgramModal(true); }}
-          >
-            <Plus size={12} /> Add
-          </button>
+          <div className="flex gap-2">
+            {activeProgFilter && (
+              <button
+                className="btn btn-ghost"
+                style={{ padding: '0.2rem 0.6rem', fontSize: '0.72rem', color: '#64748b' }}
+                onClick={() => setActiveProgFilter(null)}
+              >
+                <X size={11} /> Clear filter
+              </button>
+            )}
+            <button
+              className="btn btn-secondary"
+              style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem', border: '1px solid #0F766E', color: '#0F766E' }}
+              onClick={() => { setNewProgramName(''); setShowAddProgramModal(true); }}
+            >
+              <Plus size={12} /> Add
+            </button>
+          </div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-          {programs.map(p => (
-            <span
-              key={p}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-                padding: '0.25rem 0.65rem', borderRadius: '99px',
-                background: customPrograms.includes(p) ? '#eff6ff' : '#f0fdf4',
-                color: customPrograms.includes(p) ? '#1d4ed8' : '#15803d',
-                border: `1px solid ${customPrograms.includes(p) ? '#93c5fd' : '#86efac'}`,
-                fontSize: '0.78rem', fontWeight: 600,
-              }}
-            >
-              {p}
-              {beneficiaries.filter(b => b.program === p).length > 0 && (
-                <span style={{ opacity: 0.65, fontWeight: 400, fontSize: '0.72rem' }}>
-                  · {beneficiaries.filter(b => b.program === p).length}
-                </span>
-              )}
-            </span>
-          ))}
+          {programs.map(p => {
+            const isActive = activeProgFilter === p;
+            const benCount = beneficiaries.filter(b => b.program === p).length;
+            return (
+              <button
+                key={p}
+                onClick={() => setActiveProgFilter(prev => prev === p ? null : p)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                  padding: '0.25rem 0.65rem', borderRadius: '99px',
+                  background: isActive ? '#0F766E' : customPrograms.includes(p) ? '#eff6ff' : '#f0fdf4',
+                  color: isActive ? '#fff' : customPrograms.includes(p) ? '#1d4ed8' : '#15803d',
+                  border: `1px solid ${isActive ? '#0F766E' : customPrograms.includes(p) ? '#93c5fd' : '#86efac'}`,
+                  fontSize: '0.78rem', fontWeight: 600,
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+                title={`Click to filter beneficiaries by "${p}"`}
+              >
+                {p}
+                {benCount > 0 && (
+                  <span style={{ opacity: isActive ? 0.85 : 0.65, fontWeight: 400, fontSize: '0.72rem' }}>
+                    · {benCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      {/* Recent MIS Submissions panel */}
+      {misReviewIntents.length > 0 && (
+        <div className="card" style={{ marginBottom: '1rem', padding: '0.9rem 1.1rem' }}>
+          <div style={{ fontWeight: 700, fontSize: '0.875rem', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <ClipboardCheck size={15} color="#7C3AED" /> Recent MIS Submissions
+            <span style={{ fontSize: '0.72rem', fontWeight: 400, color: 'var(--color-text-secondary)', marginLeft: 'auto' }}>
+              last {Math.min(10, misReviewIntents.length)} of {misReviewIntents.length}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {[...misReviewIntents].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10).map(intent => {
+              const filled = ['beneficiary', 'location', 'metric', 'value', 'program'].filter(k => (intent.extracted as Record<string, unknown>)[k]).length;
+              const confidence = Math.round((filled / 5) * 100);
+              return (
+                <div key={intent.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap',
+                  padding: '0.5rem 0.75rem', borderRadius: 8,
+                  background: 'var(--color-bg-main)', border: '1px solid var(--color-border-light)',
+                  fontSize: '0.8rem',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {intent.extracted.beneficiary || 'Unknown'} · {intent.extracted.program || '—'}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>
+                      {intent.extracted.metric} {intent.extracted.value ? `= ${intent.extracted.value}` : ''} · {intent.reportDate}
+                    </div>
+                  </div>
+                  <span style={{
+                    fontSize: '0.68rem', fontWeight: 700, padding: '1px 7px', borderRadius: '99px', whiteSpace: 'nowrap',
+                    background: confidence >= 80 ? '#f0fdf4' : confidence >= 60 ? '#fffbeb' : '#fef2f2',
+                    color: confidence >= 80 ? '#16A34A' : confidence >= 60 ? '#d97706' : '#DC2626',
+                    border: `1px solid ${confidence >= 80 ? '#86efac' : confidence >= 60 ? '#fde68a' : '#fecaca'}`,
+                  }}>
+                    {confidence}% confidence
+                  </span>
+                  <span style={{
+                    fontSize: '0.68rem', padding: '1px 7px', borderRadius: '99px',
+                    background: intent.status === 'pending' ? '#f0f9ff' : intent.status === 'approved' || intent.status === 'edited' ? '#f0fdf4' : '#f1f5f9',
+                    color: intent.status === 'pending' ? '#0369a1' : intent.status === 'approved' || intent.status === 'edited' ? '#15803d' : '#64748b',
+                    border: `1px solid ${intent.status === 'pending' ? '#bae6fd' : intent.status === 'approved' || intent.status === 'edited' ? '#86efac' : '#e2e8f0'}`,
+                  }}>
+                    {intent.status}
+                  </span>
+                  {intent.status === 'pending' && (
+                    <div className="flex gap-1">
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem', color: '#16A34A', border: '1px solid #86efac' }}
+                        onClick={() => { decideMisReviewIntent(intent.id, 'approved'); toast.success('MIS submission approved.'); }}
+                      >
+                        ✓ Confirm
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                        onClick={() => {
+                          const match = beneficiaries.find(b => b.name.toLowerCase().includes((intent.extracted.beneficiary || '').toLowerCase()));
+                          if (match) {
+                            setEditBenExtra(unpackBenDetails(match.details));
+                            setEditBen(match);
+                            setEditMissingFields(new Set());
+                            setShowEditBen(true);
+                          } else {
+                            toast('No matching beneficiary found — approve first, then enroll.', { icon: 'ℹ️' });
+                          }
+                        }}
+                      >
+                        ✎ Edit
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="programs-grid">
         <div className="flex-col gap-6 flex">
           <div className="card">
-            <div className="card-header flex justify-between items-center">
-              <h3 className="card-title">Enrollments ({beneficiaries.length})</h3>
-              <div className="flex items-center gap-2">
+            <div className="card-header flex justify-between items-center" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h3 className="card-title">
+                Enrollments ({sortedBeneficiaries.length}{sortedBeneficiaries.length !== beneficiaries.length ? ` of ${beneficiaries.length}` : ''})
+                {activeProgFilter && (
+                  <span style={{ marginLeft: 6, fontSize: '0.72rem', fontWeight: 400, color: '#0F766E' }}>· {activeProgFilter}</span>
+                )}
+              </h3>
+              <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                <div className="ben-sort-toggle">
+                  <button
+                    className={`ben-sort-btn ${benStatusFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setBenStatusFilter('all')}
+                    title="All beneficiaries"
+                  >
+                    All
+                  </button>
+                  <button
+                    className={`ben-sort-btn ${benStatusFilter === 'inactive' ? 'active' : ''}`}
+                    onClick={() => setBenStatusFilter(prev => prev === 'inactive' ? 'all' : 'inactive')}
+                    title="No service in 30+ days"
+                    style={{ color: benStatusFilter === 'inactive' ? '#DC2626' : undefined }}
+                  >
+                    <Clock size={11} /> Inactive {inactiveCount > 0 && `(${inactiveCount})`}
+                  </button>
+                </div>
                 <div className="ben-sort-toggle">
                   <button
                     className={`ben-sort-btn ${benSort === 'attention' ? 'active' : ''}`}
@@ -676,22 +873,42 @@ const Programs: React.FC = () => {
                               })()}
                             </div>
                             <div className="flex gap-2 items-center">
+                              {isInactive(ben.id) && (
+                                <span
+                                  title="No service record in 30+ days"
+                                  style={{
+                                    fontSize: '0.63rem', fontWeight: 700, padding: '1px 6px',
+                                    borderRadius: '99px', background: '#fef2f2', color: '#DC2626',
+                                    border: '1px solid #fecaca', whiteSpace: 'nowrap',
+                                    display: 'inline-flex', alignItems: 'center', gap: 3,
+                                  }}
+                                >
+                                  <Clock size={9} /> Inactive
+                                </span>
+                              )}
                               {(() => {
                                 const pct = computeBeneficiaryCompleteness(ben);
                                 const color = pct >= 80 ? '#16A34A' : pct >= 60 ? '#d97706' : '#DC2626';
                                 const bg   = pct >= 80 ? '#f0fdf4' : pct >= 60 ? '#fffbeb' : '#fef2f2';
                                 const bd   = pct >= 80 ? '#86efac' : pct >= 60 ? '#fde68a' : '#fecaca';
                                 return (
-                                  <span
-                                    title={`Profile completeness: ${pct}%`}
+                                  <button
+                                    title={pct >= 80 ? `Profile complete (${pct}%)` : `${pct}% complete — click to see missing fields`}
+                                    onClick={() => {
+                                      const extra = unpackBenDetails(ben.details);
+                                      setEditBenExtra(extra);
+                                      setEditBen(ben);
+                                      setEditMissingFields(pct < 80 ? computeMissingBenFields(ben, extra) : new Set());
+                                      setShowEditBen(true);
+                                    }}
                                     style={{
                                       fontSize: '0.65rem', fontWeight: 700, padding: '2px 7px',
                                       borderRadius: '99px', background: bg, color, border: `1px solid ${bd}`,
-                                      whiteSpace: 'nowrap',
+                                      whiteSpace: 'nowrap', cursor: pct < 80 ? 'pointer' : 'default',
                                     }}
                                   >
                                     {pct}%
-                                  </span>
+                                  </button>
                                 );
                               })()}
                               <span className="badge badge-outline" style={{ fontSize: '0.7rem' }}>
@@ -1238,7 +1455,12 @@ const Programs: React.FC = () => {
                 entityLabel={editBen.name}
               />
             </div>
-            <form onSubmit={handleEditBenSubmit} className="flex-col gap-4 flex">
+            {editMissingFields.size > 0 && (
+              <div style={{ margin: '-0.25rem 0 0.75rem', padding: '0.5rem 0.75rem', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', fontSize: '0.8rem', color: '#92400e' }}>
+                ⚠ {editMissingFields.size} field{editMissingFields.size > 1 ? 's' : ''} missing to reach 80% completeness — highlighted below.
+              </div>
+            )}
+            <form onSubmit={e => { handleEditBenSubmit(e); setEditMissingFields(new Set()); }} className="flex-col gap-4 flex">
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
                 <input required type="text" className="input-field" value={editBen.name} onChange={e => setEditBen({ ...editBen, name: e.target.value })} />
@@ -1257,8 +1479,10 @@ const Programs: React.FC = () => {
                   <input type="number" className="input-field" min="1" max="20" value={editBen.familySize} onChange={e => setEditBen({ ...editBen, familySize: Number(e.target.value) })} />
                 </div>
                 <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label className="input-label">Gender</label>
-                  <select className="input-field" value={editBenExtra.gender} onChange={e => setEditBenExtra({ ...editBenExtra, gender: e.target.value })}>
+                  <label className="input-label" style={editMissingFields.has('gender') ? { color: '#d97706' } : {}}>
+                    Gender {editMissingFields.has('gender') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                  </label>
+                  <select className="input-field" value={editBenExtra.gender} onChange={e => setEditBenExtra({ ...editBenExtra, gender: e.target.value })} style={editMissingFields.has('gender') ? { borderColor: '#d97706', background: '#fffbeb' } : {}}>
                     <option value="">—</option>
                     <option value="female">Female</option>
                     <option value="male">Male</option>
@@ -1269,29 +1493,39 @@ const Programs: React.FC = () => {
               </div>
               <div className="flex items-center gap-2">
                 <input type="checkbox" id="edit-aadhaar" checked={editBen.aadhaar} onChange={e => setEditBen({ ...editBen, aadhaar: e.target.checked })} />
-                <label htmlFor="edit-aadhaar" style={{ fontSize: '0.875rem' }}>Aadhaar verified</label>
+                <label htmlFor="edit-aadhaar" style={{ fontSize: '0.875rem', color: editMissingFields.has('aadhaar') ? '#d97706' : undefined }}>
+                  Aadhaar verified {editMissingFields.has('aadhaar') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                </label>
               </div>
               <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label className="input-label">Phone</label>
-                    <input type="tel" className="input-field" value={editBenExtra.phone} onChange={e => setEditBenExtra({ ...editBenExtra, phone: e.target.value })} />
+                    <label className="input-label" style={editMissingFields.has('phone') ? { color: '#d97706' } : {}}>
+                      Phone {editMissingFields.has('phone') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                    </label>
+                    <input type="tel" className="input-field" value={editBenExtra.phone} onChange={e => setEditBenExtra({ ...editBenExtra, phone: e.target.value })} style={editMissingFields.has('phone') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
                   </div>
                   <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label className="input-label">Email</label>
-                    <input type="email" className="input-field" value={editBenExtra.email} onChange={e => setEditBenExtra({ ...editBenExtra, email: e.target.value })} />
+                    <label className="input-label" style={editMissingFields.has('email') ? { color: '#d97706' } : {}}>
+                      Email {editMissingFields.has('email') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                    </label>
+                    <input type="email" className="input-field" value={editBenExtra.email} onChange={e => setEditBenExtra({ ...editBenExtra, email: e.target.value })} style={editMissingFields.has('email') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
                   </div>
                 </div>
                 <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
-                  <label className="input-label">Date of birth</label>
-                  <input type="date" className="input-field" value={editBenExtra.dob} onChange={e => setEditBenExtra({ ...editBenExtra, dob: e.target.value })} />
+                  <label className="input-label" style={editMissingFields.has('dob') ? { color: '#d97706' } : {}}>
+                    Date of birth {editMissingFields.has('dob') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                  </label>
+                  <input type="date" className="input-field" value={editBenExtra.dob} onChange={e => setEditBenExtra({ ...editBenExtra, dob: e.target.value })} style={editMissingFields.has('dob') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
                 </div>
               </div>
               <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label className="input-label">Referral source</label>
-                    <select className="input-field" value={editBenExtra.referralSource} onChange={e => setEditBenExtra({ ...editBenExtra, referralSource: e.target.value })}>
+                    <label className="input-label" style={editMissingFields.has('referralSource') ? { color: '#d97706' } : {}}>
+                      Referral source {editMissingFields.has('referralSource') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                    </label>
+                    <select className="input-field" value={editBenExtra.referralSource} onChange={e => setEditBenExtra({ ...editBenExtra, referralSource: e.target.value })} style={editMissingFields.has('referralSource') ? { borderColor: '#d97706', background: '#fffbeb' } : {}}>
                       <option value="">—</option>
                       <option value="anganwadi">Anganwadi</option>
                       <option value="shg">SHG</option>
@@ -1302,20 +1536,26 @@ const Programs: React.FC = () => {
                     </select>
                   </div>
                   <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label className="input-label">Referral detail</label>
-                    <input type="text" className="input-field" value={editBenExtra.referralDetail} onChange={e => setEditBenExtra({ ...editBenExtra, referralDetail: e.target.value })} />
+                    <label className="input-label" style={editMissingFields.has('referralDetail') ? { color: '#d97706' } : {}}>
+                      Referral detail {editMissingFields.has('referralDetail') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                    </label>
+                    <input type="text" className="input-field" value={editBenExtra.referralDetail} onChange={e => setEditBenExtra({ ...editBenExtra, referralDetail: e.target.value })} style={editMissingFields.has('referralDetail') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
                   </div>
                 </div>
                 <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
-                  <label className="input-label">Vulnerability tags</label>
-                  <input type="text" className="input-field" value={editBenExtra.vulnerabilityTags} onChange={e => setEditBenExtra({ ...editBenExtra, vulnerabilityTags: e.target.value })} />
+                  <label className="input-label" style={editMissingFields.has('vulnerabilityTags') ? { color: '#d97706' } : {}}>
+                    Vulnerability tags {editMissingFields.has('vulnerabilityTags') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                  </label>
+                  <input type="text" className="input-field" value={editBenExtra.vulnerabilityTags} onChange={e => setEditBenExtra({ ...editBenExtra, vulnerabilityTags: e.target.value })} style={editMissingFields.has('vulnerabilityTags') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
                 </div>
               </div>
               <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label className="input-label">ID type</label>
-                    <select className="input-field" value={editBenExtra.idDocType} onChange={e => setEditBenExtra({ ...editBenExtra, idDocType: e.target.value })}>
+                    <label className="input-label" style={editMissingFields.has('idDocType') ? { color: '#d97706' } : {}}>
+                      ID type {editMissingFields.has('idDocType') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                    </label>
+                    <select className="input-field" value={editBenExtra.idDocType} onChange={e => setEditBenExtra({ ...editBenExtra, idDocType: e.target.value })} style={editMissingFields.has('idDocType') ? { borderColor: '#d97706', background: '#fffbeb' } : {}}>
                       <option value="">—</option>
                       <option value="aadhaar_masked">Aadhaar (masked)</option>
                       <option value="election_id">Election ID</option>
@@ -1325,13 +1565,17 @@ const Programs: React.FC = () => {
                     </select>
                   </div>
                   <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label className="input-label">ID reference</label>
-                    <input type="text" className="input-field" value={editBenExtra.idDocRef} onChange={e => setEditBenExtra({ ...editBenExtra, idDocRef: e.target.value })} />
+                    <label className="input-label" style={editMissingFields.has('idDocRef') ? { color: '#d97706' } : {}}>
+                      ID reference {editMissingFields.has('idDocRef') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                    </label>
+                    <input type="text" className="input-field" value={editBenExtra.idDocRef} onChange={e => setEditBenExtra({ ...editBenExtra, idDocRef: e.target.value })} style={editMissingFields.has('idDocRef') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
                   </div>
                 </div>
                 <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
-                  <label className="input-label">Case notes</label>
-                  <textarea className="input-field" rows={2} value={editBenExtra.notes} onChange={e => setEditBenExtra({ ...editBenExtra, notes: e.target.value })} />
+                  <label className="input-label" style={editMissingFields.has('notes') ? { color: '#d97706' } : {}}>
+                    Case notes {editMissingFields.has('notes') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                  </label>
+                  <textarea className="input-field" rows={2} value={editBenExtra.notes} onChange={e => setEditBenExtra({ ...editBenExtra, notes: e.target.value })} style={editMissingFields.has('notes') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
                 </div>
                 <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
                   <input type="checkbox" id="edit-consentBen" checked={editBenExtra.consentData} onChange={e => setEditBenExtra({ ...editBenExtra, consentData: e.target.checked })} />
@@ -1339,6 +1583,88 @@ const Programs: React.FC = () => {
                 </div>
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>Update Beneficiary</button>
+            </form>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ── Log Effort Modal ─────────────────────────────────────────── */}
+      {showLogEffort && (
+        <ModalOverlay onBackdropClick={() => setShowLogEffort(false)}>
+          <div
+            className="modal-card modal-card--narrow"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="log-effort-title"
+          >
+            <button type="button" onClick={() => setShowLogEffort(false)} style={{ position: 'absolute', right: '1rem', top: '1rem' }} className="action-btn" aria-label="Close"><X size={20} /></button>
+            <h2 id="log-effort-title" style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Briefcase size={20} color="#0F766E" /> Log Effort
+            </h2>
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                if (!effortForm.staffName.trim() || !effortForm.programme || effortForm.hours <= 0) {
+                  toast.error('Fill in all fields.');
+                  return;
+                }
+                addEffortEntry({
+                  id: `EFF-${Date.now()}`,
+                  staffName: effortForm.staffName.trim(),
+                  date: effortForm.date,
+                  hours: effortForm.hours,
+                  type: effortForm.type,
+                  programme: effortForm.programme,
+                  createdAt: new Date().toISOString(),
+                });
+                toast.success(`${effortForm.hours}h logged for ${effortForm.programme}.`);
+                setShowLogEffort(false);
+              }}
+              className="flex-col gap-4 flex"
+            >
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Staff member *</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  required
+                  list="effort-staff-list"
+                  value={effortForm.staffName}
+                  onChange={e => setEffortForm(prev => ({ ...prev, staffName: e.target.value }))}
+                  placeholder="Name of staff / volunteer"
+                />
+                <datalist id="effort-staff-list">
+                  {volunteers.map(v => <option key={v.id} value={v.name} />)}
+                </datalist>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Date *</label>
+                  <input type="date" className="input-field" required value={effortForm.date} onChange={e => setEffortForm(prev => ({ ...prev, date: e.target.value }))} />
+                </div>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Hours *</label>
+                  <input type="number" className="input-field" required min={0.5} max={24} step={0.5} value={effortForm.hours} onChange={e => setEffortForm(prev => ({ ...prev, hours: Number(e.target.value) }))} />
+                </div>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Type *</label>
+                <select className="input-field" value={effortForm.type} onChange={e => setEffortForm(prev => ({ ...prev, type: e.target.value as 'office' | 'field_visit' }))}>
+                  <option value="office">Office</option>
+                  <option value="field_visit">Field Visit</option>
+                </select>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label">Programme *</label>
+                <select className="input-field" required value={effortForm.programme} onChange={e => setEffortForm(prev => ({ ...prev, programme: e.target.value }))}>
+                  <option value="">— select —</option>
+                  {programs.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.25rem' }}>
+                <Briefcase size={15} /> Save Effort Entry
+              </button>
             </form>
           </div>
         </ModalOverlay>

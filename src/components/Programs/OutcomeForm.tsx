@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Activity, X } from 'lucide-react';
 import { ModalOverlay } from '../ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
 import { programIdFromName } from '../../utils/programFinance';
 import { improvementPct, type BeneficiaryOutcome } from '../../utils/outcomes';
+import { readToCForProgram } from '../../utils/tocStorage';
 
 interface Props {
   beneficiaryId: string;
@@ -25,11 +26,17 @@ const OutcomeForm: React.FC<Props> = ({ beneficiaryId, beneficiaryName, programN
   const upsert = useStore(s => s.upsertBeneficiaryOutcome);
   const existing = useStore(s => s.beneficiaryOutcomes.find(o => o.beneficiaryId === beneficiaryId));
 
+  const tocNodes = useMemo(() => {
+    const nodes = readToCForProgram(programName);
+    return nodes.filter(n => n.type === 'output' || n.type === 'outcome');
+  }, [programName]);
+
   const [metricIdx, setMetricIdx] = useState(0);
   const preset = METRIC_PRESETS[metricIdx];
   const [baseline, setBaseline] = useState<string>(existing?.baseline?.toString() ?? '');
   const [current,  setCurrent]  = useState<string>(existing?.current?.toString() ?? '');
   const [note, setNote] = useState(existing?.note ?? '');
+  const [tocNodeId, setTocNodeId] = useState<string>(existing?.tocNodeId ?? '');
 
   const baselineNum = Number(baseline);
   const currentNum  = Number(current);
@@ -58,6 +65,7 @@ const OutcomeForm: React.FC<Props> = ({ beneficiaryId, beneficiaryName, programN
       unit: preset.unit,
       measuredAt: new Date().toISOString().slice(0, 10),
       note: note.trim() || undefined,
+      tocNodeId: tocNodeId || undefined,
     };
     upsert(record);
     toast.success(`Outcome saved for ${beneficiaryName}.`);
@@ -96,6 +104,23 @@ const OutcomeForm: React.FC<Props> = ({ beneficiaryId, beneficiaryName, programN
               <input className="input-field" type="number" inputMode="decimal" value={current} onChange={e => setCurrent(e.target.value)} required />
             </div>
           </div>
+
+          {tocNodes.length > 0 && (
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label className="input-label">Theory of Change node (optional)</label>
+              <select className="input-field" value={tocNodeId} onChange={e => setTocNodeId(e.target.value)}>
+                <option value="">— not linked —</option>
+                {tocNodes.map(n => (
+                  <option key={n.id} value={n.id}>{n.type === 'output' ? '📦' : '🎯'} {n.content.slice(0, 60)}</option>
+                ))}
+              </select>
+              {tocNodeId && (
+                <div style={{ fontSize: '0.7rem', color: '#0369a1', marginTop: 3 }}>
+                  Metric will be overlaid on this ToC node in the builder.
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="input-group" style={{ marginBottom: 0 }}>
             <label className="input-label">Supervisor note (optional)</label>

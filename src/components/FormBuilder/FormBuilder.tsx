@@ -7,14 +7,33 @@ import {
 import toast from 'react-hot-toast';
 
 // ── Field Type Definitions ────────────────────────────────────────────────────
+
+const BEN_FIELD_OPTIONS = [
+  { value: '', label: '— none —' },
+  { value: 'name', label: 'Full Name' },
+  { value: 'location', label: 'Location' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'email', label: 'Email' },
+  { value: 'gender', label: 'Gender' },
+  { value: 'dob', label: 'Date of Birth' },
+  { value: 'aadhaar', label: 'Aadhaar Verified' },
+  { value: 'familySize', label: 'Family Size' },
+  { value: 'referral_source', label: 'Referral Source' },
+  { value: 'referral_detail', label: 'Referral Detail' },
+  { value: 'vulnerability_flags', label: 'Vulnerability Tags' },
+  { value: 'notes', label: 'Notes' },
+];
+
 interface FormField {
   id: string;
   type: 'text' | 'number' | 'select' | 'boolean' | 'date' | 'location' | 'photo' | 'checkbox';
   label: string;
   placeholder?: string;
   required: boolean;
-  options?: string[];       // for select / checkbox
+  options?: string[];
   skipLogic?: { ifValue: string; thenHide: string[] };
+  /** Beneficiary field this form field writes back to on submission. */
+  mapsToField?: string;
 }
 
 const FIELD_TYPES = [
@@ -243,6 +262,21 @@ const FormBuilder: React.FC = () => {
                             onChange={e => updateField(field.id, { options: e.target.value.split('\n').filter(Boolean) })} />
                         </div>
                       )}
+                      <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+                        <label className="input-label">Maps to beneficiary field</label>
+                        <select
+                          className="input-field"
+                          value={field.mapsToField ?? ''}
+                          onChange={e => updateField(field.id, { mapsToField: e.target.value || undefined })}
+                        >
+                          {BEN_FIELD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                        {field.mapsToField && (
+                          <div style={{ fontSize: '0.72rem', color: '#0369a1', marginTop: 3 }}>
+                            Submissions will write to beneficiary.{field.mapsToField}
+                          </div>
+                        )}
+                      </div>
                       <label className="flex items-center gap-2" style={{ cursor: 'pointer', fontSize: '0.875rem' }}>
                         <input type="checkbox" checked={field.required} onChange={e => updateField(field.id, { required: e.target.checked })} />
                         Mark as required

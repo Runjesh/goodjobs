@@ -1,5 +1,15 @@
 import { create } from 'zustand';
 import type { ProgramBudget } from '../utils/programFinance';
+
+export interface EffortEntry {
+  id: string;
+  staffName: string;
+  date: string;
+  hours: number;
+  type: 'office' | 'field_visit';
+  programme: string;
+  createdAt: string;
+}
 import type { BeneficiaryOutcome } from '../utils/outcomes';
 import type { GrantTranche } from '../utils/grantLifecycle';
 import type { VolunteerAssignment } from '../utils/volunteerProgram';
@@ -294,6 +304,10 @@ interface AppState {
   outreachLog:          OutreachEntry[];
   addOutreachEntry:     (entry: OutreachEntry) => void;
   updateOutreachEntry:  (id: string, patch: Partial<OutreachEntry>) => void;
+
+  /** Staff effort log — written by the Log Effort form on Programs. */
+  programEffort:        EffortEntry[];
+  addEffortEntry:       (e: EffortEntry) => void;
 }
 
 const initialDonors: Donor[] = [
@@ -878,4 +892,11 @@ export const useStore = create<AppState>((set, get) => ({
   updateOutreachEntry: (id, patch) => set((state) => ({
     outreachLog: state.outreachLog.map(e => e.id === id ? { ...e, ...patch } : e),
   })),
+
+  programEffort: loadLS<EffortEntry[]>('goodjobs.programEffort.v1', []),
+  addEffortEntry: (e) => set((state) => {
+    const next = [e, ...state.programEffort];
+    saveLS('goodjobs.programEffort.v1', next);
+    return { programEffort: next };
+  }),
 }));
