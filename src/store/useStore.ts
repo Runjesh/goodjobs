@@ -36,6 +36,8 @@ export interface NgoDetails {
   eighty_g_no: string;
   /** ISO state name, e.g. "Maharashtra". */
   state: string;
+  /** Primary cause area selected at signup — used to pre-filter grant matching. */
+  causeArea?: string;
 }
 
 /**

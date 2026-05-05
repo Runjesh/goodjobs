@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   ShieldCheck, Sparkles, Mail, ArrowRight, Building2, Users,
@@ -43,6 +43,29 @@ const Signup: React.FC = () => {
   const [form, setForm] = useState<SignupForm>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const handleResend = () => {
+    if (resendCooldown > 0) return;
+    toast.success('Verification email resent!', { icon: '📧' });
+    setResendCooldown(60);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown((c) => {
+        if (c <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+    };
+  }, []);
 
   // ── Mock OAuth: pre-fills the form, doesn't bypass verification ─────────
   const handleGoogleOAuth = () => {
@@ -254,6 +277,17 @@ const Signup: React.FC = () => {
               <button className="btn btn-primary auth-submit" onClick={handleVerify} disabled={verifyBusy}>
                 {verifyBusy ? <span className="auth-spinner" /> : <>I clicked the link — verify <ArrowRight size={16} /></>}
               </button>
+              <p className="signup-verify-resend">
+                Didn't get it?{' '}
+                <button
+                  type="button"
+                  className="signup-verify-resend-btn"
+                  onClick={handleResend}
+                  disabled={resendCooldown > 0}
+                >
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend verification email'}
+                </button>
+              </p>
               <button className="signup-verify-back" onClick={() => setStage('form')}>
                 ← Back to edit details
               </button>

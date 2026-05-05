@@ -12,7 +12,7 @@ export interface Permission {
   canApproveAgents: boolean;
 }
 
-const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ed: [
     { module: 'dashboard',   canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
     { module: 'tasks',       canView: true,  canEdit: true,  canExport: true,  canApproveAgents: true },
@@ -176,6 +176,9 @@ interface AuthContextValue {
   can: (module: string, action: keyof Omit<Permission, 'module'>) => boolean;
   /** Patch the active user (persists to storage). No-op if no user is logged in. */
   updateUser: (patch: Partial<AuthUser>) => void;
+  /** Session-only demo role override — does not persist to localStorage. */
+  demoRole: UserRole | null;
+  setDemoRole: (role: UserRole | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -190,7 +193,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch { return null; }
   });
 
-  const permissions = user ? ROLE_PERMISSIONS[user.role] : [];
+  const [demoRole, setDemoRole] = useState<UserRole | null>(null);
+
+  const permissions = user ? ROLE_PERMISSIONS[demoRole ?? user.role] : [];
 
   const login = useCallback((newUser: AuthUser) => {
     // Trial + subscriptionTier belong to the *org*, not the individual user.
@@ -251,12 +256,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const can = useCallback((module: string, action: keyof Omit<Permission, 'module'>): boolean => {
     if (!user) return false;
-    const perm = ROLE_PERMISSIONS[user.role].find(p => p.module === module);
+    const effectiveRole = demoRole ?? user.role;
+    const perm = ROLE_PERMISSIONS[effectiveRole].find(p => p.module === module);
     return perm ? perm[action] : false;
-  }, [user]);
+  }, [user, demoRole]);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, can, updateUser }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, can, updateUser, demoRole, setDemoRole }}>
       {children}
     </AuthContext.Provider>
   );

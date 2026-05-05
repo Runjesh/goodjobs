@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2, Circle, ChevronRight, X, Sparkles,
   Users, HeartHandshake, ShieldCheck, Megaphone, UserPlus,
-  Building2, MessageCircle, FileText,
+  Building2, MessageCircle, FileText, ArrowRightLeft, ClipboardList,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
@@ -13,7 +13,6 @@ import {
 } from '../../utils/wizard';
 import './Onboarding.css';
 
-// Map wizard-step ids to checklist row appearance.
 const WIZARD_STEP_VISUALS: Record<WizardStepId, { icon: React.ElementType; color: string; label: string; cta: string }> = {
   'org-profile':           { icon: Building2,     color: '#0F766E', label: 'Finish your org profile',    cta: 'Open Settings' },
   'first-program':         { icon: FileText,      color: '#0F766E', label: 'Add your first program',     cta: 'Open Programs' },
@@ -77,7 +76,7 @@ interface Step {
 const GetStartedChecklist: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { beneficiaries, donors, campaigns, complianceDocs } = useStore();
+  const { beneficiaries, donors, transactions, customPrograms, volunteers, complianceDocs } = useStore();
 
   const [hidden, setHidden] = useState<boolean>(() =>
     user ? isDismissed(user.id) : false
@@ -95,9 +94,6 @@ const GetStartedChecklist: React.FC = () => {
     navigate(path);
   };
 
-  // Surface wizard steps the user explicitly skipped (or that remained when
-  // they finished early via "Skip setup"). Treated as additional checklist rows
-  // so nothing the wizard asked for falls through the cracks.
   const wizardFollowups = useMemo(() => {
     if (!user) return [];
     return checklistFollowupSteps(loadWizardState(user.id));
@@ -107,7 +103,7 @@ const GetStartedChecklist: React.FC = () => {
     const baseSteps: Step[] = [
       {
         id: 'beneficiary',
-        label: 'Add your first beneficiary',
+        label: 'Enroll your first beneficiary',
         hint: 'Enter one person or import a CSV — about 1 minute',
         icon: Users,
         color: '#0F766E',
@@ -126,14 +122,34 @@ const GetStartedChecklist: React.FC = () => {
         cta: 'Open Funding',
       },
       {
-        id: 'campaign',
-        label: 'Create your first campaign',
-        hint: 'Get a public donation link to share',
-        icon: Megaphone,
+        id: 'transaction',
+        label: 'Log your first transaction',
+        hint: 'Record an income or expense to start your fund accounting',
+        icon: ArrowRightLeft,
         color: '#7C3AED',
-        done: campaigns.length > 0,
+        done: transactions.length > 0,
         path: '/funding',
-        cta: 'Create Campaign',
+        cta: 'Open Finance',
+      },
+      {
+        id: 'programme',
+        label: 'Add your first programme',
+        hint: 'Name a programme — it pre-populates beneficiary forms',
+        icon: ClipboardList,
+        color: '#0F766E',
+        done: customPrograms.length > 0,
+        path: '/programs',
+        cta: 'Open Programs',
+      },
+      {
+        id: 'volunteer',
+        label: 'Register a volunteer',
+        hint: 'Track skills, hours, and programme assignments',
+        icon: Megaphone,
+        color: '#16A34A',
+        done: volunteers.length > 0,
+        path: '/programs',
+        cta: 'Open Programs',
       },
       {
         id: 'compliance',
@@ -157,8 +173,6 @@ const GetStartedChecklist: React.FC = () => {
       },
     ];
 
-    // Wizard steps surface as their own rows (deduped against base ids if a
-    // matching base step already covers the same ground, e.g. team/import).
     const baseCovers: Partial<Record<WizardStepId, string>> = {
       'invite-team': 'team',
       'import-beneficiaries': 'beneficiary',
@@ -169,7 +183,6 @@ const GetStartedChecklist: React.FC = () => {
         const baseId = baseCovers[meta.id];
         if (!baseId) return true;
         const baseStep = baseSteps.find((s) => s.id === baseId);
-        // If the user actually did the equivalent base action, hide the wizard row.
         return !baseStep?.done;
       })
       .map((meta) => {
@@ -188,14 +201,22 @@ const GetStartedChecklist: React.FC = () => {
       });
 
     return [...baseSteps, ...wizardRows];
-  }, [beneficiaries.length, donors.length, campaigns.length, complianceDocs.length, manualDone, wizardFollowups]);
+  }, [
+    beneficiaries.length,
+    donors.length,
+    transactions.length,
+    customPrograms.length,
+    volunteers.length,
+    complianceDocs.length,
+    manualDone,
+    wizardFollowups,
+  ]);
 
   const completed = steps.filter((s) => s.done).length;
   const total = steps.length;
   const pct = Math.round((completed / total) * 100);
   const allDone = completed === total;
 
-  // Auto-hide if all steps done OR user dismissed
   if (hidden || allDone) return null;
 
   const handleDismiss = () => {

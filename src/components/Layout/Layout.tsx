@@ -183,7 +183,7 @@ const Layout: React.FC = () => {
   const [isNotifOpen,    setIsNotifOpen]    = useState(false);
   const [isDarkMode,     setIsDarkMode]     = useState(false);
   const [trialModal,     setTrialModal]     = useState<null | 'day28' | 'expired'>(null);
-  const { user, can, updateUser } = useAuth();
+  const { user, can, updateUser, demoRole, setDemoRole } = useAuth();
   const { t, lang, setLanguage } = useTranslation();
   const { setDonors, setTransactions, setCampaigns, setCsrCards, setComplianceDocs } = useStore();
   const { setVolunteers, setBeneficiaries } = useStore();
@@ -673,6 +673,31 @@ const Layout: React.FC = () => {
           {/* Actions */}
           <div className="header-actions">
             <DemoModePill />
+            {user?.token?.startsWith('demo-jwt') && (
+              <select
+                className="header-lang-select"
+                value={demoRole ?? user.role}
+                onChange={(e) => {
+                  const chosen = e.target.value as import('../../context/AuthContext').UserRole;
+                  if (chosen === user.role) {
+                    setDemoRole(null);
+                  } else {
+                    setDemoRole(chosen);
+                    toast(`Previewing as ${ROLE_META[chosen].label}`, { icon: ROLE_META[chosen].icon, duration: 2000 });
+                  }
+                }}
+                aria-label="Preview as role"
+                title="Switch role preview (demo only)"
+                style={{ borderColor: '#7C3AED', color: '#7C3AED', fontWeight: 600 }}
+              >
+                <option value="" disabled>Preview as…</option>
+                {(['ed', 'finance', 'programs', 'field', 'board'] as const).map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_META[r].icon} {ROLE_META[r].label}
+                  </option>
+                ))}
+              </select>
+            )}
             <TrialPill />
             <select
               className="header-lang-select"

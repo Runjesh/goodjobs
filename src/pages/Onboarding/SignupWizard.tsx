@@ -89,6 +89,9 @@ const SignupWizard: React.FC = () => {
           details: { source: 'signup-wizard', startDate: fp.startDate ?? null, geography: fp.geography ?? null },
         });
       }
+      // Also register as a named custom programme so it shows in programme
+      // dropdowns and GetStarted checklist immediately after wizard exits.
+      useStore.getState().addCustomProgram(title);
       // Fire-and-forget backend persistence; toast on failure happens inside.
       void persistFirstProgram(fp);
       return;
@@ -162,6 +165,17 @@ const SignupWizard: React.FC = () => {
     }
   }, [updateUser, user]);
 
+  // ── Seed store from signup form's cause area after wizard finishes ─────────
+  // Idempotent: only writes when causeArea is not already set in ngoDetails.
+  const seedCauseArea = useCallback(() => {
+    const ca = user?.orgProfile?.causeArea;
+    if (!ca) return;
+    const current = useStore.getState().ngoDetails;
+    if (!current.causeArea) {
+      useStore.getState().setNgoDetails({ causeArea: ca });
+    }
+  }, [user?.orgProfile?.causeArea]);
+
   const advance = useCallback((status: 'completed' | 'skipped') => {
     setState((prev) => {
       const id = WIZARD_STEP_ORDER[prev.currentIndex];
@@ -180,6 +194,7 @@ const SignupWizard: React.FC = () => {
         const finalState = finishWizard(userId, { ...prev, completedSteps, skippedSteps, currentIndex: nextIndex });
         const handedOff = completedSteps.length;
         const skipped = skippedSteps.length;
+        seedCauseArea();
         toast.success(
           skipped > 0
             ? `You're all set! ${handedOff} of ${WIZARD_STEP_ORDER.length} steps done — we'll surface the rest in your checklist.`
@@ -193,7 +208,7 @@ const SignupWizard: React.FC = () => {
       }
       return { ...prev, completedSteps, skippedSteps, currentIndex: nextIndex };
     });
-  }, [commitStep, userId, updateUser, navigate]);
+  }, [commitStep, userId, updateUser, navigate, seedCauseArea]);
 
   const goBack = useCallback(() => {
     setState((prev) => ({ ...prev, currentIndex: Math.max(0, prev.currentIndex - 1) }));
@@ -203,10 +218,11 @@ const SignupWizard: React.FC = () => {
     if (!userId) return;
     const finalState = finishWizard(userId, state);
     setState(finalState);
+    seedCauseArea();
     updateUser({ needsWizard: false });
     toast.success("You're all set — welcome to GoodJobs!", { icon: '🎉', duration: 3500 });
     navigate('/', { replace: true });
-  }, [userId, state, updateUser, navigate]);
+  }, [userId, state, updateUser, navigate, seedCauseArea]);
 
   const isLastStep = state.currentIndex >= totalSteps - 1;
   const isFinishedScreen = state.currentIndex >= totalSteps;
