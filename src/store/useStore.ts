@@ -307,7 +307,7 @@ interface AppState {
   addVolunteer: (v: Omit<Volunteer, 'id' | 'hours'>) => void;
   updateVolunteer: (id: string, data: Partial<Volunteer>) => void;
   deleteVolunteer: (id: string) => void;
-  addComplianceDoc: (doc: Omit<ComplianceDocument, 'id' | 'uploadedAt'>) => void;
+  addComplianceDoc: (doc: Omit<ComplianceDocument, 'uploadedAt'> & { id?: string }) => void;
 
   /** CRM outreach touchpoint log — shared across all views within the session. */
   outreachLog:          OutreachEntry[];
@@ -911,7 +911,7 @@ export const useStore = create<AppState>((set, get) => ({
   })),
 
   addComplianceDoc: (doc) => set((state) => ({
-    complianceDocs: [{ ...doc, id: `doc-${Date.now()}`, uploadedAt: new Date().toISOString().split('T')[0] }, ...state.complianceDocs]
+    complianceDocs: [{ ...doc, id: doc.id ?? `doc-${Date.now()}`, uploadedAt: new Date().toISOString().split('T')[0] }, ...state.complianceDocs]
   })),
 
   outreachLog: [],

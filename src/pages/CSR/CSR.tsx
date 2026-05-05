@@ -234,33 +234,40 @@ const CSR: React.FC = () => {
         // triggers the At-Risk Grants Banner on this page.
         if (card.col === 'mou' && col === 'live') {
           const now = new Date();
-          const dueDate = new Date(now.getTime() + 30 * 86_400_000);
+          // Use earliest non-released tranche as the grant report due date;
+          // fall back to 90 days if no scheduled tranches are found.
+          const nextTranche = grantTranches
+            .filter(t => String(t.grantId) === String(card.id) && t.status !== 'released')
+            .sort((a, b) => a.expectedDate.localeCompare(b.expectedDate))[0];
+          const dueDate = nextTranche
+            ? new Date(nextTranche.expectedDate)
+            : new Date(now.getTime() + 90 * 86_400_000);
           const expiryIso = dueDate.toISOString().slice(0, 10);
 
-          // 1) Compliance record — shows in Compliance HQ + AtRiskGrantsBanner.
-          //    We pre-compute the same timestamp the store action uses so we can
-          //    immediately link the new doc to this grant in complianceGrantLinks.
-          const docTs = Date.now();
-          const newDocId = `doc-${docTs}`;
+          // 1) Compliance record of type grant_report — surfaces in Compliance HQ
+          //    and AtRiskGrantsBanner. Caller-provided id ensures the subsequent
+          //    complianceGrantLink references the exact same record.
+          const newDocId = `doc-mou-live-${String(card.id)}-${now.getTime()}`;
           addComplianceDoc({
-            name: `${card.company} — CSR-1 Filing`,
-            type: 'CSR Eligibility',
+            id: newDocId,
+            name: `${card.company} — Grant Report`,
+            type: 'grant_report',
             status: 'Expiring Soon',
             expiry: expiryIso,
           });
-          // 1b) Link the new doc to the grant so compliance panels can join the two.
+          // 1b) Link the new doc to the grant so all compliance panels can join correctly.
           addComplianceGrantLink({
-            id: `cgl-mou-live-${String(card.id)}-${docTs}`,
+            id: `cgl-mou-live-${String(card.id)}-${now.getTime()}`,
             grantId: String(card.id),
             complianceDocId: newDocId,
-            reason: 'Auto-created on MoU → Live transition; CSR-1 filing required',
+            reason: 'Auto-created on MoU → Live transition; grant report filing required',
           });
 
           // 2) High-priority task for the finance / ED team
           const compTask: Task = {
-            id: `mou-live-${String(card.id)}-${now.getTime()}`,
-            title: `File CSR-1 compliance record — ${card.company} grant is now Live`,
-            description: `${card.company} moved from MoU Signed → Project Live. Upload the executed MoU to the Compliance Vault and file the CSR-1 form within 30 days (by ${expiryIso}).`,
+            id: `mou-live-task-${String(card.id)}-${now.getTime()}`,
+            title: `Submit grant report — ${card.company} grant is now Live`,
+            description: `${card.company} moved from MoU Signed → Project Live. File the grant report and upload the executed MoU to the Compliance Vault by ${expiryIso}.`,
             priority: 'high',
             status: 'open',
             sourceType: 'agent',
@@ -272,9 +279,11 @@ const CSR: React.FC = () => {
             updatedAt: now.toISOString(),
           };
           addTask(compTask);
-          toast('CSR-1 compliance record created and task assigned — due in 30 days.', {
-            icon: '📋', duration: 4500,
-          });
+          toast.success(
+            `Grant report compliance record created — due ${expiryIso}. ` +
+            'Check Compliance HQ for full tracking.',
+            { duration: 5000 },
+          );
         }
       }
       setDragId(null);
@@ -343,7 +352,12 @@ const CSR: React.FC = () => {
         }),
       });
       if (res.ok) {
-        updateCSRCard(editCard.id, { ...editCard, tags, details: packCsrDetails(editExtra) });
+        updateCSRCard(editCard.id, {
+          ...editCard,
+          tags,
+          details: packCsrDetails(editExtra),
+          win_probability: editCard.win_probability ?? undefined,
+        });
         toast.success(`Proposal updated!`);
         setShowEditCard(false);
       } else {
@@ -1238,6 +1252,26 @@ const CSR: React.FC = () => {
                     <option value="PM">PM — Priya M</option>
                   </select>
                 </div>
+              </div>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label className="input-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Bot size={13} /> Win probability override (0–100)
+                  <span style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', fontWeight: 400 }}>
+                    — leave blank to use AI score
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  className="input-field"
+                  min="0"
+                  max="100"
+                  placeholder="AI-computed (leave blank)"
+                  value={editCard.win_probability != null ? editCard.win_probability : ''}
+                  onChange={e => setEditCard({
+                    ...editCard,
+                    win_probability: e.target.value === '' ? undefined : Math.min(100, Math.max(0, Number(e.target.value))),
+                  })}
+                />
               </div>
               <div className="csr-form-section">
                 <div className="csr-form-section-title">Corporate contact &amp; notes</div>
