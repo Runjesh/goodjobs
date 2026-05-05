@@ -503,11 +503,12 @@ const Finance: React.FC = () => {
     } catch { /* offline/no backend */ }
 
     // Resolve the authoritative receipt number:
-    //   1. Use receipt_number returned by a real backend (DB sequence).
-    //   2. Fall back to the client-generated localStorage number when in mock / offline mode.
+    //   Production (real backend): prefer the DB-sequence number returned in the
+    //   response JSON so the server is the single source of truth.
+    //   Mock / offline: fall back to the localStorage-generated number.
     const serverReceiptNo = (payload as any)?.receipt_number as string | undefined;
     const receiptNo: string | undefined = entryToSave.type === 'Income'
-      ? (serverReceiptNo || (isMockEnabled() ? clientReceiptNo : clientReceiptNo))
+      ? (serverReceiptNo ?? clientReceiptNo)
       : undefined;
 
     const { source, id } = resolvePersistedJournalEntryId(payload);
@@ -650,7 +651,10 @@ const Finance: React.FC = () => {
       }
 
       const zipBytes = createZip(zipFiles);
-      const blob = new Blob([zipBytes], { type: 'application/zip' });
+      // Cast to ArrayBuffer to satisfy the strict BlobPart type check —
+      // Uint8Array's .buffer is typed as ArrayBufferLike (which includes
+      // SharedArrayBuffer) but Blob only accepts ArrayBuffer.
+      const blob = new Blob([zipBytes.buffer as ArrayBuffer], { type: 'application/zip' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href     = url;
