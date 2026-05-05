@@ -38,6 +38,8 @@ export interface NgoDetails {
   state: string;
   /** Primary cause area selected at signup — used to pre-filter grant matching. */
   causeArea?: string;
+  /** WhatsApp number wired during onboarding — mirrors user.whatsapp.phone. */
+  whatsapp?: string;
 }
 
 /**
@@ -248,6 +250,11 @@ interface AppState {
   customPrograms:        string[];
   addCustomProgram:      (name: string) => void;
   removeCustomProgram:   (name: string) => void;
+
+  /** Team members invited during onboarding wizard — available in task-assignment dropdowns. */
+  pendingTeamMembers:    { email: string; role: string; invitedAt: string }[];
+  addPendingTeamMember:  (m: { email: string; role: string; invitedAt: string }) => void;
+  clearPendingTeamMembers: () => void;
 
   setProgramBudgets:      (b: ProgramBudget[]) => void;
   upsertProgramBudget:    (b: ProgramBudget) => void;
@@ -526,6 +533,7 @@ export const useStore = create<AppState>((set, get) => ({
   complianceGrantLinks: loadLS<ComplianceGrantLink[]>(LS_COMP_LINKS, seedComplianceLinks),
   programGrantLinks:    loadLS<ProgramGrantLink[]>(LS_PROG_GRANT_LINKS, seedProgramGrantLinks),
   customPrograms:       loadLS<string[]>(LS_CUSTOM_PROGRAMS, []),
+  pendingTeamMembers:   loadLS<{ email: string; role: string; invitedAt: string }[]>('goodjobs.pendingTeamMembers.v1', []),
   grantBudgetHeads:     loadLS<GrantBudgetHead[]>(LS_BUDGET_HEADS, seedGrantBudgetHeads),
   journalEntries:       loadLS<JournalExpense[]>(LS_JOURNAL_ENTRIES, seedJournalEntries),
   tasks:                loadLS<Task[]>(LS_TASKS, []),
@@ -639,6 +647,17 @@ export const useStore = create<AppState>((set, get) => ({
     saveLS(LS_CUSTOM_PROGRAMS, next);
     return { customPrograms: next };
   }),
+
+  addPendingTeamMember: (m) => set((state) => {
+    if (state.pendingTeamMembers.some(x => x.email.toLowerCase() === m.email.toLowerCase())) return {};
+    const next = [...state.pendingTeamMembers, m];
+    saveLS('goodjobs.pendingTeamMembers.v1', next);
+    return { pendingTeamMembers: next };
+  }),
+  clearPendingTeamMembers: () => {
+    saveLS('goodjobs.pendingTeamMembers.v1', []);
+    set({ pendingTeamMembers: [] });
+  },
 
   setProgramBudgets: (programBudgets) => { saveLS(LS_BUDGETS, programBudgets); set({ programBudgets }); },
   upsertProgramBudget: (b) => set((state) => {

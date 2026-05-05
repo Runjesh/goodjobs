@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { useAuth } from '../../context/AuthContext';
+import PermissionGate from '../../components/Auth/PermissionGate';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 import toast from 'react-hot-toast';
@@ -105,7 +107,8 @@ function unpackCsrDetails(details?: Record<string, unknown> | null): CsrExtraFor
 const CSR: React.FC = () => {
   useFocusFromUrl('card');
   const navigate = useNavigate();
-  const { csrCards, moveCSRCard, addCSRCard, updateCSRCard, deleteCSRCard } = useStore();
+  const { csrCards, moveCSRCard, addCSRCard, updateCSRCard, deleteCSRCard, ngoDetails } = useStore();
+  const { can } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [dragId, setDragId] = useState<number | string | null>(null);
   const [form, setForm] = useState({ company: '', amount: 1000000, project: '', tags: '', col: 'prospecting', agent: 'AD' });
@@ -323,6 +326,16 @@ const CSR: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docRoom?.cardId]);
 
+  // Pre-seed the prospect DB search with the org's cause area when no
+  // explicit query has been entered and the modal is first opened.
+  useEffect(() => {
+    if (showProspectDb && !dbQuery && ngoDetails.causeArea) {
+      setDbQuery(ngoDetails.causeArea);
+    }
+    // Only run when the modal opens — not on every dbQuery change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showProspectDb]);
+
   const onPickDocFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -433,15 +446,17 @@ const CSR: React.FC = () => {
             {aiLoading ? <Loader2 size={16} className="animate-spin" /> : <Bot size={16} />}
             {aiLoading ? 'Researching…' : 'AI Prospect Research'}
           </button>
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              setExtraForm({ ...CSR_EXTRA_EMPTY });
-              setShowModal(true);
-            }}
-          >
-            <Plus size={16} /> New Proposal
-          </button>
+          <PermissionGate module="csr" action="canEdit">
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                setExtraForm({ ...CSR_EXTRA_EMPTY });
+                setShowModal(true);
+              }}
+            >
+              <Plus size={16} /> New Proposal
+            </button>
+          </PermissionGate>
         </div>
       </div>
 

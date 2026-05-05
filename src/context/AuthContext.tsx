@@ -232,6 +232,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = useCallback(() => {
     setUser(null);
+    setDemoRole(null);
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem('access_token');
   }, []);

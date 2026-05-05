@@ -144,13 +144,12 @@ const SignupWizard: React.FC = () => {
       if (!fresh.length) return;
       const existing = user?.pendingInvites ?? [];
       const existingEmails = new Set(existing.map((i) => i.email.toLowerCase()));
-      const merged = [
-        ...existing,
-        ...fresh
-          .filter((i) => !existingEmails.has(i.email.trim().toLowerCase()))
-          .map((i) => ({ email: i.email.trim(), role: i.role, invitedAt: new Date().toISOString() })),
-      ];
-      updateUser({ pendingInvites: merged });
+      const newInvites = fresh
+        .filter((i) => !existingEmails.has(i.email.trim().toLowerCase()))
+        .map((i) => ({ email: i.email.trim(), role: i.role, invitedAt: new Date().toISOString() }));
+      updateUser({ pendingInvites: [...existing, ...newInvites] });
+      // Also seed the pendingTeamMembers store slice for task-assignment dropdowns.
+      newInvites.forEach((m) => useStore.getState().addPendingTeamMember(m));
       void persistInvites(fresh);
       return;
     }
@@ -160,6 +159,8 @@ const SignupWizard: React.FC = () => {
       updateUser({
         whatsapp: { phone: cw.phone, verified: !!cw.verified, connectedAt: new Date().toISOString() },
       });
+      // Mirror the WhatsApp number into ngoDetails so integrations surfaces can read it.
+      useStore.getState().setNgoDetails({ whatsapp: cw.phone });
       void persistWhatsApp(user?.ngoName ?? '', cw);
       return;
     }

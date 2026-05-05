@@ -87,7 +87,12 @@ const TrialPill: React.FC = () => {
   };
 
   return (
-    <div ref={wrapRef} className="trial-pill-wrap">
+    <div
+      ref={wrapRef}
+      className="trial-pill-wrap"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
       <button
         type="button"
         className={`trial-pill trial-pill--${variant}`}
