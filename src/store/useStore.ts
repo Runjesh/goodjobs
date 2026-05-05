@@ -266,6 +266,7 @@ interface AppState {
   /** Team members invited during onboarding wizard — available in task-assignment dropdowns. */
   pendingTeamMembers:    { email: string; role: string; invitedAt: string }[];
   addPendingTeamMember:  (m: { email: string; role: string; invitedAt: string }) => void;
+  updatePendingTeamMember: (email: string, role: string) => void;
   clearPendingTeamMembers: () => void;
 
   setProgramBudgets:      (b: ProgramBudget[]) => void;
@@ -669,6 +670,13 @@ export const useStore = create<AppState>((set, get) => ({
   addPendingTeamMember: (m) => set((state) => {
     if (state.pendingTeamMembers.some(x => x.email.toLowerCase() === m.email.toLowerCase())) return {};
     const next = [...state.pendingTeamMembers, m];
+    saveLS('goodjobs.pendingTeamMembers.v1', next);
+    return { pendingTeamMembers: next };
+  }),
+  updatePendingTeamMember: (email, role) => set((state) => {
+    const next = state.pendingTeamMembers.map(m =>
+      m.email.toLowerCase() === email.toLowerCase() ? { ...m, role } : m
+    );
     saveLS('goodjobs.pendingTeamMembers.v1', next);
     return { pendingTeamMembers: next };
   }),

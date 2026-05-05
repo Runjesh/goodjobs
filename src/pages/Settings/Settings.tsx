@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { User, Building2, Shield, Bell, Trash2, Download, Key, Save, ChevronRight, CreditCard, Users, Mail, X as XIcon, Lock, MessageCircle } from 'lucide-react';
+import JSZip from 'jszip';
 import WhatsAppPortal from '../../components/Settings/WhatsAppPortal';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -24,7 +25,18 @@ const TABS = [
 
 const Settings: React.FC = () => {
   const { user, login, updateUser } = useAuth();
-  const setNgoDetails = useStore(s => s.setNgoDetails);
+  const setNgoDetails              = useStore(s => s.setNgoDetails);
+  const updatePendingTeamMember    = useStore(s => s.updatePendingTeamMember);
+  const pendingTeamMembers         = useStore(s => s.pendingTeamMembers);
+  // Data slices for full-org export
+  const exportDonors               = useStore(s => s.donors);
+  const exportTransactions         = useStore(s => s.transactions);
+  const exportBeneficiaries        = useStore(s => s.beneficiaries);
+  const exportGrants               = useStore(s => s.csrCards);
+  const exportCompliance           = useStore(s => s.complianceDocs);
+  const exportVolunteers           = useStore(s => s.volunteers);
+  const exportMisIntents           = useStore(s => s.misReviewIntents);
+  const exportOutcomes             = useStore(s => s.beneficiaryOutcomes);
   // Honor ?tab=plans (or any other tab) so contextual upgrade prompts can
   // deep-link. We accept "billing" as an alias for "plans" because the
   // expired-trial banner and the day-28 upgrade modal historically link to
@@ -172,17 +184,82 @@ const Settings: React.FC = () => {
 
   const handleExportData = async () => {
     try {
-      const res = await apiFetch('/dpdp/export');
-      if (!res.ok) throw new Error('export');
-      const data = await res.json();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const toCsv = (rows: Record<string, unknown>[]): string => {
+        if (rows.length === 0) return '';
+        const headers = Object.keys(rows[0]);
+        const escape = (v: unknown): string => {
+          const s = v == null ? '' : String(v);
+          return s.includes(',') || s.includes('"') || s.includes('\n')
+            ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        return [
+          headers.join(','),
+          ...rows.map(r => headers.map(h => escape(r[h])).join(',')),
+        ].join('\n');
+      };
+
+      const zip = new JSZip();
+
+      zip.file('donors.csv', toCsv(exportDonors.map(d => ({
+        id: d.id, name: d.name, type: d.type, total_given: d.totalGiven,
+        last_gift: d.lastGift, pan: d.pan, location: d.location,
+        email: d.email ?? '', phone: d.phone ?? '', tags: (d.tags ?? []).join(';'),
+      }))));
+
+      zip.file('transactions.csv', toCsv(exportTransactions.map(t => ({
+        id: t.id, donor_id: t.donorId, donor_name: t.donorName,
+        amount: t.amount, method: t.method,
+        campaign_id: t.campaignId, campaign_title: t.campaignTitle,
+        programme_id: t.programmeId ?? '', grant_id: t.grantId ?? '',
+        date: t.date,
+      }))));
+
+      zip.file('beneficiaries.csv', toCsv(exportBeneficiaries.map(b => ({
+        id: b.id, name: b.name, program: b.program, location: b.location,
+        aadhaar: b.aadhaar ? 'yes' : 'no', family_size: b.familySize,
+      }))));
+
+      zip.file('grants.csv', toCsv(exportGrants.map(g => ({
+        id: g.id, company: g.company, amount: g.amount, project: g.project,
+        tags: (g.tags ?? []).join(';'), status: g.col, date: g.date,
+        report_due_date: g.report_due_date ?? '', win_probability: g.win_probability ?? '',
+      }))));
+
+      zip.file('compliance_docs.csv', toCsv(exportCompliance.map(c => ({
+        id: c.id, name: c.name, type: c.type, status: c.status,
+        expiry: c.expiry, registration_number: c.registration_number ?? '',
+        assigned_to: c.assigned_to ?? '', uploaded_at: c.uploadedAt,
+      }))));
+
+      zip.file('volunteers.csv', toCsv(exportVolunteers.map(v => ({
+        id: v.id, name: v.name, skills: (v.skills ?? []).join(';'),
+        hours: v.hours, verified: v.verified ? 'yes' : 'no',
+      }))));
+
+      zip.file('form_submissions.csv', toCsv(exportMisIntents.map(m => ({
+        id: m.id, reporter_id: m.reporterId, report_date: m.reportDate,
+        status: m.status, narrative: m.narrative,
+        beneficiary: m.extracted?.beneficiary ?? '', location: m.extracted?.location ?? '',
+        metric: m.extracted?.metric ?? '', value: m.extracted?.value ?? '',
+        program: m.extracted?.program ?? '', created_at: m.createdAt,
+        decided_at: m.decidedAt ?? '',
+      }))));
+
+      zip.file('programme_outcomes.csv', toCsv(exportOutcomes.map(o => ({
+        id: o.id, beneficiary_id: o.beneficiaryId, program_id: o.programId,
+        metric: o.metric, metric_label: o.metricLabel, baseline: o.baseline,
+        current: o.current, unit: o.unit ?? '', higher_is_better: o.higherIsBetter ? 'yes' : 'no',
+        measured_at: o.measuredAt, note: o.note ?? '',
+      }))));
+
+      const blob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'goodjobs_data_export.json';
+      a.download = `goodjobs_export_${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('Your data exported (DPDP §12 right to portability).', { duration: 3500 });
+      toast.success('Full data export downloaded as ZIP.', { duration: 4000 });
     } catch {
       toast.error('Failed to export your data.');
     }
@@ -413,6 +490,52 @@ const Settings: React.FC = () => {
                 </div>
               </div>
 
+              {/* Existing team members (wizard + store) with role change */}
+              {pendingTeamMembers.length > 0 && (
+                <div style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', overflow: 'hidden', marginBottom: '1rem' }}>
+                  <div style={{
+                    padding: '0.55rem 0.85rem', background: 'var(--color-bg-main)',
+                    fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
+                    color: 'var(--color-text-tertiary)', borderBottom: '1px solid var(--color-border-light)',
+                  }}>
+                    Team members
+                  </div>
+                  {pendingTeamMembers.map(member => (
+                    <div
+                      key={member.email}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '0.65rem 0.85rem',
+                        borderBottom: '1px solid var(--color-border-light)',
+                        fontSize: '0.85rem', gap: '0.75rem',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.email}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
+                          Joined {new Date(member.invitedAt).toLocaleDateString('en-IN')}
+                        </div>
+                      </div>
+                      <select
+                        className="input-field"
+                        style={{ width: 'auto', minWidth: 140, fontSize: '0.8rem', padding: '4px 8px', height: 34 }}
+                        value={member.role}
+                        onChange={e => {
+                          updatePendingTeamMember(member.email, e.target.value);
+                          toast.success(`${member.email.split('@')[0]}'s role updated to ${ROLE_META[e.target.value as keyof typeof ROLE_META]?.label ?? e.target.value}.`);
+                        }}
+                      >
+                        <option value="ED">Executive Director</option>
+                        <option value="PROGRAM_HEAD">Program Head</option>
+                        <option value="FUNDRAISER">Fundraiser</option>
+                        <option value="FINANCE">Finance Officer</option>
+                        <option value="FIELD_OPS">Field Officer</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Invite list */}
               <div style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                 <div style={{
@@ -434,11 +557,11 @@ const Settings: React.FC = () => {
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         padding: '0.65rem 0.85rem',
                         borderBottom: '1px solid var(--color-border-light)',
-                        fontSize: '0.85rem',
+                        fontSize: '0.85rem', gap: '0.75rem',
                       }}
                     >
-                      <div>
-                        <div style={{ fontWeight: 500 }}>{inv.email}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inv.email}</div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
                           {ROLE_META[inv.role as keyof typeof ROLE_META]?.label ?? inv.role} · invited {new Date(inv.invitedAt).toLocaleDateString('en-IN')}
                         </div>
