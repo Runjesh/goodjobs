@@ -280,7 +280,7 @@ const Compliance: React.FC = () => {
             ngo_pan:      ngoDetails.pan      || undefined,
             ngo_reg_no:   ngoDetails.reg_no   || undefined,
             ngo_fcra_reg: ngoDetails.fcra_reg || undefined,
-            ngo_80g_no:   ngoDetails.eighty_g_no || undefined,
+            ngo_80g_no:   complianceDocs.find(d => d.type === 'Donor Deduction' && d.registration_number)?.registration_number || undefined,
           },
         }),
       });
@@ -485,7 +485,7 @@ const Compliance: React.FC = () => {
             {ngoDetails.reg_no && <span>Reg: <strong>{ngoDetails.reg_no}</strong></span>}
             {ngoDetails.pan && <span>PAN: <strong>{ngoDetails.pan}</strong></span>}
             {ngoDetails.fcra_reg && <span>FCRA: <strong>{ngoDetails.fcra_reg}</strong></span>}
-            {ngoDetails.eighty_g_no && <span>80G: <strong>{ngoDetails.eighty_g_no}</strong></span>}
+            {(() => { const r = complianceDocs.find(d => d.type === 'Donor Deduction' && d.registration_number)?.registration_number; return r ? <span>80G: <strong>{r}</strong></span> : null; })()}
           </div>
         </div>
         <div className="flex gap-4">
