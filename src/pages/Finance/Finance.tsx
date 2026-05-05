@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe, Tag, PackageOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
+import PermissionGate from '../../components/Auth/PermissionGate';
 import './Finance.css';
 import { apiFetch } from '../../api/client';
 import { isMockEnabled } from '../../api/mockBackend';
@@ -980,9 +981,11 @@ const Finance: React.FC = () => {
           >
             <PackageOpen size={16} /> {bulkReceiptBusy ? 'Generating…' : 'Generate All Pending Receipts'}
           </button>
-          <button className="btn btn-primary" onClick={() => setShowEntryModal(true)}>
-            <Plus size={16} /> New Journal Entry
-          </button>
+          <PermissionGate module="finance" action="canEdit">
+            <button className="btn btn-primary" onClick={() => setShowEntryModal(true)}>
+              <Plus size={16} /> New Journal Entry
+            </button>
+          </PermissionGate>
         </div>
       </div>
 

@@ -166,15 +166,26 @@ const SignupWizard: React.FC = () => {
     }
   }, [updateUser, user]);
 
-  // ── Seed store from signup form's cause area after wizard finishes ─────────
-  // Idempotent: only writes when causeArea is not already set in ngoDetails.
-  const seedCauseArea = useCallback(() => {
-    const ca = user?.orgProfile?.causeArea;
-    if (!ca) return;
-    const current = useStore.getState().ngoDetails;
-    if (!current.causeArea) {
-      useStore.getState().setNgoDetails({ causeArea: ca });
+  // ── Single completion handoff: seed ALL step outputs into the store ─────────
+  // Called from both the wasLast path and exitWizard(). Idempotent so re-runs
+  // (e.g. wizard resumed then finished again) are safe.
+  const seedStoreFromWizardState = useCallback((data: WizardData) => {
+    const store = useStore.getState();
+    // Cause area → grant matching prefilter.
+    const ca = data.orgProfile?.causeArea ?? user?.orgProfile?.causeArea;
+    if (ca && !store.ngoDetails.causeArea) {
+      store.setNgoDetails({ causeArea: ca });
     }
+    // WhatsApp → ngoDetails.whatsapp.
+    const phone = data.connectWhatsapp?.phone;
+    if (phone && !store.ngoDetails.whatsapp) {
+      store.setNgoDetails({ whatsapp: phone });
+    }
+    // Team invites → pendingTeamMembers for task-assignment dropdowns.
+    const invites = (data.inviteTeam?.invites ?? []).filter((i) => i.email.trim() && i.role);
+    invites.forEach((i) =>
+      store.addPendingTeamMember({ email: i.email.trim(), role: i.role, invitedAt: new Date().toISOString() }),
+    );
   }, [user?.orgProfile?.causeArea]);
 
   const advance = useCallback((status: 'completed' | 'skipped') => {
@@ -195,7 +206,7 @@ const SignupWizard: React.FC = () => {
         const finalState = finishWizard(userId, { ...prev, completedSteps, skippedSteps, currentIndex: nextIndex });
         const handedOff = completedSteps.length;
         const skipped = skippedSteps.length;
-        seedCauseArea();
+        seedStoreFromWizardState(prev.data);
         toast.success(
           skipped > 0
             ? `You're all set! ${handedOff} of ${WIZARD_STEP_ORDER.length} steps done — we'll surface the rest in your checklist.`
@@ -209,7 +220,7 @@ const SignupWizard: React.FC = () => {
       }
       return { ...prev, completedSteps, skippedSteps, currentIndex: nextIndex };
     });
-  }, [commitStep, userId, updateUser, navigate, seedCauseArea]);
+  }, [commitStep, userId, updateUser, navigate, seedStoreFromWizardState]);
 
   const goBack = useCallback(() => {
     setState((prev) => ({ ...prev, currentIndex: Math.max(0, prev.currentIndex - 1) }));
@@ -219,11 +230,11 @@ const SignupWizard: React.FC = () => {
     if (!userId) return;
     const finalState = finishWizard(userId, state);
     setState(finalState);
-    seedCauseArea();
+    seedStoreFromWizardState(state.data);
     updateUser({ needsWizard: false });
     toast.success("You're all set — welcome to GoodJobs!", { icon: '🎉', duration: 3500 });
     navigate('/', { replace: true });
-  }, [userId, state, updateUser, navigate, seedCauseArea]);
+  }, [userId, state, updateUser, navigate, seedStoreFromWizardState]);
 
   const isLastStep = state.currentIndex >= totalSteps - 1;
   const isFinishedScreen = state.currentIndex >= totalSteps;

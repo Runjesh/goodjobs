@@ -693,7 +693,7 @@ const Layout: React.FC = () => {
                 <option value="" disabled>Preview as…</option>
                 {(['ed', 'finance', 'programs', 'field', 'board'] as const).map((r) => (
                   <option key={r} value={r}>
-                    {ROLE_META[r].icon} {ROLE_META[r].label}
+                    {ROLE_META[r].icon} {r === 'board' ? 'Board Member (Viewer)' : ROLE_META[r].label}
                   </option>
                 ))}
               </select>

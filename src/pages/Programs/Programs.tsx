@@ -183,6 +183,7 @@ const Programs: React.FC = () => {
 
   const customPrograms = useStore(s => s.customPrograms);
   const addCustomProgram = useStore(s => s.addCustomProgram);
+  const pendingTeamMembers = useStore(s => s.pendingTeamMembers);
   const derivedPrograms = Array.from(new Set(beneficiaries.map(b => b.program).filter(Boolean)));
   const mergedPrograms = Array.from(new Set([...derivedPrograms, ...customPrograms]));
   const programs = mergedPrograms.length > 0 ? mergedPrograms : DEFAULT_PROGRAMS;
@@ -1711,6 +1712,9 @@ const Programs: React.FC = () => {
                     >
                       <option value="">— select team member —</option>
                       {volunteers.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
+                      {pendingTeamMembers.filter(m => !volunteers.some(v => v.name === m.email)).map(m => (
+                        <option key={m.email} value={m.email}>{m.email} (invited)</option>
+                      ))}
                       <option value="__other__">Other (type below)</option>
                     </select>
                     {!volunteers.some(v => v.name === effortForm.staffName) && effortForm.staffName !== '__other__' && (

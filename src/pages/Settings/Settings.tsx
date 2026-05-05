@@ -507,6 +507,12 @@ const Settings: React.FC = () => {
                     <option>Telangana</option><option>Uttar Pradesh</option><option>West Bengal</option>
                   </select>
                 </div>
+                {storedNgoDetails.whatsapp && (
+                  <div className="input-group">
+                    <label className="input-label">WhatsApp Number (from onboarding)</label>
+                    <input className="input-field" readOnly value={storedNgoDetails.whatsapp} style={{ background: 'var(--color-bg-secondary)', cursor: 'default' }} />
+                  </div>
+                )}
                 <button className="btn btn-primary" onClick={handleSaveNgo}><Save size={16} /> Save NGO Details</button>
               </div>
             </div>
