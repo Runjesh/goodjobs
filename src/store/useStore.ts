@@ -138,6 +138,9 @@ export interface CSRCard {
   details?: Record<string, unknown>;
   /** Deal health heuristic (0–100). */
   win_probability?: number;
+  /** ISO date (YYYY-MM-DD) of the next required grant report — used to seed
+   *  compliance records on MoU → Live transition. */
+  report_due_date?: string;
   /** ISO timestamp — last pipeline activity (aligned with backend updated_at in DB mode). */
   last_activity_at?: string;
   updated_at?: string;
@@ -345,8 +348,8 @@ const initialCSRCards: CSRCard[] = [
   { id: 2, company: 'Tata Consultancy Services', amount: 2500000, project: 'Digital Literacy 2026', tags: ['Education', 'Tech'], agent: 'RS', col: 'pitch', date: 'Sent on: Oct 12' },
   { id: 3, company: 'HDFC Bank CSR', amount: 8000000, project: 'Women Livelihood Center', tags: ['Livelihood'], agent: 'AD', col: 'diligence', date: 'Audit pending' },
   { id: 4, company: 'Wipro Care', amount: 1200000, project: 'School Infrastructure', tags: ['Education', 'WASH'], agent: 'PM', col: 'mou', date: 'Signed: Oct 15' },
-  { id: 5, company: 'Mahindra Finance', amount: 4500000, project: 'Farmer Support Init', tags: ['Agriculture'], agent: 'RS', col: 'live', date: 'Report due: Nov 30' },
-  { id: 6, company: 'Infosys Foundation', amount: 6000000, project: 'STEM for Girls', tags: ['Education'], agent: 'AD', col: 'live', date: 'Report due: Dec 15' }
+  { id: 5, company: 'Mahindra Finance', amount: 4500000, project: 'Farmer Support Init', tags: ['Agriculture'], agent: 'RS', col: 'live', date: 'Report due: Nov 30', report_due_date: '2026-11-30' },
+  { id: 6, company: 'Infosys Foundation', amount: 6000000, project: 'STEM for Girls', tags: ['Education'], agent: 'AD', col: 'live', date: 'Report due: Dec 15', report_due_date: '2026-12-15' }
 ];
 
 // Seed beneficiaries are only included in dev builds. Production starts empty

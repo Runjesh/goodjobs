@@ -234,15 +234,18 @@ const CSR: React.FC = () => {
         // triggers the At-Risk Grants Banner on this page.
         if (card.col === 'mou' && col === 'live') {
           const now = new Date();
-          // Use earliest non-released tranche as the grant report due date;
-          // fall back to 90 days if no scheduled tranches are found.
+          // Due date source priority:
+          //  1. card.report_due_date — explicit field set when card is created/edited
+          //  2. earliest non-released tranche for this grant
+          //  3. fallback: now + 90 days
           const nextTranche = grantTranches
             .filter(t => String(t.grantId) === String(card.id) && t.status !== 'released')
             .sort((a, b) => a.expectedDate.localeCompare(b.expectedDate))[0];
-          const dueDate = nextTranche
-            ? new Date(nextTranche.expectedDate)
-            : new Date(now.getTime() + 90 * 86_400_000);
-          const expiryIso = dueDate.toISOString().slice(0, 10);
+          const dueDateRaw = card.report_due_date
+            || nextTranche?.expectedDate
+            || new Date(now.getTime() + 90 * 86_400_000).toISOString().slice(0, 10);
+          const dueDate = new Date(dueDateRaw);
+          const expiryIso = dueDateRaw.slice(0, 10);
 
           // 1) Compliance record of type grant_report — surfaces in Compliance HQ
           //    and AtRiskGrantsBanner. Caller-provided id ensures the subsequent
@@ -279,10 +282,20 @@ const CSR: React.FC = () => {
             updatedAt: now.toISOString(),
           };
           addTask(compTask);
-          toast.success(
-            `Grant report compliance record created — due ${expiryIso}. ` +
-            'Check Compliance HQ for full tracking.',
-            { duration: 5000 },
+          // Toast with deeplink to Compliance HQ
+          toast(
+            (t) => (
+              <span style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <strong>Grant report record created — due {expiryIso}</strong>
+                <button
+                  style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: '0.75rem', alignSelf: 'flex-start' }}
+                  onClick={() => { navigate('/compliance?alert=true'); toast.dismiss(t.id); }}
+                >
+                  View in Compliance HQ →
+                </button>
+              </span>
+            ),
+            { duration: 6000, icon: '📋' },
           );
         }
       }
@@ -349,6 +362,7 @@ const CSR: React.FC = () => {
           col: editCard.col,
           date: editCard.date || 'Just added',
           details: packCsrDetails(editExtra),
+          win_probability: editCard.win_probability ?? null,
         }),
       });
       if (res.ok) {
@@ -931,8 +945,11 @@ const CSR: React.FC = () => {
                           );
                         })()}
                         {kpi.reportReadinessPct > 0 && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.reportReadinessPct >= 70 ? '#f0fdf4' : '#fef9c3', color: kpi.reportReadinessPct >= 70 ? '#166534' : '#854d0e', borderRadius: 4, padding: '1px 5px' }}>
-                            {kpi.reportReadinessPct}% ready
+                          <span
+                            title="% of enrolled beneficiaries with a measured outcome in the last 90 days (data readiness)"
+                            style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.reportReadinessPct >= 70 ? '#f0fdf4' : '#fef9c3', color: kpi.reportReadinessPct >= 70 ? '#166534' : '#854d0e', borderRadius: 4, padding: '1px 5px' }}
+                          >
+                            {kpi.reportReadinessPct}% data
                           </span>
                         )}
                         {kpi.nextReportDue && (
