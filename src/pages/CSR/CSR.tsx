@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight, Users, CalendarClock } from 'lucide-react';
-import { improvementPct } from '../../utils/outcomes';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import type { Task } from '../../utils/tasks';
@@ -87,8 +86,9 @@ function computeWinProbability(
 interface CardKpi {
   programLabel: string;
   beneficiaryCount: number;
-  outcomeAchievementPct: number | null;
-  reportReadinessPct: number;
+  /** % of enrolled beneficiaries with at least one outcome recorded in the
+   *  last 90 days — "outcomes recorded vs enrolled" per spec. */
+  outcomeAchievementPct: number;
   nextReportDue: string | null;
   healthStatus: 'healthy' | 'at_risk' | 'overdue';
 }
@@ -796,39 +796,32 @@ const CSR: React.FC = () => {
         {columns.map(col => {
           const colCards = csrCards.filter(c => c.col === col.id);
           const colTotal = colCards.reduce((s, c) => s + c.amount, 0);
-          const showKpi = col.id === 'mou' || col.id === 'live';
 
-          const kpiByCard = showKpi
-            ? new Map<string, CardKpi | null>(colCards.map(card => {
-                const rollups = selectGrantProgramRollups(String(card.id), {
-                  links: programGrantLinks as ProgramGrantLink[],
-                  beneficiaries,
-                  outcomes: beneficiaryOutcomes,
-                  periodDays: 90,
-                });
-                const primary = rollups.find(r => r.role !== 'co-funder') ?? rollups[0];
-                if (!primary) return [String(card.id), null];
-                const health = grantHealthForProgram(primary.programId, String(card.id), {
-                  budgets: programBudgets,
-                  tranches: grantTranches,
-                  complianceLinks: complianceGrantLinks,
-                  docs: complianceDocs,
-                });
-                const progOutcomes = beneficiaryOutcomes.filter(o => o.programId === primary.programId);
-                const outcomeAchievementPct = progOutcomes.length > 0
-                  ? Math.round(progOutcomes.reduce((s, o) => s + Math.max(0, improvementPct(o)), 0) / progOutcomes.length)
-                  : null;
-                const kpi: CardKpi = {
-                  programLabel: primary.programLabel,
-                  beneficiaryCount: primary.beneficiaryCount,
-                  outcomeAchievementPct,
-                  reportReadinessPct: primary.reportReadinessPct,
-                  nextReportDue: health.nextReportDue,
-                  healthStatus: health.status,
-                };
-                return [String(card.id), kpi];
-              }))
-            : new Map<string, CardKpi | null>();
+          // Compute KPI for every card in this column that has a linked programme.
+          const kpiByCard = new Map<string, CardKpi | null>(colCards.map(card => {
+            const rollups = selectGrantProgramRollups(String(card.id), {
+              links: programGrantLinks as ProgramGrantLink[],
+              beneficiaries,
+              outcomes: beneficiaryOutcomes,
+              periodDays: 90,
+            });
+            const primary = rollups.find(r => r.role !== 'co-funder') ?? rollups[0];
+            if (!primary) return [String(card.id), null];
+            const health = grantHealthForProgram(primary.programId, String(card.id), {
+              budgets: programBudgets,
+              tranches: grantTranches,
+              complianceLinks: complianceGrantLinks,
+              docs: complianceDocs,
+            });
+            const kpi: CardKpi = {
+              programLabel: primary.programLabel,
+              beneficiaryCount: primary.beneficiaryCount,
+              outcomeAchievementPct: primary.reportReadinessPct,
+              nextReportDue: health.nextReportDue,
+              healthStatus: health.status,
+            };
+            return [String(card.id), kpi];
+          }));
 
           return (
             <div key={col.id} className={`kanban-column ${col.class}`}
@@ -937,20 +930,12 @@ const CSR: React.FC = () => {
                             <Users size={8} /> {kpi.beneficiaryCount}
                           </span>
                         )}
-                        {kpi.outcomeAchievementPct != null && (
+                        {kpi.outcomeAchievementPct > 0 && (
                           <span
-                            title="Avg % improvement from baseline across measured outcomes"
+                            title="% of enrolled beneficiaries with an outcome recorded in the last 90 days (outcomes recorded vs enrolled)"
                             style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.outcomeAchievementPct >= 70 ? '#f0fdf4' : kpi.outcomeAchievementPct >= 30 ? '#fef9c3' : '#fee2e2', color: kpi.outcomeAchievementPct >= 70 ? '#166534' : kpi.outcomeAchievementPct >= 30 ? '#854d0e' : '#991b1b', borderRadius: 4, padding: '1px 5px' }}
                           >
-                            {kpi.outcomeAchievementPct}% outcome
-                          </span>
-                        )}
-                        {kpi.reportReadinessPct > 0 && (
-                          <span
-                            title="% of enrolled beneficiaries with a measured outcome in the last 90 days"
-                            style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.reportReadinessPct >= 70 ? '#f0fdf4' : '#fef9c3', color: kpi.reportReadinessPct >= 70 ? '#166534' : '#854d0e', borderRadius: 4, padding: '1px 5px' }}
-                          >
-                            {kpi.reportReadinessPct}% data
+                            {kpi.outcomeAchievementPct}% outcomes
                           </span>
                         )}
                         {kpi.nextReportDue && (
