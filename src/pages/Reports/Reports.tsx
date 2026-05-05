@@ -281,7 +281,7 @@ const Reports: React.FC = () => {
         assignee: 'Finance Officer',
         relatedEntityType: 'grant' as const,
         relatedEntityId: id,
-        meta: { link: `/reports?focus=${id}`, reportId: id, reportTitle },
+        meta: { link: `/reports?report=${id}`, reportId: id, reportTitle },
         createdAt: nowIso,
         updatedAt: nowIso,
       });
@@ -298,7 +298,7 @@ const Reports: React.FC = () => {
         assignee: 'Programme Manager',
         relatedEntityType: 'grant' as const,
         relatedEntityId: id,
-        meta: { link: `/reports?focus=${id}`, reportId: id, reportTitle },
+        meta: { link: `/reports?report=${id}`, reportId: id, reportTitle },
         createdAt: nowIso,
         updatedAt: nowIso,
       });
