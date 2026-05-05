@@ -1001,7 +1001,7 @@ const Finance: React.FC = () => {
       {eightyGMissing && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 1rem', marginBottom: '1rem', background: '#fef9c3', border: '1px solid #fde047', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', color: '#713f12' }}>
           <AlertCircle size={15} color="#ca8a04" />
-          <span>No 80G certificate found in the Compliance Registry — receipts will use the Settings fallback number. <strong>Upload your 80G document in Compliance HQ</strong> to ensure receipts use the authoritative registration number.</span>
+          <span>No 80G certificate found in the Compliance Registry — receipts will show a blank registration number. <strong>Upload your 80G certificate in Compliance HQ</strong> to populate this automatically.</span>
         </div>
       )}
 

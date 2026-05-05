@@ -192,7 +192,7 @@ const Settings: React.FC = () => {
       const res = await apiFetch('/settings/ngo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: ngoName, reg_no: regNo || null, fcra_reg: fcraReg || null, pan: panNo || null, eighty_g_no: eightyGNo || null, state: ngoState || null }),
+        body: JSON.stringify({ name: ngoName, reg_no: regNo || null, fcra_reg: fcraReg || null, pan: panNo || null, state: ngoState || null }),
       });
       if (!res.ok) throw new Error('ngo');
       const data = await res.json().catch(() => ({}));
@@ -200,12 +200,13 @@ const Settings: React.FC = () => {
       // Single source of truth: write to Zustand so Finance, Compliance, and
       // every other module always reads the same canonical org identity.
       setNgoDetails({
-        name:        data?.ngo?.name        || ngoName,
-        reg_no:      data?.ngo?.reg_no      ?? regNo,
-        fcra_reg:    data?.ngo?.fcra_reg    ?? fcraReg,
-        pan:         data?.ngo?.pan         ?? panNo,
-        eighty_g_no: data?.ngo?.eighty_g_no ?? eightyGNo,
-        state:       data?.ngo?.state       ?? ngoState,
+        name:    data?.ngo?.name    || ngoName,
+        reg_no:  data?.ngo?.reg_no  ?? regNo,
+        fcra_reg: data?.ngo?.fcra_reg ?? fcraReg,
+        pan:     data?.ngo?.pan     ?? panNo,
+        state:   data?.ngo?.state   ?? ngoState,
+        // eighty_g_no is intentionally omitted — it is the Compliance Registry's
+        // responsibility (single source of truth). Finance reads it from there.
       });
       toast.success('NGO details saved.');
     } catch {
