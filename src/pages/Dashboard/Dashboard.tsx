@@ -847,6 +847,8 @@ const Dashboard: React.FC = () => {
 
   const taskItems = useMemo<PriorityItem[]>(() => {
     const routeFor = (t: Task): string | undefined => {
+      // Explicit deep-link in meta takes precedence (e.g. report-stage notifications).
+      if (t.meta?.link && typeof t.meta.link === 'string') return t.meta.link as string;
       if (!t.relatedEntityType || !t.relatedEntityId) return '/tasks';
       const id = encodeURIComponent(t.relatedEntityId);
       switch (t.relatedEntityType) {

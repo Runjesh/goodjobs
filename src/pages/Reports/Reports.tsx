@@ -279,8 +279,6 @@ const Reports: React.FC = () => {
         sourceAgent: 'Reports',
         sourceIntentId: `report-review-finance-${id}`,
         assignee: 'Finance Officer',
-        relatedEntityType: 'grant' as const,
-        relatedEntityId: id,
         meta: { link: `/reports?report=${id}`, reportId: id, reportTitle },
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -296,8 +294,6 @@ const Reports: React.FC = () => {
         sourceAgent: 'Reports',
         sourceIntentId: `report-review-pm-${id}`,
         assignee: 'Programme Manager',
-        relatedEntityType: 'grant' as const,
-        relatedEntityId: id,
         meta: { link: `/reports?report=${id}`, reportId: id, reportTitle },
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -453,11 +449,11 @@ const Reports: React.FC = () => {
       }
       toast.success('AI draft ready — downloading now.');
     } catch {
-      succeeded = true;
-      if (report) {
-        setDraftReadyIds(prev => new Set(prev).add(report.id));
-      }
-      toast.success('AI report draft ready — check your downloads.');
+      // The mock backend intercepts all requests in dev, so catch only fires
+      // on truly unexpected errors (e.g. JSON parse failure). Do not mark
+      // succeeded=true here — failed drafts must not consume quota or show
+      // a "Draft ready" badge. Show an error toast instead.
+      toast.error('Draft failed — please try again.');
     } finally {
       if (succeeded && user?.ngoId) recordReportDraft(user.ngoId);
       setDraftingReport(null);

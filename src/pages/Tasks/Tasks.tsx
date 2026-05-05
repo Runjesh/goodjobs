@@ -39,6 +39,8 @@ const RECURRENCE_OPTIONS: { id: TaskRecurrence; label: string }[] = [
 ];
 
 function entityRoute(t: Task): string | null {
+  // If the task carries an explicit deep-link in meta, honour it first.
+  if (t.meta?.link && typeof t.meta.link === 'string') return t.meta.link as string;
   if (!t.relatedEntityType || !t.relatedEntityId) return null;
   const id = encodeURIComponent(t.relatedEntityId);
   switch (t.relatedEntityType) {
