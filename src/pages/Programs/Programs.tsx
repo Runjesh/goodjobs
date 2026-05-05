@@ -504,7 +504,7 @@ const Programs: React.FC = () => {
 
   const isInactive = (benId: string) => {
     const days = inactiveMap.get(benId);
-    return days === null || days > 30;
+    return days === null || days === undefined || days > 30;
   };
 
   const inactiveCount = useMemo(
@@ -963,6 +963,7 @@ const Programs: React.FC = () => {
                                 onClick={() => {
                                   setEditBenExtra(unpackBenDetails(ben.details));
                                   setEditBen(ben);
+                                  setEditMissingFields(new Set());
                                   setShowEditBen(true);
                                 }}
                               >
