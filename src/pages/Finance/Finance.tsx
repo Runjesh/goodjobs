@@ -450,7 +450,14 @@ const Finance: React.FC = () => {
   };
 
   const fcraGrants = grants.filter((g: any) => (g?.name || '').toString().toLowerCase().includes('fcra'));
-  const fcraTotal = fcraGrants.reduce((s: number, g: any) => s + (Number(g.total) || 0), 0);
+  // Primary fcraTotal: sum of grant totals for FCRA-tagged grants.
+  // Fallback: sum of Income journal entries tagged to the FCRA fund — this
+  // keeps the guard accurate even when grants haven't been loaded or are stale.
+  const fcraGrantTotal = fcraGrants.reduce((s: number, g: any) => s + (Number(g.total) || 0), 0);
+  const fcraJournalTotal = journalEntries
+    .filter(je => je.entryType === 'Income' && je.fund === 'FCRA')
+    .reduce((s, je) => s + Math.abs(Number(je.amount) || 0), 0);
+  const fcraTotal = fcraGrantTotal > 0 ? fcraGrantTotal : fcraJournalTotal;
   const fcraAdminSpent = fcraGrants.reduce((s: number, g: any) => s + (Number(g.spent) || 0), 0);
   const fcraAdminLimit = fcraTotal * 0.2;
   const fcraAdminPercent = fcraAdminLimit > 0 ? (fcraAdminSpent / fcraAdminLimit) * 100 : 0;
@@ -1293,7 +1300,12 @@ const Finance: React.FC = () => {
               </div>
               <div className="fcra-gauge-meta">
                 <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 500 }}>of total FCRA funds used as admin overhead</div>
-                <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: 2 }}>Statutory cap under FCRA 2010: 20%</div>
+                <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: 2 }}>
+                  Statutory cap (FCRA 2010): <strong>20%</strong>
+                  &nbsp;·&nbsp;
+                  Internal pre-save guard: <strong style={{ color: '#D97706' }}>18%</strong>
+                  &nbsp;(2% buffer to stay comfortably within the legal limit)
+                </div>
               </div>
             </div>
             <div className="fcra-gauge-bar-wrap">
