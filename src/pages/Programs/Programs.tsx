@@ -777,7 +777,11 @@ const Programs: React.FC = () => {
                               toast.success(`MIS submission confirmed for ${match.name}.`);
                             }
                           } else {
-                            toast.success('MIS submission approved.');
+                            toast('No beneficiary matched. Opening Edit to link or create a record.', { icon: 'ℹ️', duration: 4000 });
+                            setEditBen(null as any);
+                            setShowEditBen(false);
+                            decideMisReviewIntent(intent.id, 'approved');
+                            return;
                           }
                           decideMisReviewIntent(intent.id, 'approved');
                         }}
@@ -1531,13 +1535,17 @@ const Programs: React.FC = () => {
                     <option value="other">Other</option>
                     <option value="prefer_not">Prefer not to say</option>
                   </select>
+                  {editMissingFields.has('gender') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="edit-aadhaar" checked={editBen.aadhaar} onChange={e => setEditBen({ ...editBen, aadhaar: e.target.checked })} />
-                <label htmlFor="edit-aadhaar" style={{ fontSize: '0.875rem', color: editMissingFields.has('aadhaar') ? '#d97706' : undefined }}>
-                  Aadhaar verified {editMissingFields.has('aadhaar') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
-                </label>
+              <div>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="edit-aadhaar" checked={editBen.aadhaar} onChange={e => setEditBen({ ...editBen, aadhaar: e.target.checked })} />
+                  <label htmlFor="edit-aadhaar" style={{ fontSize: '0.875rem', color: editMissingFields.has('aadhaar') ? '#d97706' : undefined }}>
+                    Aadhaar verified {editMissingFields.has('aadhaar') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
+                  </label>
+                </div>
+                {editMissingFields.has('aadhaar') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
               </div>
               <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -1546,12 +1554,14 @@ const Programs: React.FC = () => {
                       Phone {editMissingFields.has('phone') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
                     </label>
                     <input type="tel" className="input-field" value={editBenExtra.phone} onChange={e => setEditBenExtra({ ...editBenExtra, phone: e.target.value })} style={editMissingFields.has('phone') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
+                    {editMissingFields.has('phone') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                   </div>
                   <div className="input-group" style={{ marginBottom: 0 }}>
                     <label className="input-label" style={editMissingFields.has('email') ? { color: '#d97706' } : {}}>
                       Email {editMissingFields.has('email') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
                     </label>
                     <input type="email" className="input-field" value={editBenExtra.email} onChange={e => setEditBenExtra({ ...editBenExtra, email: e.target.value })} style={editMissingFields.has('email') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
+                    {editMissingFields.has('email') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                   </div>
                 </div>
                 <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
@@ -1559,6 +1569,7 @@ const Programs: React.FC = () => {
                     Date of birth {editMissingFields.has('dob') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
                   </label>
                   <input type="date" className="input-field" value={editBenExtra.dob} onChange={e => setEditBenExtra({ ...editBenExtra, dob: e.target.value })} style={editMissingFields.has('dob') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
+                  {editMissingFields.has('dob') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                 </div>
               </div>
               <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
@@ -1576,12 +1587,14 @@ const Programs: React.FC = () => {
                       <option value="other_org">Partner</option>
                       <option value="other">Other</option>
                     </select>
+                    {editMissingFields.has('referralSource') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                   </div>
                   <div className="input-group" style={{ marginBottom: 0 }}>
                     <label className="input-label" style={editMissingFields.has('referralDetail') ? { color: '#d97706' } : {}}>
                       Referral detail {editMissingFields.has('referralDetail') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
                     </label>
                     <input type="text" className="input-field" value={editBenExtra.referralDetail} onChange={e => setEditBenExtra({ ...editBenExtra, referralDetail: e.target.value })} style={editMissingFields.has('referralDetail') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
+                    {editMissingFields.has('referralDetail') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                   </div>
                 </div>
                 <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
@@ -1589,6 +1602,7 @@ const Programs: React.FC = () => {
                     Vulnerability tags {editMissingFields.has('vulnerabilityTags') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
                   </label>
                   <input type="text" className="input-field" value={editBenExtra.vulnerabilityTags} onChange={e => setEditBenExtra({ ...editBenExtra, vulnerabilityTags: e.target.value })} style={editMissingFields.has('vulnerabilityTags') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
+                  {editMissingFields.has('vulnerabilityTags') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                 </div>
               </div>
               <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--color-border-light)' }}>
@@ -1605,12 +1619,14 @@ const Programs: React.FC = () => {
                       <option value="birth_cert">Birth certificate</option>
                       <option value="other">Other</option>
                     </select>
+                    {editMissingFields.has('idDocType') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                   </div>
                   <div className="input-group" style={{ marginBottom: 0 }}>
                     <label className="input-label" style={editMissingFields.has('idDocRef') ? { color: '#d97706' } : {}}>
                       ID reference {editMissingFields.has('idDocRef') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
                     </label>
                     <input type="text" className="input-field" value={editBenExtra.idDocRef} onChange={e => setEditBenExtra({ ...editBenExtra, idDocRef: e.target.value })} style={editMissingFields.has('idDocRef') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
+                    {editMissingFields.has('idDocRef') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                   </div>
                 </div>
                 <div className="input-group" style={{ marginBottom: 0, marginTop: '0.75rem' }}>
@@ -1618,6 +1634,7 @@ const Programs: React.FC = () => {
                     Case notes {editMissingFields.has('notes') && <span style={{ fontSize: '0.68rem' }}>⚠</span>}
                   </label>
                   <textarea className="input-field" rows={2} value={editBenExtra.notes} onChange={e => setEditBenExtra({ ...editBenExtra, notes: e.target.value })} style={editMissingFields.has('notes') ? { borderColor: '#d97706', background: '#fffbeb' } : {}} />
+                  {editMissingFields.has('notes') && <div style={{ fontSize: '0.65rem', color: '#d97706', marginTop: 2 }}>Required for 80% score</div>}
                 </div>
                 <div className="flex items-center gap-2" style={{ marginTop: '0.5rem' }}>
                   <input type="checkbox" id="edit-consentBen" checked={editBenExtra.consentData} onChange={e => setEditBenExtra({ ...editBenExtra, consentData: e.target.checked })} />
@@ -1667,18 +1684,42 @@ const Programs: React.FC = () => {
             >
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Staff member *</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  required
-                  list="effort-staff-list"
-                  value={effortForm.staffName}
-                  onChange={e => setEffortForm(prev => ({ ...prev, staffName: e.target.value }))}
-                  placeholder="Name of staff / volunteer"
-                />
-                <datalist id="effort-staff-list">
-                  {volunteers.map(v => <option key={v.id} value={v.name} />)}
-                </datalist>
+                {volunteers.length > 0 ? (
+                  <>
+                    <select
+                      className="input-field"
+                      required
+                      value={volunteers.some(v => v.name === effortForm.staffName) ? effortForm.staffName : (effortForm.staffName ? '__other__' : '')}
+                      onChange={e => {
+                        if (e.target.value === '__other__') setEffortForm(prev => ({ ...prev, staffName: '' }));
+                        else setEffortForm(prev => ({ ...prev, staffName: e.target.value }));
+                      }}
+                    >
+                      <option value="">— select team member —</option>
+                      {volunteers.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
+                      <option value="__other__">Other (type below)</option>
+                    </select>
+                    {!volunteers.some(v => v.name === effortForm.staffName) && effortForm.staffName !== '__other__' && (
+                      <input
+                        type="text"
+                        className="input-field"
+                        style={{ marginTop: 6 }}
+                        value={effortForm.staffName}
+                        onChange={e => setEffortForm(prev => ({ ...prev, staffName: e.target.value }))}
+                        placeholder="Enter name"
+                      />
+                    )}
+                  </>
+                ) : (
+                  <input
+                    type="text"
+                    className="input-field"
+                    required
+                    value={effortForm.staffName}
+                    onChange={e => setEffortForm(prev => ({ ...prev, staffName: e.target.value }))}
+                    placeholder="Name of staff member"
+                  />
+                )}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div className="input-group" style={{ marginBottom: 0 }}>
