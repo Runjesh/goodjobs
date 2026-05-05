@@ -29,6 +29,23 @@ const Compliance: React.FC = () => {
   const { complianceDocs, setComplianceDocs } = useStore();
   const ngoDetails = useStore(s => s.ngoDetails);
   const [pageTab, setPageTab] = useState('vault');
+
+  // ── Deep-link query-param consumers ────────────────────────────────────────
+  // Dashboard brief links navigate here with ?doc=<type>&alert=true so the
+  // right tab opens and expiring/expired documents are visually highlighted.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const alert  = params.get('alert');
+    const docTab = params.get('tab');
+    if (alert === 'true') {
+      // Vault is the default tab; nothing to switch, but mark for banner display.
+      setPageTab('vault');
+    }
+    if (docTab && ['vault', 'board', 'filings', 'dpdp'].includes(docTab)) {
+      setPageTab(docTab);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [showDocModal, setShowDocModal] = useState(false);
   const [docForm, setDocForm] = useState({
     name: '',

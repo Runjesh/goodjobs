@@ -256,6 +256,18 @@ const Finance: React.FC = () => {
     onConfirm: () => void;
   }>(null);
 
+  // ── Deep-link query-param consumers ────────────────────────────────────────
+  // Dashboard clawback-risk links navigate here with ?filter=clawback&grantId=<id>
+  // so the matching grant is highlighted in the grants section.
+  const [highlightGrantId, setHighlightGrantId] = useState<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('filter') === 'clawback') {
+      setHighlightGrantId(params.get('grantId'));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Feature 5: bulk receipt generation ───────────────────────────────────
   const [bulkReceiptBusy, setBulkReceiptBusy] = useState(false);
 
@@ -1470,6 +1482,13 @@ const Finance: React.FC = () => {
                         alignItems: 'center',
                         fontSize: '0.82rem',
                         borderBottom: '1px solid var(--color-border-light)',
+                        // Highlight grant targeted by ?filter=clawback&grantId= deep link
+                        ...(highlightGrantId && String(grant.id) === String(highlightGrantId) ? {
+                          background: '#fff7ed',
+                          outline: '2px solid #f97316',
+                          outlineOffset: '-2px',
+                          borderRadius: '4px',
+                        } : {}),
                       }}
                     >
                       <div style={{ minWidth: 0 }}>

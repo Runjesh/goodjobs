@@ -63,6 +63,21 @@ const CRM: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // ── Deep-link query-param consumers ────────────────────────────────────────
+  // Dashboard brief links navigate here with context params so the right filter
+  // is pre-applied and the donor detail panel opens on the right record.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const filter = params.get('filter');
+    const donorId = params.get('donor');
+    if (filter === 'lapsed')           setActiveFilter('Dormant');
+    else if (filter === 'lapse-risk')  setActiveFilter('Lapse Risk');
+    else if (filter === 'touchpoints-due') setActiveFilter('Renewal');
+    else if (filter === 'impact-due')  setActiveFilter('Stewardship');
+    if (donorId) setActiveDonorId(donorId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [showAddContact, setShowAddContact] = useState(false);
   const [showComposer, setShowComposer] = useState(false);
   const [showCSVImport, setShowCSVImport] = useState(false);

@@ -99,6 +99,21 @@ const Funding: React.FC = () => {
   const { can } = useAuth();
   const { donors, transactions, campaigns, csrCards, complianceDocs } = useStore();
 
+  // ── Deep-link query-param consumers ────────────────────────────────────────
+  // Dashboard brief links navigate here with context params to pre-open the
+  // correct module tab (receipts → donors, near-goal/live → fundraising, clawback → finance).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get('action');
+    const filter = params.get('filter');
+    const stage  = params.get('stage');
+    if (action === 'receipts')          setActiveTab('donors');
+    else if (filter === 'near-goal')    setActiveTab('fundraising');
+    else if (filter === 'clawback')     setActiveTab('finance');
+    else if (stage === 'live')          setActiveTab('fundraising');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const thisMonthTotal = (() => {
     const start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
     return transactions

@@ -208,6 +208,22 @@ const Programs: React.FC = () => {
   const [benSort, setBenSort] = useState<'attention' | 'alpha'>('attention');
   const [activeProgFilter, setActiveProgFilter] = useState<string | null>(null);
   const [benStatusFilter, setBenStatusFilter] = useState<'all' | 'inactive'>('all');
+
+  // ── Deep-link query-param consumers ────────────────────────────────────────
+  // Dashboard brief links navigate here with ?tab= and ?action= context params
+  // so the right tab/modal opens automatically on arrival.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab    = params.get('tab');
+    const action = params.get('action');
+    const filter = params.get('filter');
+    if (tab === 'forms')  setActiveTab('forms');
+    else if (tab === 'toc') setActiveTab('toc');
+    else if (tab === 'mis' || tab === 'outcomes') setActiveTab('mis'); // outcomes live inside MIS tab
+    if (action === 'enroll' || action === 'mis') setShowModal(true);
+    if (filter === 'inactive') setBenStatusFilter('inactive');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [showLogService, setShowLogService] = useState(false);
   const [logServiceSearch, setLogServiceSearch] = useState('');
   const [logServiceType, setLogServiceType] = useState('service_visit');
