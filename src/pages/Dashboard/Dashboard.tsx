@@ -266,7 +266,7 @@ function deriveFromStore(
     if (!d.expiry) return false;
     const msLeft = new Date(d.expiry).getTime() - nowMs;
     const daysLeft = msLeft / 86_400_000;
-    return daysLeft <= 14; // includes already-expired (negative)
+    return daysLeft <= 14 && daysLeft >= -90; // <=14 days ahead; overdue up to 90d back
   });
   const farExpiring = complianceDocs.filter(d => {
     if (!d.expiry) return false;
