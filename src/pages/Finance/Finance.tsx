@@ -520,9 +520,23 @@ const Finance: React.FC = () => {
         : undefined;
     // Production: use the DB-sequence number from the server response.
     // Mock / offline: fall back to the localStorage-generated clientReceiptNo.
-    const receiptNo: string | undefined = entryToSave.type === 'Income'
-      ? (serverReceiptNo ?? clientReceiptNo)
-      : undefined;
+    // If in production mode and the server didn't return a receipt number, warn —
+    // this indicates the backend hasn't implemented the sequence endpoint yet.
+    let receiptNo: string | undefined;
+    if (entryToSave.type === 'Income') {
+      if (serverReceiptNo) {
+        receiptNo = serverReceiptNo;
+      } else if (clientReceiptNo) {
+        // clientReceiptNo is only set when isMockEnabled() — so this branch only
+        // executes in mock/offline mode. In production the client never generates one.
+        receiptNo = clientReceiptNo;
+      } else {
+        // Production + no server receipt number: backend hasn't implemented the
+        // /finance/issue-receipt sequence yet. Surface a clear warning.
+        toast('Receipt number not issued — backend sequence endpoint not yet implemented.', { icon: '⚠️', duration: 5000 });
+        receiptNo = undefined;
+      }
+    }
 
     const { source, id } = resolvePersistedJournalEntryId(payload);
     const tag = entryToSave.grantId && entryToSave.budgetHeadId
@@ -939,7 +953,7 @@ const Finance: React.FC = () => {
             disabled={bulkReceiptBusy}
             title="Generate 80G receipts for all income entries this month with a linked donor"
           >
-            <PackageOpen size={16} /> {bulkReceiptBusy ? 'Generating…' : 'Pending Receipts'}
+            <PackageOpen size={16} /> {bulkReceiptBusy ? 'Generating…' : 'Generate All Pending Receipts'}
           </button>
           <button className="btn btn-primary" onClick={() => setShowEntryModal(true)}>
             <Plus size={16} /> New Journal Entry
@@ -1691,10 +1705,11 @@ const Finance: React.FC = () => {
                       setEntry(prev => ({
                         ...prev,
                         donorId: match ? match.id : '',
-                        // Auto-fill receipt fields from the linked CRM donor so the
-                        // 80G receipt has the correct name + PAN without manual entry.
-                        receiptDonorName: match ? match.name : prev.receiptDonorName,
-                        receiptDonorPan:  match ? (match.pan || '') : prev.receiptDonorPan,
+                        // Auto-fill receipt fields from the linked CRM donor.
+                        // When the donor link is cleared (match is undefined), reset
+                        // both fields to empty so stale PAN data isn't retained.
+                        receiptDonorName: match ? match.name : '',
+                        receiptDonorPan:  match ? (match.pan || '') : '',
                       }));
                     }}
                   />
