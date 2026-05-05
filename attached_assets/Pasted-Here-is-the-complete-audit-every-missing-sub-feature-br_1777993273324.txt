@@ -1,0 +1,419 @@
+Here is the complete audit — every missing sub-feature, broken connection, and incomplete flow inside what you have already built.
+
+***
+
+## The Core Problem: 7 Islands With No Bridges
+
+Every major section works in isolation. The product has data but no **data flow**. A donor exists. A programme exists. A grant exists. But none of them know about each other. Here is every broken bridge. [linkedin](https://www.linkedin.com/posts/marlingwilliams_nonprofitoperations-intentionaltechnology-activity-7432175951918055425-W-Qw)
+
+***
+
+## Section 1 — Auth & Onboarding: 6 Missing Pieces
+
+**What's built:** Signup, wizard, demo login, role-based access.
+
+**What's missing:**
+
+### 1.1 — Wizard data does not seed the rest of the app
+The wizard collects org profile, first programme, team, beneficiaries, and WhatsApp. But after completion:
+- The programme created in Step 2 does not appear pre-selected when enrolling beneficiaries
+- The team members invited in Step 3 do not appear in the task assignment dropdown
+- The WhatsApp number connected in Step 5 is not shown in Settings → NGO Details
+- The cause area selected in signup is never used again (should seed AI grant matching in Section 6)
+
+**Fix:** After wizard completion, write all five steps into the Zustand store simultaneously and fire a `onboardingComplete` event that every section subscribes to.
+
+### 1.2 — Demo login shows ED view but role-switching is absent
+You can log in as ED but cannot switch to "log in as Field Staff" or "log in as Finance Officer" without logging out and back in.
+
+**Fix:** Add a **"Switch Role" dropdown** in the demo environment header — one click re-renders the entire app as that role. Critical for pitching the role-appropriate access story.
+
+### 1.3 — Email verification has no resend flow
+If the verification email is missed, there is no resend button on the verification waiting screen.
+
+### 1.4 — Trial pill shows days remaining but has no "what happens at expiry" tooltip
+Hovering or clicking the trial pill should show: what features are locked at Starter, what data is preserved, and a one-click upgrade link.
+
+### 1.5 — No post-wizard GetStartedChecklist connected to real actions
+The checklist exists but its items are not connected to actual completion — checking "Add first donor" does not tick when a donor is actually added.
+
+**Fix:** Each checklist item should watch the Zustand store for the relevant record count. `donors.length > 0` → tick "Add first donor" automatically.
+
+### 1.6 — Role permissions block fields but don't explain why
+When a Field Staff user sees a disabled button, there is no tooltip explaining: "This action requires Programme Manager access." Silent blocking creates confusion.
+
+***
+
+## Section 2 — Dashboard (Today Screen): 5 Missing Pieces
+
+**What's built:** Morning brief, quick actions, trial pill.
+
+**What's missing:**
+
+### 2.1 — Morning brief items are not clickable into context
+The morning brief lists "Overdue grants — 2" but clicking it does nothing (or navigates to the Grants list top-level). It should navigate directly to the specific overdue grant card.
+
+**Fix:** Every morning brief item needs a `deep_link` — the exact URL with filters pre-applied:
+```
+"Overdue grants" → /grants?stage=live&filter=overdue
+"Donor follow-up: Tata Trusts" → /crm/donors/{id}?highlight=followup
+"FCRA document expires in 7 days" → /compliance?doc=fcra&alert=true
+```
+
+### 2.2 — Quick action tiles don't carry context forward
+"Enroll a beneficiary" opens the enrollment modal with all fields blank. It should pre-fill the programme if you were viewing a programme before clicking Today.
+
+### 2.3 — No "Going Well" section
+The spec mentions a "Going Well" section (yesterday's wins, campaign progress). This is completely absent — the dashboard only shows problems, never strengths. NGO staff need morale signals as much as urgency signals.
+
+### 2.4 — Morning brief does not refresh after actions are taken
+If you approve an intent from Agent HQ, the dashboard's morning brief still shows it as pending until you manually refresh.
+
+**Fix:** After any action in the app, dispatch a `briefInvalidate` event. The dashboard re-fetches the brief (from mock or backend) within 2 seconds.
+
+### 2.5 — No role-specific shortcut customisation
+All roles see the same 4 quick action tiles. A Field Staff user should see "Log MIS Entry" and "View My Tasks." A Finance Officer should see "Log Transaction" and "Generate Receipts." These should be role-derived from AuthContext.
+
+***
+
+## Section 3 — CRM (Donor Management): 8 Missing Pieces
+
+**What's built:** Donor list, lifecycle stages, touchpoints, propensity scoring, outreach sends.
+
+**What's missing:**
+
+### 3.1 — Donor record has no connection to transactions
+A donor profile exists. A transaction ledger exists. But clicking a donor does not show their donation history from the Finance section. These are two separate data stores with no join.
+
+**Fix:** `transactions.filter(t => t.donor_id === donor.id)` — render these as a "Giving History" tab on the donor profile. Every transaction should have a `donor_id` field set at the time of entry.
+
+### 3.2 — Donor lifecycle stage is shown but never auto-advances
+The five stages (New → Active → Lapsing → Lapsed → Major) are displayed but they are static labels, not computed values. If a donor gave today, they are still shown as "Lapsing" until someone manually changes it.
+
+**Fix:** Compute stage dynamically from `last_gift_date` in `donorLifecycle.ts` every time the donor record is rendered. The stage badge should never be a stored field — it should always be derived.
+
+```typescript
+// donorLifecycle.ts — this function already exists but is it wired to the badge?
+export function computeStage(donor: Donor): DonorStage {
+  const daysSince = daysSinceLastGift(donor.last_gift_date)
+  if (donor.total_given >= MAJOR_THRESHOLD) return 'Major'
+  if (daysSince <= 90) return 'New'
+  if (daysSince <= 180) return 'Active'
+  if (daysSince <= 365) return 'Lapsing'
+  return 'Lapsed'
+}
+// Is this called at render time? Or is stage stored in Zustand?
+// If stored → it goes stale. Must be computed at render.
+```
+
+### 3.3 — Outreach "Send" has no delivery confirmation or failure state
+Clicking "Send WhatsApp" shows a success toast but there is no record of whether the message was actually delivered, opened, or failed. The touchpoint is logged but the delivery status is absent.
+
+**Fix:** After send, create a touchpoint with `status: 'sent'`. In mock mode, simulate a 2-second delay then update to `status: 'delivered'`. In production, this hooks to WhatsApp Business API webhooks.
+
+### 3.4 — Propensity score has no explanation
+The score (0–100) is shown but users don't know what drives it. A donor scoring 34 doesn't know if they should call, email, or write them off.
+
+**Fix:** Add a score breakdown tooltip:
+```
+Score: 47 / 100
+↓ Recency: Last gave 8 months ago (low)
+↑ Frequency: 4 gifts in 3 years (medium)
+↑ Channel: Responds to WhatsApp (high)
+→ Recommended action: Send a personal impact update
+```
+
+### 3.5 — No link from donor to the programme their money funded
+A donor gave ₹2L. Which programme did it go to? There is no way to see this from the donor profile. The Finance ledger has the transaction. The Programme has the budget. But the donor profile shows neither.
+
+**Fix:** When a transaction is logged, tag it with `programme_id`. The donor profile then shows: "Your gifts funded: Education Programme (₹1.2L), Health Programme (₹80K)."
+
+### 3.6 — "Needs attention" flag (60+ days no contact) has no action button
+The yellow flag appears but clicking it does nothing. It should open a pre-filled outreach drawer.
+
+### 3.7 — Donor list search does not search by PAN or phone
+Current search is by name only. Finance officers frequently look up donors by PAN for receipt generation.
+
+### 3.8 — No "Merge Duplicate Donors" flow
+When a donor is added twice (once manually, once via a donation import), there are two records with no way to merge them. Duplicate detection exists on beneficiaries but not donors.
+
+***
+
+## Section 4 — Finance & Accounting: 9 Missing Pieces
+
+**What's built:** Transaction ledger, 80G receipts, FCRA separation, budget vs actuals, AI categorisation.
+
+**What's missing:**
+
+### 4.1 — Transactions have no `donor_id` field
+Every income transaction should be linked to a donor record. Currently, entering a donation in Finance and adding a donor in CRM are completely separate. The 80G receipt cannot auto-populate donor details because there is no join.
+
+**Fix:** Add a "Donor" typeahead field to the income transaction form. Selecting a donor fills: donor name, PAN, address. This single field fixes: donor giving history (3.1), 80G auto-population (4.3), and impact trail (3.5).
+
+### 4.2 — Transactions have no `programme_id` field
+The spec says "transactions are tagged to the correct programme automatically if a matching programme name is detected." But if the programme name isn't detected, there is no manual tagging field. And even when auto-tagged, there is no UI to verify or correct it.
+
+**Fix:** Add a "Programme" dropdown to every transaction form. Pre-fill from AI suggestion but allow override.
+
+### 4.3 — 80G receipt does not pull donor PAN automatically
+The receipt form requires manually entering the donor's PAN every time. If the donor record already has a PAN (masked in CRM), it should auto-fill when a donor is selected.
+
+### 4.4 — FCRA fund separation is a display, not an enforcement
+The system shows foreign and domestic funds separately but does not prevent a user from tagging a foreign fund transaction to a domestic programme expense. The warning fires after the fact.
+
+**Fix:** When `fund_type = 'foreign'` and `expense_category = 'administrative'`, calculate the running admin % before saving. If saving this transaction would push admin spend above 18%, show a warning before save (not after).
+
+### 4.5 — Budget vs actuals is not connected to the transaction ledger in real time
+The budget bar for a programme shows allocated budget and "amount spent." But how is "amount spent" calculated? If it pulls from transactions tagged to that programme, this needs to be verified. If it is a manually entered number, it will always be stale.
+
+**Fix:** `programmeSpend = transactions.filter(t => t.programme_id === p.id && t.type === 'expense').sum('amount')` — computed live, never stored.
+
+### 4.6 — No reconciliation view
+Finance officers need to verify that what's in the ledger matches the bank statement. There is no "mark as reconciled" flag on transactions, no running reconciled balance, and no import-from-bank-statement flow beyond the AI categorisation paste.
+
+### 4.7 — 80G receipt numbering is per-session, not persistent
+In demo/mock mode, receipt numbers reset every time the page is refreshed. Sequential numbering must persist across sessions (localStorage in mock mode, database sequence in production).
+
+### 4.8 — No bulk receipt generation
+If 14 donations came in this month, generating receipts one by one is unusable. A "Generate All Pending Receipts" button with a batch download ZIP is missing.
+
+### 4.9 — AI categorisation result is not saved
+Pasting a bank statement line and getting a category suggestion is useful — but clicking away discards the suggestion. The user must manually re-enter the details. The AI suggestion should pre-fill the transaction form fields directly.
+
+***
+
+## Section 5 — Programmes & Beneficiary MIS: 10 Missing Pieces
+
+**What's built:** Programme management, beneficiary enrollment, CSV import/export, outcome recording, Theory of Change, Form Builder, Conversational MIS.
+
+**What's missing:**
+
+### 5.1 — Programme chip panel has no click-through to filtered beneficiary list
+Clicking a programme chip should filter the beneficiary list to only show enrolled beneficiaries in that programme. Currently, each chip is a display element only.
+
+### 5.2 — Beneficiary completeness score is computed but never actioned
+A score of 45% is shown but there is no "Complete this profile" button that highlights missing fields or jumps to the edit form with missing fields highlighted.
+
+**Fix:** Clicking the completeness score opens the edit form with all missing fields highlighted in amber and a "Required for 80% score" label.
+
+### 5.3 — CSV import validates rows but doesn't link to existing donors
+If a beneficiary CSV contains a column for "referred by donor name," there is no matching against the CRM donor list. Referral source stays as a plain text string.
+
+### 5.4 — Outcome recording has no connection to Theory of Change nodes
+The Theory of Change builder lets you create Output and Outcome nodes. The outcome recording form lets you record metrics. These are two completely separate flows — recording an outcome does not update a ToC node, and ToC nodes don't know which outcomes to pull.
+
+**Fix:** Each outcome record needs a `toc_node_id` field. The outcome form shows a dropdown: "Which Theory of Change outcome does this map to?" Selecting one links the metric to the node, and the ToC builder shows live values on each node.
+
+### 5.5 — Form Builder forms are not connected to beneficiary records
+A form can be designed and saved. But completing a form does not write data into the beneficiary record. Forms and beneficiary records are parallel stores with no join.
+
+**Fix:** Each form field needs a `maps_to_beneficiary_field` property. When a form is submitted for a beneficiary, the mapped fields are written to `beneficiaries[id]` in the store.
+
+### 5.6 — Conversational MIS has no "pending review" queue visible in-app
+Field staff submit via WhatsApp → MIS Agent extracts data → record is created. But Programme Managers have no in-app view of recent MIS submissions waiting for review. The Agent HQ has an "MIS review queue" sub-panel but it is not connected to the Programme section.
+
+**Fix:** Add a "Recent MIS Submissions" panel on the Programmes page showing the last 10 WhatsApp-sourced records with their confidence score and a one-click "Confirm" or "Edit" button.
+
+### 5.7 — Budget vs spend per programme does not link to Finance transactions
+The spec says this "pulls from the finance ledger." If `transactions` in the Finance Zustand store and `programmes` are separate slices with no shared `programme_id` key, this pull cannot happen.
+
+### 5.8 — Programme Effort Summary (staff hours and field visit days) has no data entry point
+The summary is displayed but there is no form to log "Staff hours: 4hrs, Field visit: 1 day" against a programme. The data has nowhere to come from.
+
+**Fix:** Add a "Log Effort" FAB on the Programme detail page. Fields: staff member, date, hours, type (office / field visit), programme. This feeds the Effort Summary.
+
+### 5.9 — Enrolled beneficiary count on programme chips is static
+The number on each chip (e.g. "Education — 47") is hardcoded in demo data. It should be `beneficiaries.filter(b => b.programme_id === p.id).length` computed live.
+
+### 5.10 — No "inactive beneficiary" detection or alert
+A beneficiary who has had no service log for 30+ days should be automatically flagged as "inactive" and appear on the dashboard morning brief and in the Agent HQ queue. There is no such detection currently.
+
+***
+
+## Section 6 — Grant Management: 6 Missing Pieces
+
+**What's built:** Kanban pipeline, compliance-grant linking, utilisation tracking, AI grant matching.
+
+**What's missing:**
+
+### 6.1 — Grant cards have no connection to programme outcomes
+A grant funds a programme. The programme has beneficiary counts and outcomes. But the grant card shows neither. A funder reviewing progress cannot see live KPIs from the grant card.
+
+**Fix:** Grant cards should show:
+```
+Education Programme — 247 beneficiaries | 73% of target
+Next report: 14 June 2026 | Data readiness: 81%
+```
+
+### 6.2 — Win probability is manually entered, never AI-computed
+The kanban card shows a "win probability" percentage but it is a field the user types in. It should be computed from: stage, days in stage, last touchpoint age, and whether a compliance doc is linked.
+
+### 6.3 — Moving a grant to "Live" does not create a compliance monitoring task
+When a grant moves from MOU → Live, a grant report deadline should be auto-created in the Compliance calendar. Currently, nothing happens on stage change.
+
+**Fix:** `onStageChange('live')` → create compliance record: `{ type: 'grant_report', grant_id, due_date: grant.report_due_date, linked_to: grant.id }`.
+
+### 6.4 — Grant utilisation tracking does not pull from Finance transactions
+Utilisation is entered manually per quarter. It should pull from `transactions.filter(t => t.grant_id === grant.id)` automatically.
+
+### 6.5 — AI grant matching result is not actionable
+The AI suggests funders to approach. But clicking a suggested funder does nothing — there is no "Add to Pipeline" button that creates a new grant card in Prospecting stage pre-filled with the suggested funder's details.
+
+### 6.6 — No clawback risk notification to ED
+When a grant is under-utilised (spec says this triggers an alert), the alert currently shows only in the Finance section. The ED does not see it on the Today dashboard.
+
+***
+
+## Section 7 — Compliance: 5 Missing Pieces
+
+**What's built:** Document registry, expiry alerts, compliance cascade, auto-filing reminders.
+
+**What's missing:**
+
+### 7.1 — Document upload is not connected to 80G receipt generation
+The 80G registration number stored in Compliance → Documents should be the same number printed on 80G receipts in Finance. Currently, the Finance section has a separate "NGO 80G Number" field in Settings. Two fields, two sources, guaranteed divergence.
+
+**Fix:** Single source of truth: `compliance.documents.find(d => d.type === '80G').registration_number` → used everywhere receipts are generated.
+
+### 7.2 — FCRA Annual Return deadline is calculated but the return form data is not compiled
+The system reminds at 30 and 7 days before the FCRA return deadline. But it does not compile the data needed for the return (total FC received, spent, programme-wise breakup). The reminder fires but the user still has to do all the work manually.
+
+**Fix:** Add a "Prepare FCRA Return" button that pulls: all foreign fund transactions grouped by programme, total received vs spent, admin % — and exports as a pre-filled CSV matching the FC-4 format.
+
+### 7.3 — Compliance cascade blocks a grant but doesn't tell the grant owner who to contact
+When a grant is blocked by an expired document, the Agent HQ card says "blocked." But it doesn't show: who owns the document renewal, which team member to contact, or what the renewal process is.
+
+### 7.4 — No DPDP Act module
+The spec mentions DPDP Act 2023 compliance (consent capture, erasure requests, breach log) but the Compliance section has no dedicated DPDP panel. Consent is captured at enrollment (beneficiary form has a checkbox) but:
+- Consent records are not stored in a queryable registry
+- Data erasure requests have no tracking form
+- The 72-hour breach notification countdown does not exist anywhere in the app
+
+### 7.5 — Document expiry alerts appear in Compliance but not in Today or Agent HQ
+An expiring FCRA certificate is urgent. But a user who doesn't check the Compliance section won't see it. The orange banner is only visible to someone already on the Compliance page.
+
+**Fix:** Any document expiring within 14 days → create an Agent HQ intent card (risk: High) AND add to the Today morning brief urgent strip.
+
+***
+
+## Section 9 — Reports: 6 Missing Pieces
+
+**What's built:** Report catalogue, data readiness indicator, kanban pipeline, AI drafting, Theory of Change anchoring, view/download.
+
+**What's missing:**
+
+### 9.1 — AI draft does not pull live data from the Zustand store
+The AI draft button generates a report narrative. But in the current implementation, does it actually read from `beneficiaries`, `transactions`, `grants`, and `programmes` in the store? Or does it generate a generic template with placeholder numbers?
+
+**Fix:** The draft function must call:
+```typescript
+const data = {
+  beneficiary_count: store.beneficiaries.filter(b => b.programme_id === report.programme_id).length,
+  outcomes: store.outcomes.filter(o => o.programme_id === report.programme_id),
+  spend: store.transactions.filter(t => t.programme_id === report.programme_id && t.type === 'expense').reduce((sum, t) => sum + t.amount, 0),
+  toc: store.theoryOfChange[report.programme_id]
+}
+// THEN pass to AI prompt — not generate from thin air
+```
+
+### 9.2 — Data readiness percentage is not computed from real data
+The readiness bar shows a percentage but it must be verified that it actually checks:
+- `beneficiaries.filter(b => b.programme_id === p.id).length > 0` → beneficiary data present
+- `outcomes.filter(o => o.programme_id === p.id).length > 0` → outcome data present
+- `transactions.filter(t => t.programme_id === p.id).length > 0` → financial data present
+- `theoryOfChange[p.id]` exists → ToC present
+
+If any of these checks are skipped, the readiness score is meaningless.
+
+### 9.3 — "Advance" button on kanban changes stage but notifies nobody
+Moving a report from Draft → In Review should notify the Finance Officer (to review the financial section) and the Programme Manager (to review the outcomes section). Currently, the stage changes silently.
+
+### 9.4 — Downloaded report file contains metadata only
+The spec says download produces "a text file with report metadata and a prompt to connect the backend for full PDF generation." This is a placeholder, not a feature. In a demo environment, the download should produce a properly formatted HTML or markdown document with real data from the store — not a stub.
+
+### 9.5 — No report version history
+If a report is edited and re-drafted, the previous version is lost. There is no "v1 / v2 / v3" history or ability to revert.
+
+### 9.6 — Theory of Change anchoring requires ToC to be built first
+If a programme has no Theory of Change, the AI draft has no anchoring and produces a generic narrative. There is no warning to the user before drafting that "this programme has no Theory of Change — your report will be less specific."
+
+***
+
+## Section 10 — Agent HQ (Copilot): 7 Missing Pieces
+
+**What's built:** Intent queue, HITL approval, compliance cascade queue, MIS review queue, audit log, agent performance metrics, auto-approve threshold.
+
+**What's missing:**
+
+### 10.1 — Intent cards expire but the expiry countdown has no escalation
+The card shows a countdown. When it hits zero, the card disappears. But there is no escalation — the ED is not notified that a high-risk intent expired without action. High-risk expired intents should re-queue with higher urgency.
+
+### 10.2 — "Edit" on an intent opens a modal but the edited parameters are not validated
+The Edit flow lets you modify the intent's parameters (e.g., change the donor message text or the amount). But there is no validation that the edited parameters are still within safe bounds — you could edit a ₹50,000 transfer to ₹5,000,000.
+
+### 10.3 — Batch approve processes intents but shows no per-intent result
+"Batch Approve" runs all pending intents and shows "Done." If one intent fails, the user doesn't know which one or why.
+
+**Fix:** After batch approve, show a result list: `3 approved ✓ | 1 failed ✗ (Donor Nurture Agent: WhatsApp rate limit)`.
+
+### 10.4 — Audit log is searchable but not filterable by agent or outcome
+The audit log shows all actions. There is no filter by agent name, risk level, or outcome (approved/rejected/failed). For compliance review, an auditor needs to filter to "all Financial Agent actions in April 2026."
+
+### 10.5 — Agent performance metrics (correct streak) are static in demo mode
+The streak and rejection count are demo data. They should reflect actual approvals/rejections made during the current session — making the demo feel live and the metrics feel meaningful.
+
+### 10.6 — Auto-approve threshold is configurable but has no audit trail
+If the threshold is changed from ₹0 to ₹10,000, there is no log of who changed it, when, and from what value. This is a compliance and accountability gap.
+
+### 10.7 — No "Why did the agent suggest this?" explanation on each intent
+The intent card shows what the agent wants to do but not why. "Send WhatsApp to 14 lapsed donors" — why these 14? Why now? What data triggered this? The reasoning is completely absent.
+
+**Fix:** Each intent card needs an expandable "Agent Reasoning" section:
+```
+Why now: 14 donors crossed the 180-day lapse threshold in the last 7 days
+Why these donors: Filtered by: last_gift < 180 days ago AND has_whatsapp_consent = true
+Why this message: Based on their last programme donation (Education Programme)
+Confidence: 0.87
+```
+
+***
+
+## Section 11 — Settings: 3 Missing Pieces
+
+### 11.1 — NGO details are not the single source of truth
+Registration number, PAN, and FCRA number entered in Settings should auto-populate: 80G receipts (Finance), compliance document metadata (Compliance), and grant applications (Grants). Currently, these are separate fields in each section.
+
+### 11.2 — Team invites have no role change flow
+You can invite someone with a role. But if you want to change an existing team member's role (e.g. Field Staff → Programme Manager), there is no interface to do so. Only invite and remove.
+
+### 11.3 — Data export does not include compliance documents or grant data
+The export downloads beneficiaries, donors, and transactions. It misses: grants, compliance documents, volunteer records, and form submissions. An NGO migrating away from GoodJobs cannot take all their data.
+
+***
+
+## The 10 Cross-Cutting Missing Connections (Priority Order)
+
+These are the highest-impact fixes — each one connects two existing sections that currently have no data relationship:
+
+| # | From | To | Missing Join Field | Impact if Fixed |
+|---|---|---|---|---|
+| 1 | Finance transactions | CRM donors | `donor_id` on transaction | Giving history, 80G auto-fill, impact trail |
+| 2 | Finance transactions | Programmes | `programme_id` on transaction | Live budget vs actuals, grant utilisation |
+| 3 | Grants | Programmes | `programme_id` on grant | Live KPIs on grant card, report data pull |
+| 4 | Outcomes | Theory of Change nodes | `toc_node_id` on outcome | ToC shows live values, report anchoring works |
+| 5 | Form submissions | Beneficiary records | `maps_to_beneficiary_field` on form field | Forms actually update beneficiary data |
+| 6 | Compliance documents | Finance receipts | Single `registration_number` source | 80G receipts always correct |
+| 7 | Agent HQ intents | Tasks | `task_id` on approved intent | Approving an intent creates a follow-up task |
+| 8 | Morning brief items | Deep links | `deep_link` URL on each brief item | Brief items navigate to exact context |
+| 9 | Compliance expiries | Today + Agent HQ | Event broadcast on expiry | Expiring docs surface everywhere, not just Compliance |
+| 10 | Programme chips | Beneficiary list filter | `programme_id` filter on click | Chips become navigation, not just display |
+
+***
+
+## The Single Biggest Fix
+
+**Add `programme_id` and `donor_id` as foreign keys to every transaction.**
+
+This one change — two fields on one form — fixes: live budget vs actuals (5.7), grant utilisation (6.4), donor giving history (3.1), 80G auto-population (4.3), donor impact trail (3.5), report data pull (9.1), data readiness computation (9.2), and FCRA fund monitoring accuracy (4.5).
+
+Every other fix is meaningful. This one is foundational. Without it, Finance, CRM, Programmes, Grants, and Reports are permanently disconnected.
