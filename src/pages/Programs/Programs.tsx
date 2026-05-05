@@ -777,10 +777,7 @@ const Programs: React.FC = () => {
                               toast.success(`MIS submission confirmed for ${match.name}.`);
                             }
                           } else {
-                            toast('No beneficiary matched. Opening Edit to link or create a record.', { icon: 'ℹ️', duration: 4000 });
-                            setEditBen(null as any);
-                            setShowEditBen(false);
-                            decideMisReviewIntent(intent.id, 'approved');
+                            toast('No matching beneficiary found. Use the ✎ Edit button to link or create a record.', { icon: 'ℹ️', duration: 5000 });
                             return;
                           }
                           decideMisReviewIntent(intent.id, 'approved');
