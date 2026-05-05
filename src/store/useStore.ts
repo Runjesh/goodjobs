@@ -167,6 +167,21 @@ export interface ComplianceDocument {
   details?: Record<string, unknown>;
 }
 
+/** A single outreach touchpoint logged when the CRM sends via WhatsApp or email.
+ *  Stored in the Zustand store (shared, survives component remounts within the
+ *  session) and used to drive the per-donor delivery-status indicator. */
+export interface OutreachEntry {
+  id: string;
+  donorId: string;
+  /** ISO timestamp — used for last-contact computation. */
+  timestamp: number;
+  /** Human-readable date string for display. */
+  date: string;
+  channel: 'whatsapp' | 'email';
+  template: string;
+  status: 'sent' | 'delivered';
+}
+
 interface AppState {
   donors: Donor[];
   campaigns: Campaign[];
@@ -274,6 +289,11 @@ interface AppState {
   updateVolunteer: (id: string, data: Partial<Volunteer>) => void;
   deleteVolunteer: (id: string) => void;
   addComplianceDoc: (doc: Omit<ComplianceDocument, 'id' | 'uploadedAt'>) => void;
+
+  /** CRM outreach touchpoint log — shared across all views within the session. */
+  outreachLog:          OutreachEntry[];
+  addOutreachEntry:     (entry: OutreachEntry) => void;
+  updateOutreachEntry:  (id: string, patch: Partial<OutreachEntry>) => void;
 }
 
 const initialDonors: Donor[] = [
@@ -851,5 +871,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   addComplianceDoc: (doc) => set((state) => ({
     complianceDocs: [{ ...doc, id: `doc-${Date.now()}`, uploadedAt: new Date().toISOString().split('T')[0] }, ...state.complianceDocs]
+  })),
+
+  outreachLog: [],
+  addOutreachEntry: (entry) => set((state) => ({ outreachLog: [entry, ...state.outreachLog] })),
+  updateOutreachEntry: (id, patch) => set((state) => ({
+    outreachLog: state.outreachLog.map(e => e.id === id ? { ...e, ...patch } : e),
   })),
 }));

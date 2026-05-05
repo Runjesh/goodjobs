@@ -19,6 +19,7 @@ import DonorImpactPanel from '../../components/Donor/DonorImpactPanel';
 import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
 import {
   computeStage,
+  computeTouchpoints,
   nextDueMilestone,
   subscribeLifecycleHydrated,
   urgencyScore,
@@ -27,7 +28,18 @@ import {
   STAGE_META,
   type LifecycleStage,
 } from '../../utils/donorLifecycle';
+import type { OutreachEntry } from '../../store/useStore';
 import './CRM.css';
+
+/** Format a raw programmeId slug/UUID into a human-readable label.
+ *  "education-programme" → "Education Programme"
+ *  Falls back gracefully for UUIDs (shows truncated form). */
+function formatProgId(id: string): string {
+  if (!id) return id;
+  // UUID-like (8-4-4-4-12 hex) — show shorter alias
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)) return `Programme ${id.slice(0, 6).toUpperCase()}`;
+  return id.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
 
 const WA_TEMPLATES = [
   { id: 'thank', label: 'Thank You', body: 'Namaste {name}! 🙏 Thank you for your generous donation of ₹{amount}. Your support directly helps {cause}. Your 80G certificate has been sent to your email.' },
@@ -39,7 +51,8 @@ const WA_TEMPLATES = [
 const CSV_TEMPLATE = 'name,type,pan,location,email,phone,employer\nAnita Sharma,Recurring,ABCDE1234F,"Mumbai, Maharashtra",a@x.com,9876500000,Acme\nRaj Kumar,Major Donor,XYZAB5678G,"Delhi, NCR",,,';
 
 const CRM: React.FC = () => {
-  const { donors, transactions, addDonor, updateDonor, deleteDonor } = useStore();
+  const { donors, transactions, addDonor, updateDonor, deleteDonor,
+          outreachLog, addOutreachEntry, updateOutreachEntry } = useStore();
   // Unified deep-link focus via useFocusFromUrl (initial read, virtualizer
   // wiring is below once the virtualizer has been declared).
   const initialFocus = typeof window !== 'undefined'
@@ -298,12 +311,34 @@ const CRM: React.FC = () => {
     return Array.from(map.entries()).map(([id, total]) => ({ id, total }));
   }, [donorTransactions]);
 
-  const daysSinceLastGift = useMemo(() => {
-    if (!activeDonor?.lastGift) return 999;
-    const last = new Date(activeDonor.lastGift);
-    const now = new Date();
-    return Math.floor((now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24));
-  }, [activeDonor]);
+  /** Last contact = most recent of: last gift date, last completed milestone
+   *  doneDate, last outreach log entry.  Used for "Needs attention" gating so
+   *  we check *contact* recency, not just gift recency. */
+  const daysSinceLastContact = useMemo(() => {
+    if (!activeDonor) return 999;
+    const candidates: number[] = [];
+    if (activeDonor.lastGift) candidates.push(new Date(activeDonor.lastGift).getTime());
+    const milestones = computeTouchpoints(activeDonor);
+    for (const m of milestones) {
+      if (m.state === 'done' && m.doneDate) candidates.push(m.doneDate.getTime());
+    }
+    for (const e of outreachLog) {
+      if (e.donorId === String(activeDonor.id)) candidates.push(e.timestamp);
+    }
+    if (candidates.length === 0) return 999;
+    const latestMs = Math.max(...candidates);
+    return Math.floor((Date.now() - latestMs) / (1000 * 60 * 60 * 24));
+  }, [activeDonor, outreachLog]);
+
+  /** Last channel used to contact this donor — pre-selects the composer. */
+  const lastUsedChannel = useMemo((): 'whatsapp' | 'email' => {
+    if (!activeDonor) return 'whatsapp';
+    const donorLog = outreachLog.filter(e => e.donorId === String(activeDonor.id));
+    if (donorLog.length > 0) return donorLog[0].channel;
+    const meta = (activeDonor.meta || {}) as Record<string, unknown>;
+    const ch = meta.preferred_channel;
+    return (ch === 'whatsapp' || ch === 'email') ? ch : 'whatsapp';
+  }, [activeDonor, outreachLog]);
 
   const filteredDonors = useMemo(() => {
     void lifecycleTick;
@@ -496,18 +531,7 @@ const CRM: React.FC = () => {
     }
   };
 
-  /** A lightweight in-session outreach log that drives the per-touchpoint
-   *  delivery status indicator.  Each entry is appended on Send and async-
-   *  updated to 'delivered' after a 2-second mock delay. */
-  interface OutreachEntry {
-    id: string;
-    donorId: string;
-    date: string;
-    channel: 'whatsapp' | 'email';
-    template: string;
-    status: 'sent' | 'delivered';
-  }
-  const [outreachLog, setOutreachLog] = useState<OutreachEntry[]>([]);
+  // outreachLog, addOutreachEntry, updateOutreachEntry — from Zustand store (shared state).
 
   const [emailNotConnected, setEmailNotConnected] = useState(false);
   const [composerSending, setComposerSending] = useState(false);
@@ -600,17 +624,19 @@ const CRM: React.FC = () => {
           setBulkMode(false);
           setLastOutreachStatus('sent');
           if (!bulkMode && activeDonor) {
+            const now = Date.now();
             const entry: OutreachEntry = {
-              id: Date.now().toString(),
+              id: now.toString(),
               donorId: String(activeDonor.id),
-              date: new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+              timestamp: now,
+              date: new Date(now).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
               channel: 'email',
               template: selectedTemplate.label,
               status: 'sent',
             };
-            setOutreachLog(prev => [entry, ...prev]);
+            addOutreachEntry(entry);
             setTimeout(() => {
-              setOutreachLog(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'delivered' } : e));
+              updateOutreachEntry(entry.id, { status: 'delivered' });
               setLastOutreachStatus('delivered');
             }, 2000);
           } else {
@@ -654,17 +680,19 @@ const CRM: React.FC = () => {
         setBulkMode(false);
         setLastOutreachStatus('sent');
         if (!bulkMode && activeDonor) {
+          const now = Date.now();
           const entry: OutreachEntry = {
-            id: Date.now().toString(),
+            id: now.toString(),
             donorId: String(activeDonor.id),
-            date: new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+            timestamp: now,
+            date: new Date(now).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
             channel: 'whatsapp',
             template: selectedTemplate.label,
             status: 'sent',
           };
-          setOutreachLog(prev => [entry, ...prev]);
+          addOutreachEntry(entry);
           setTimeout(() => {
-            setOutreachLog(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'delivered' } : e));
+            updateOutreachEntry(entry.id, { status: 'delivered' });
             setLastOutreachStatus('delivered');
           }, 2000);
         } else {
@@ -1123,21 +1151,22 @@ const CRM: React.FC = () => {
                         </div>
                       )}
                     </div>
-                    {/* Needs attention CTA — shown when 60+ days silent */}
-                    {daysSinceLastGift >= 60 && (() => {
-                      const meta = (activeDonor.meta || {}) as Record<string, unknown>;
-                      const ch = meta.preferred_channel;
-                      const safeChannel: 'whatsapp' | 'email' = (ch === 'whatsapp' || ch === 'email') ? ch : 'whatsapp';
+                    {/* Needs attention CTA — shown when 60+ days since last CONTACT
+                        (gift, completed milestone, or outreach log entry). Uses the
+                        last channel the donor was contacted on, not just preferred. */}
+                    {daysSinceLastContact >= 60 && (() => {
                       const lastProg = donorTransactions.find(t => t.programmeId)?.programmeId;
-                      const attentionMsg = lastProg
-                        ? `Namaste {name}! 🙏 We've been continuing our ${lastProg} programme and your past support has made a real difference. It's been a while since we last connected — we'd love to share an update and stay in touch. Reply to reconnect!`
-                        : WA_TEMPLATES.find(t => t.id === 'reactivate')?.body ?? '';
+                      const progName = lastProg ? formatProgId(lastProg) : null;
+                      const donorFirstName = activeDonor.name.split(' ')[0];
+                      const attentionMsg = progName
+                        ? `Namaste ${donorFirstName}! 🙏 We've been continuing our ${progName} programme and your past support has made a real difference. It's been a while since we last connected — we'd love to share an update and stay in touch. Reply to reconnect!`
+                        : WA_TEMPLATES.find(t => t.id === 'reactivate')?.body?.replace('{name}', donorFirstName) ?? '';
                       return (
                         <button
                           className="needs-attention-btn"
-                          onClick={() => openSingleCompose(safeChannel, 'reactivate', attentionMsg)}
+                          onClick={() => openSingleCompose(lastUsedChannel, 'reactivate', attentionMsg)}
                         >
-                          <BellRing size={11} /> Needs attention · {daysSinceLastGift}d ago
+                          <BellRing size={11} /> Needs attention · {daysSinceLastContact}d since last contact
                         </button>
                       );
                     })()}
@@ -1392,7 +1421,7 @@ const CRM: React.FC = () => {
                       <div className="programme-impact-pills">
                         {impactByProgramme.map(({ id, total }) => (
                           <span key={id} className="programme-impact-pill">
-                            {id} · ₹{total >= 100000 ? `${(total / 100000).toFixed(1)}L` : total >= 1000 ? `${(total / 1000).toFixed(0)}K` : total.toLocaleString()}
+                            {formatProgId(id)} · ₹{total >= 100000 ? `${(total / 100000).toFixed(1)}L` : total >= 1000 ? `${(total / 1000).toFixed(0)}K` : total.toLocaleString()}
                           </span>
                         ))}
                       </div>
