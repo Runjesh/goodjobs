@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight } from 'lucide-react';
+import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight, TrendingUp, Users } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
+import type { Task } from '../../utils/tasks';
 import PermissionGate from '../../components/Auth/PermissionGate';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
@@ -35,6 +36,54 @@ function idleDaysFromIso(iso?: string): number {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return 0;
   return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+}
+
+/**
+ * Compute a heuristic win probability score (0–99) for a CSR card.
+ * Factors: pipeline stage, idle-day penalty, compliance document health.
+ * Used when the card does not have a manually-set win_probability.
+ */
+function computeWinProbability(
+  card: { col: string; last_activity_at?: string; updated_at?: string; id: number | string },
+  complianceGrantLinks: { grantId: string | number; complianceDocId: string }[],
+  complianceDocs: { id: string; status: string }[],
+): number {
+  const stageBase: Record<string, number> = {
+    prospecting: 10, pitch: 25, diligence: 45, mou: 75, live: 92,
+  };
+  let score = stageBase[card.col] ?? 10;
+  const idle = idleDaysFromIso(card.last_activity_at || card.updated_at);
+  if (idle > 60) score = Math.max(score - 25, 5);
+  else if (idle > 30) score = Math.max(score - 15, 5);
+  else if (idle <= 7 && idle >= 0) score = Math.min(score + 5, 97);
+  const links = complianceGrantLinks.filter(l => String(l.grantId) === String(card.id));
+  for (const link of links) {
+    const doc = complianceDocs.find(d => d.id === link.complianceDocId);
+    if (doc?.status === 'Expired') { score = Math.max(score - 25, 5); break; }
+    if (doc?.status === 'Expiring Soon') { score = Math.max(score - 12, 5); }
+  }
+  return Math.min(Math.round(score), 99);
+}
+
+/**
+ * Return live programme KPIs for a grant card when it is in mou/live stage.
+ * Reads from the programGrantLinks → programBudgets → beneficiaries chain.
+ */
+function getCardKpi(
+  cardId: string,
+  programGrantLinks: { grantId: string | number; programId: string; programLabel?: string; allocationPct?: number }[],
+  programBudgets: { programId: string; planned: number; spent: number; label?: string }[],
+  beneficiaries: { program: string }[],
+): { utilPct: number | null; benCount: number; label: string } | null {
+  const link = programGrantLinks.find(l => String(l.grantId) === cardId && (l as any).role !== 'co-funder');
+  if (!link) return null;
+  const budget = programBudgets.find(b => b.programId === link.programId);
+  const label = link.programLabel ?? budget?.label ?? link.programId;
+  const normalised = link.programId.replace(/-/g, ' ').toLowerCase();
+  const benCount = beneficiaries.filter(b => b.program.toLowerCase() === normalised ||
+    b.program.toLowerCase().replace(/\s+/g, '-') === link.programId).length;
+  const utilPct = budget && budget.planned > 0 ? Math.round((budget.spent / budget.planned) * 100) : null;
+  return { utilPct, benCount, label };
 }
 
 type CsrExtraForm = {
@@ -108,6 +157,12 @@ const CSR: React.FC = () => {
   useFocusFromUrl('card');
   const navigate = useNavigate();
   const { csrCards, moveCSRCard, addCSRCard, updateCSRCard, deleteCSRCard, ngoDetails } = useStore();
+  const complianceGrantLinks = useStore(s => s.complianceGrantLinks);
+  const complianceDocs = useStore(s => s.complianceDocs);
+  const programBudgets = useStore(s => s.programBudgets);
+  const programGrantLinks = useStore(s => s.programGrantLinks);
+  const beneficiaries = useStore(s => s.beneficiaries);
+  const addTask = useStore(s => s.addTask);
   const { can } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [dragId, setDragId] = useState<number | string | null>(null);
@@ -124,6 +179,7 @@ const CSR: React.FC = () => {
   const [dbQuery, setDbQuery] = useState('');
   const [dbLoading, setDbLoading] = useState(false);
   const [dbResults, setDbResults] = useState<any[]>([]);
+  const [dbAddedIds, setDbAddedIds] = useState<Set<string>>(new Set());
 
   const [showEditCard, setShowEditCard] = useState(false);
   const [editCard, setEditCard] = useState<any>(null);
@@ -147,6 +203,30 @@ const CSR: React.FC = () => {
           // best-effort; UI already updated
         }
         toast.success(`Moved "${card.company}" to ${columns.find(c => c.id === col)?.title}`);
+
+        // MOU → Live: auto-create a compliance reminder task so the team
+        // doesn't forget to file CSR-1 and upload the executed MoU to the vault.
+        if (card.col === 'mou' && col === 'live') {
+          const now = new Date();
+          const compTask: Task = {
+            id: `mou-live-${String(card.id)}-${now.getTime()}`,
+            title: `File CSR-1 compliance record — ${card.company} grant is now Live`,
+            description: `${card.company} moved from MoU Signed → Project Live. Upload the executed MoU and file the CSR-1 form in the Compliance Vault within 7 days.`,
+            priority: 'high',
+            status: 'open',
+            sourceType: 'agent',
+            sourceAgent: 'Pipeline Guardian',
+            relatedEntityType: 'grant',
+            relatedEntityId: String(card.id),
+            dueAt: new Date(now.getTime() + 7 * 86_400_000).toISOString(),
+            createdAt: now.toISOString(),
+            updatedAt: now.toISOString(),
+          };
+          addTask(compTask);
+          toast('Compliance task created: file CSR-1 record within 7 days.', {
+            icon: '📋', duration: 4500,
+          });
+        }
       }
       setDragId(null);
     }
@@ -512,37 +592,82 @@ const CSR: React.FC = () => {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {dbResults.map((c) => (
+                  {dbResults.map((c) => {
+                    const prospecKey = String(c.id ?? c.company_name);
+                    const alreadyAdded = dbAddedIds.has(prospecKey);
+                    return (
                     <div key={c.id} style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', padding: '1rem', background: 'white' }}>
                       <div className="flex justify-between items-start">
                         <div>
                           <div style={{ fontWeight: 700 }}>{c.company_name}</div>
                           <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{c.sector} • {c.hq_city}</div>
                         </div>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
-                          onClick={() => {
-                            setForm(prev => ({
-                              ...prev,
-                              company: c.company_name,
-                              amount: Math.round((c.csr_obligation_cr || 10) * 10000000),
-                              project: (c.focus_areas?.[0] || prev.project),
-                            }));
-                            setExtraForm(prev => ({ ...prev, sector: c.sector || prev.sector }));
-                            toast.success('Prefilled proposal form from Prospect DB.');
-                            setShowProspectDb(false);
-                          }}
-                        >
-                          Use
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem' }}
+                            onClick={() => {
+                              setForm(prev => ({
+                                ...prev,
+                                company: c.company_name,
+                                amount: Math.round((c.csr_obligation_cr || 10) * 10000000),
+                                project: (c.focus_areas?.[0] || prev.project),
+                              }));
+                              setExtraForm(prev => ({ ...prev, sector: c.sector || prev.sector }));
+                              toast.success('Prefilled proposal form from Prospect DB.');
+                              setShowProspectDb(false);
+                              setShowModal(true);
+                            }}
+                          >
+                            Pre-fill form
+                          </button>
+                          <button
+                            className="btn btn-primary"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.75rem', opacity: alreadyAdded ? 0.6 : 1 }}
+                            disabled={alreadyAdded}
+                            onClick={async () => {
+                              if (alreadyAdded) return;
+                              const tags = (c.focus_areas || []).slice(0, 3);
+                              try {
+                                const res = await apiFetch('/csr/cards', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    company: c.company_name,
+                                    amount: Math.round((c.csr_obligation_cr || 10) * 10000000),
+                                    project: c.focus_areas?.[0] ?? 'To be defined',
+                                    tags,
+                                    agent: 'AD',
+                                    col: 'prospecting',
+                                    date: 'Just added',
+                                    details: { sector: c.sector ?? '', hq_city: c.hq_city ?? '' },
+                                  }),
+                                });
+                                if (res.ok) {
+                                  const data = await res.json();
+                                  if (data?.card?.id) useStore.getState().addCSRCardWithId(data.card);
+                                  else useStore.getState().addCSRCard({ company: c.company_name, amount: Math.round((c.csr_obligation_cr || 10) * 10000000), project: c.focus_areas?.[0] ?? 'To be defined', tags, agent: 'AD', col: 'prospecting', date: 'Just added', details: { sector: c.sector ?? '' } });
+                                } else {
+                                  useStore.getState().addCSRCard({ company: c.company_name, amount: Math.round((c.csr_obligation_cr || 10) * 10000000), project: c.focus_areas?.[0] ?? 'To be defined', tags, agent: 'AD', col: 'prospecting', date: 'Just added', details: { sector: c.sector ?? '' } });
+                                }
+                              } catch {
+                                useStore.getState().addCSRCard({ company: c.company_name, amount: Math.round((c.csr_obligation_cr || 10) * 10000000), project: c.focus_areas?.[0] ?? 'To be defined', tags, agent: 'AD', col: 'prospecting', date: 'Just added', details: { sector: c.sector ?? '' } });
+                              }
+                              setDbAddedIds(prev => new Set([...prev, prospecKey]));
+                              toast.success(`${c.company_name} added to Prospecting stage!`);
+                            }}
+                          >
+                            {alreadyAdded ? 'Added ✓' : 'Add to Pipeline'}
+                          </button>
+                        </div>
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                         <div><strong>CSR Obligation:</strong> ₹{c.csr_obligation_cr?.toLocaleString?.() ?? c.csr_obligation_cr} Cr</div>
                         <div><strong>Focus areas:</strong> {(c.focus_areas || []).join(', ')}</div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -622,6 +747,10 @@ const CSR: React.FC = () => {
               <div className="kanban-cards">
                 {colCards.map(card => {
                   const touchHint = formatActivityHint(card.last_activity_at || card.updated_at);
+                  const winProb = computeWinProbability(card, complianceGrantLinks, complianceDocs);
+                  const kpi = (col.id === 'mou' || col.id === 'live')
+                    ? getCardKpi(String(card.id), programGrantLinks, programBudgets, beneficiaries)
+                    : null;
                   return (
                   <div key={String(card.id)} className="kanban-card" data-focus-id={String(card.id)} draggable
                     onDragStart={() => handleDragStart(card.id)}
@@ -670,11 +799,31 @@ const CSR: React.FC = () => {
                     <div className="csr-tags">
                       {card.tags.map(tag => <span key={tag} className="csr-tag">{tag}</span>)}
                     </div>
-                    {(card.win_probability != null || touchHint) && (
-                      <div style={{ fontSize: '0.65rem', color: 'var(--color-text-tertiary)', marginTop: 2, lineHeight: 1.3 }}>
-                        {card.win_probability != null ? <span>Win {card.win_probability}%</span> : null}
-                        {card.win_probability != null && touchHint ? ' · ' : null}
-                        {touchHint ? <span>Last touch {touchHint}</span> : null}
+                    {/* Win probability — computed from stage + idle days + compliance health;
+                        stored value (manually entered) takes precedence when present. */}
+                    <div style={{ fontSize: '0.65rem', color: 'var(--color-text-tertiary)', marginTop: 2, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <span style={{
+                        background: winProb >= 70 ? '#dcfce7' : winProb >= 40 ? '#fef9c3' : '#fee2e2',
+                        color: winProb >= 70 ? '#166534' : winProb >= 40 ? '#854d0e' : '#991b1b',
+                        borderRadius: 4, padding: '1px 5px', fontWeight: 700, fontSize: '0.6rem',
+                      }}>
+                        {card.win_probability != null ? card.win_probability : winProb}% win
+                      </span>
+                      {touchHint ? <span>· {touchHint}</span> : null}
+                    </div>
+                    {/* Live programme KPI strip — shown for MoU + Project Live cards */}
+                    {kpi && (
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.375rem', fontSize: '0.62rem', color: 'var(--color-text-secondary)', flexWrap: 'wrap' }}>
+                        {kpi.benCount > 0 && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: '#f0fdf4', color: '#166534', borderRadius: 4, padding: '1px 5px' }}>
+                            <Users size={9} /> {kpi.benCount} ben
+                          </span>
+                        )}
+                        {kpi.utilPct !== null && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.utilPct < 25 ? '#fee2e2' : kpi.utilPct < 60 ? '#fef9c3' : '#f0fdf4', color: kpi.utilPct < 25 ? '#991b1b' : kpi.utilPct < 60 ? '#854d0e' : '#166534', borderRadius: 4, padding: '1px 5px' }}>
+                            <TrendingUp size={9} /> {kpi.utilPct}% util
+                          </span>
+                        )}
                       </div>
                     )}
                     <div className="csr-footer">

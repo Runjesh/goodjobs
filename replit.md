@@ -45,6 +45,7 @@ The design language is centralized in `src/index.css` using CSS variables for co
     - **Donor → Program → Impact Trail**: `DonorImpactPanel` tracks donor impact through campaigns and programs to measured outcomes.
     - **Finance ↔ Grant Budget Heads**: Expenses are tagged to specific grant budget heads, with real-time utilization tracking and sanity checks. The Finance page includes a "Tag expenses to grants" card and an "Expenses by grant" CSV export.
     - **Add Program**: Explicit "Add Program" functionality now allows creating new programs independently of beneficiaries, merging derived and custom programs in selection dropdowns.
+    - **Grants depth (Task #40)**: CSR kanban cards display a computed AI win probability (stage + idle-day penalty + compliance doc health) rendered as a colour-coded badge. MoU/Live cards show a live programme KPI strip (beneficiary count + budget utilisation %). Dragging a card from MoU → Live auto-creates a high-priority compliance task ("File CSR-1 within 7 days"). Prospect DB modal has a direct "Add to Pipeline" button alongside "Pre-fill form" that adds the funder straight to the Prospecting column without opening the new-proposal form.
 
 ### System Design Choices
 
