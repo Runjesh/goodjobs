@@ -271,7 +271,7 @@ const Reports: React.FC = () => {
       upsertTaskByIntent({
         id: `report-review-fin-${id}`,
         title: `Review financial section — "${reportTitle}"`,
-        description: `This report has moved to In Review. Finance Officers: please review the financial summary and utilisation data before it is submitted.`,
+        description: `This report has moved to In Review. Finance Officers: please review the financial summary and utilisation data before it is submitted. Navigate to Reports → "${reportTitle}" to review.`,
         dueAt: dueFin,
         priority: 'high',
         status: 'open',
@@ -279,13 +279,16 @@ const Reports: React.FC = () => {
         sourceAgent: 'Reports',
         sourceIntentId: `report-review-finance-${id}`,
         assignee: 'Finance Officer',
+        relatedEntityType: 'grant' as const,
+        relatedEntityId: id,
+        meta: { link: `/reports?focus=${id}`, reportId: id, reportTitle },
         createdAt: nowIso,
         updatedAt: nowIso,
       });
       upsertTaskByIntent({
         id: `report-review-pm-${id}`,
         title: `Review outcomes section — "${reportTitle}"`,
-        description: `This report has moved to In Review. Programme Managers: please review the outcomes and beneficiary data before it is submitted.`,
+        description: `This report has moved to In Review. Programme Managers: please review the outcomes and beneficiary data before it is submitted. Navigate to Reports → "${reportTitle}" to review.`,
         dueAt: dueFin,
         priority: 'high',
         status: 'open',
@@ -293,6 +296,9 @@ const Reports: React.FC = () => {
         sourceAgent: 'Reports',
         sourceIntentId: `report-review-pm-${id}`,
         assignee: 'Programme Manager',
+        relatedEntityType: 'grant' as const,
+        relatedEntityId: id,
+        meta: { link: `/reports?focus=${id}`, reportId: id, reportTitle },
         createdAt: nowIso,
         updatedAt: nowIso,
       });
@@ -378,16 +384,10 @@ const Reports: React.FC = () => {
       ? beneficiaryOutcomes.filter(o => o.programId === progId)
       : beneficiaryOutcomes;
 
-    const journalSpend = progId
-      ? journalEntries.filter(e => e.programmeId === progId && e.entryType === 'Expense')
-          .reduce((s, e) => s + Math.abs(Number(e.amount) || 0), 0)
-      : journalEntries.filter(e => e.entryType === 'Expense')
-          .reduce((s, e) => s + Math.abs(Number(e.amount) || 0), 0);
-    const txSpend = progId
+    const totalSpend = progId
       ? transactions.filter(t => t.programmeId === progId)
           .reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0)
-      : 0;
-    const totalSpend = journalSpend > 0 ? journalSpend : txSpend;
+      : transactions.reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
 
     const tocNodes = progName ? readToCForProgram(progName) : [];
     const tocStatements = tocNodes
