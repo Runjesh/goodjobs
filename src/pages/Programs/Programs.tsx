@@ -771,7 +771,7 @@ const Programs: React.FC = () => {
                             if (ex.location && !match.location) patch.location = ex.location;
                             if (ex.program && !match.program) patch.program = ex.program;
                             if (Object.keys(patch).length) {
-                              updateBeneficiary({ ...match, ...patch });
+                              updateBeneficiary(match.id, patch);
                               toast.success(`MIS approved and ${Object.keys(patch).join(', ')} updated for ${match.name}.`);
                             } else {
                               toast.success(`MIS submission confirmed for ${match.name}.`);

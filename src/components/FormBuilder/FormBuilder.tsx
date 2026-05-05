@@ -426,7 +426,7 @@ const FormBuilder: React.FC = () => {
                       writtenCount++;
                     }
                     if (writtenCount > 0) {
-                      updateBeneficiary({ ...ben, ...topLevel, details });
+                      updateBeneficiary(ben.id, { ...topLevel, details });
                     }
                   }
                 }
