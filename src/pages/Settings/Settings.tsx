@@ -103,7 +103,10 @@ const Settings: React.FC = () => {
   const [regNo, setRegNo] = useState(storedNgoDetails.reg_no || 'MH/2015/0012345');
   const [fcraReg, setFcraReg] = useState(storedNgoDetails.fcra_reg || '231650212');
   const [panNo, setPanNo] = useState(storedNgoDetails.pan || 'AABCI1234C');
-  const [eightyGNo, setEightyGNo] = useState(storedNgoDetails.eighty_g_no || '');
+  // 80G certificate No. is now the Compliance Registry's responsibility.
+  // We read it from complianceDocs (via useStore) for display only — never edited here.
+  const complianceDocs = useStore(s => s.complianceDocs);
+  const eightyGNo = complianceDocs.find(d => d.type === 'Donor Deduction' && d.registration_number)?.registration_number ?? storedNgoDetails.eighty_g_no ?? '';
   const [ngoState, setNgoState] = useState(storedNgoDetails.state || 'Maharashtra');
   const [notifs, setNotifs] = useState({ agentApprovals: true, complianceDue: true, donorLapse: true, dailyBrief: false, weeklyReport: true });
   const [consentGiven, setConsentGiven] = useState(true);
@@ -127,18 +130,17 @@ const Settings: React.FC = () => {
         if (typeof data?.ngo?.reg_no !== 'undefined') setRegNo(data.ngo.reg_no || '');
         if (typeof data?.ngo?.fcra_reg !== 'undefined') setFcraReg(data.ngo.fcra_reg || '');
         if (typeof data?.ngo?.pan !== 'undefined') setPanNo(data.ngo.pan || '');
-        if (typeof data?.ngo?.eighty_g_no !== 'undefined') setEightyGNo(data.ngo.eighty_g_no || '');
         if (typeof data?.ngo?.state !== 'undefined') setNgoState(data.ngo.state || 'Maharashtra');
         // Hydrate the global ngoDetails slice so Finance and Compliance get
         // the same values without requiring the user to visit Settings first.
         if (data?.ngo) {
           setNgoDetails({
-            name:         data.ngo.name        ?? undefined,
-            reg_no:       data.ngo.reg_no      ?? undefined,
-            fcra_reg:     data.ngo.fcra_reg    ?? undefined,
-            pan:          data.ngo.pan         ?? undefined,
-            eighty_g_no:  data.ngo.eighty_g_no ?? undefined,
-            state:        data.ngo.state       ?? undefined,
+            name:     data.ngo.name     ?? undefined,
+            reg_no:   data.ngo.reg_no   ?? undefined,
+            fcra_reg: data.ngo.fcra_reg ?? undefined,
+            pan:      data.ngo.pan      ?? undefined,
+            state:    data.ngo.state    ?? undefined,
+            // eighty_g_no intentionally omitted — sourced from Compliance Registry
           });
         }
         if (data?.notification_prefs && typeof data.notification_prefs === 'object') {
