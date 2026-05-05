@@ -577,7 +577,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
               {item.action && !actionDone.has(item.id) && (
                 <button
                   className={`priority-item-action ${actionBusy.has(item.id) ? 'priority-item-action--busy' : ''}`}
-                  onClick={() => void handleItemAction(item)}
+                  onClick={(e) => { e.stopPropagation(); void handleItemAction(item); }}
                   style={{ color: meta.color }}
                   disabled={actionBusy.has(item.id)}
                 >
@@ -598,7 +598,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
               {item.actionType === 'ack-lapse-risk' && !actionDone.has(item.id) && (
                 <button
                   className="priority-item-action"
-                  onClick={() => ackLapseRiskItem(item, 'snooze')}
+                  onClick={(e) => { e.stopPropagation(); ackLapseRiskItem(item, 'snooze'); }}
                   style={{ color: meta.color }}
                   title="Hide this for 14 days"
                   disabled={actionBusy.has(item.id)}
@@ -612,7 +612,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
                   <button
                     className="priority-item-snooze"
                     title="Snooze this item"
-                    onClick={() => setSnoozeMenuId(snoozeMenuId === item.id ? null : item.id)}
+                    onClick={(e) => { e.stopPropagation(); setSnoozeMenuId(snoozeMenuId === item.id ? null : item.id); }}
                   >
                     <BellOff size={12} />
                   </button>
@@ -624,13 +624,14 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.12 }}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <div className="snooze-menu-label">Snooze for…</div>
                         {SNOOZE_OPTIONS.map(opt => (
                           <button
                             key={opt.hours}
                             className="snooze-menu-opt"
-                            onClick={() => { onSnooze(item.id, opt.hours); setSnoozeMenuId(null); }}
+                            onClick={(e) => { e.stopPropagation(); onSnooze(item.id, opt.hours); setSnoozeMenuId(null); }}
                           >
                             {opt.label}
                           </button>
