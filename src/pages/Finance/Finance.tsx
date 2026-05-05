@@ -294,6 +294,9 @@ const Finance: React.FC = () => {
           // Cross-module joins (Data Foundation).
           donor_id: entry.donorId || null,
           programme_id: entry.programmeId || null,
+          // Income receipt fields — used by backend for 80G receipt generation.
+          receipt_donor_name: entry.receiptDonorName || null,
+          receipt_donor_pan:  entry.receiptDonorPan  || null,
         }),
       });
       if (res.ok) {
@@ -1069,27 +1072,32 @@ const Finance: React.FC = () => {
                         </div>
                         <span style={{ fontSize: '0.72rem', width: '35px' }}>{Math.round(progress)}%</span>
                       </div>
-                      <span
-                        className={grant.variance > 0 ? 'variance-positive' : grant.variance < 0 ? 'variance-negative' : ''}
-                        style={{ fontSize: '0.78rem' }}
-                      >
-                        {grant.variance === 0
-                          ? '-'
-                          : grant.variance > 0
-                            ? `+₹${grant.variance.toLocaleString()}`
-                            : `-₹${Math.abs(grant.variance).toLocaleString()}`}
-                      </span>
+                      {/* Variance and status are derived from liveSpent so all
+                          grant-row numbers stay consistent with the live progress bar. */}
+                      {(() => {
+                        const variance = grant.total - liveSpent;
+                        const liveStatus = liveSpent > grant.total ? 'Over Budget' : 'On Track';
+                        return (
+                          <span
+                            className={variance > 0 ? 'variance-positive' : variance < 0 ? 'variance-negative' : ''}
+                            style={{ fontSize: '0.78rem' }}
+                          >
+                            {variance === 0 ? '-' : variance > 0 ? `+₹${variance.toLocaleString()}` : `-₹${Math.abs(variance).toLocaleString()}`}
+                          </span>
+                        );
+                      })()}
                       <span>
-                        <span
-                          className={`badge ${grant.status === 'On Track' ? 'badge-success' : ''}`}
-                          style={
-                            grant.status === 'Over Budget'
-                              ? { borderColor: 'var(--color-danger)', color: 'var(--color-danger)', border: '1px solid' }
-                              : {}
-                          }
-                        >
-                          {grant.status}
-                        </span>
+                        {(() => {
+                          const liveStatus = liveSpent > grant.total ? 'Over Budget' : 'On Track';
+                          return (
+                            <span
+                              className={`badge ${liveStatus === 'On Track' ? 'badge-success' : ''}`}
+                              style={liveStatus === 'Over Budget' ? { borderColor: 'var(--color-danger)', color: 'var(--color-danger)', border: '1px solid' } : {}}
+                            >
+                              {liveStatus}
+                            </span>
+                          );
+                        })()}
                       </span>
                       <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
                         <button
