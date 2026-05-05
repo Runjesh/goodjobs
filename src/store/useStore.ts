@@ -138,11 +138,12 @@ export interface CSRCard {
   details?: Record<string, unknown>;
   /** Deal health heuristic (0–100). */
   win_probability?: number;
-  /** ISO date (YYYY-MM-DD) of the next required grant report — used to seed
-   *  compliance records on MoU → Live transition. */
+  /** ISO date (YYYY-MM-DD) of the next required grant report. */
   report_due_date?: string;
-  /** ISO timestamp — last pipeline activity (aligned with backend updated_at in DB mode). */
+  /** ISO timestamp — last pipeline activity (last outreach/touchpoint). */
   last_activity_at?: string;
+  /** ISO timestamp — when the card last moved to its current stage. */
+  stage_entered_at?: string;
   updated_at?: string;
   created_at?: string;
 }
@@ -870,7 +871,11 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   moveCSRCard: (cardId, newCol) => set((state) => ({
-    csrCards: state.csrCards.map(c => (String(c.id) === String(cardId) ? { ...c, col: newCol } : c)),
+    csrCards: state.csrCards.map(c =>
+      String(c.id) === String(cardId)
+        ? { ...c, col: newCol, stage_entered_at: new Date().toISOString() }
+        : c
+    ),
   })),
 
   addCSRCard: (card) => set((state) => ({

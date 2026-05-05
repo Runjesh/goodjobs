@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight, TrendingUp, Users, CalendarClock } from 'lucide-react';
+import { Building2, Search, Plus, Clock, X, Folder, Upload, FileText, Trash2, Download, Bot, Sparkles, Loader2, Edit, ArrowUpRight, Users, CalendarClock } from 'lucide-react';
+import { improvementPct } from '../../utils/outcomes';
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 import type { Task } from '../../utils/tasks';
@@ -40,45 +41,35 @@ function idleDaysFromIso(iso?: string): number {
   return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
 }
 
-/**
- * Compute a heuristic AI win-probability score (0–99) for a CSR card.
- *
- * Scoring model:
- *   Stage base      prospecting=20, pitch=35, diligence=50, mou=75, live=100
- *   Touch penalty   -5 per full week of inactivity
- *   Stage penalty   -2 per full week beyond each stage's expected median
- *                   (prospecting=14d, pitch=21d, diligence=30d, mou=14d, live=90d)
- *   Compliance +    +10 when at least one linked doc is Valid
- *   Compliance -    -15 per Expiring Soon doc, -25 per Expired doc (cumulative, floor 5)
- *
- * Stored `win_probability` takes precedence when manually set by the user.
- */
+// Stage weights and medians (days expected per stage before becoming overdue).
+const STAGE_BASE: Record<string, number> = {
+  prospecting: 20, pitch: 35, diligence: 50, mou: 75, live: 100,
+};
+const STAGE_MEDIAN: Record<string, number> = {
+  prospecting: 14, pitch: 21, diligence: 30, mou: 14, live: 90,
+};
+
 function computeWinProbability(
-  card: { col: string; last_activity_at?: string; updated_at?: string; id: number | string },
+  card: { col: string; last_activity_at?: string; stage_entered_at?: string; updated_at?: string; id: number | string },
   complianceGrantLinks: { grantId: string | number; complianceDocId: string }[],
   complianceDocs: { id: string; status: string }[],
 ): number {
-  const stageBase: Record<string, number> = {
-    prospecting: 20, pitch: 35, diligence: 50, mou: 75, live: 100,
-  };
-  const stageMedian: Record<string, number> = {
-    prospecting: 14, pitch: 21, diligence: 30, mou: 14, live: 90,
-  };
-  let score = stageBase[card.col] ?? 20;
-  const idle = idleDaysFromIso(card.last_activity_at || card.updated_at);
-  const median = stageMedian[card.col] ?? 21;
+  let score = STAGE_BASE[card.col] ?? 20;
 
-  // Stale-touchpoint penalty: -5 per full week of inactivity
-  const weeksIdle = Math.floor(idle / 7);
-  if (weeksIdle > 0) score = Math.max(score - weeksIdle * 5, 5);
+  // Stale-touchpoint penalty: -5 per full week since last outreach activity.
+  const touchIdle = idleDaysFromIso(card.last_activity_at || card.updated_at);
+  const touchWeeks = Math.floor(touchIdle / 7);
+  if (touchWeeks > 0) score = Math.max(score - touchWeeks * 5, 5);
 
-  // Days-in-stage penalty: -2 per full week beyond stage median
-  if (idle > median) {
-    const weeksOver = Math.floor((idle - median) / 7);
+  // Days-in-stage penalty: -2 per full week beyond this stage's expected median.
+  const stageIdle = idleDaysFromIso(card.stage_entered_at || card.updated_at);
+  const median = STAGE_MEDIAN[card.col] ?? 21;
+  if (stageIdle > median) {
+    const weeksOver = Math.floor((stageIdle - median) / 7);
     score = Math.max(score - weeksOver * 2, 5);
   }
 
-  // Compliance adjustment
+  // Compliance: +10 if any linked doc is Valid; -15/Expiring Soon; -25/Expired.
   const links = complianceGrantLinks.filter(l => String(l.grantId) === String(card.id));
   let hasValid = false;
   for (const link of links) {
@@ -93,15 +84,11 @@ function computeWinProbability(
   return Math.min(Math.round(score), 99);
 }
 
-/**
- * KPI shape returned for kanban cards in mou/live stage.
- * Built via the existing selectGrantProgramRollups + grantHealthForProgram utilities.
- */
 interface CardKpi {
   programLabel: string;
   beneficiaryCount: number;
+  outcomeAchievementPct: number | null;
   reportReadinessPct: number;
-  utilPct: number | null;
   nextReportDue: string | null;
   healthStatus: 'healthy' | 'at_risk' | 'overdue';
 }
@@ -811,7 +798,6 @@ const CSR: React.FC = () => {
           const colTotal = colCards.reduce((s, c) => s + c.amount, 0);
           const showKpi = col.id === 'mou' || col.id === 'live';
 
-          // Build a KPI map keyed by card id for this column (only mou/live).
           const kpiByCard = showKpi
             ? new Map<string, CardKpi | null>(colCards.map(card => {
                 const rollups = selectGrantProgramRollups(String(card.id), {
@@ -828,11 +814,15 @@ const CSR: React.FC = () => {
                   complianceLinks: complianceGrantLinks,
                   docs: complianceDocs,
                 });
+                const progOutcomes = beneficiaryOutcomes.filter(o => o.programId === primary.programId);
+                const outcomeAchievementPct = progOutcomes.length > 0
+                  ? Math.round(progOutcomes.reduce((s, o) => s + Math.max(0, improvementPct(o)), 0) / progOutcomes.length)
+                  : null;
                 const kpi: CardKpi = {
                   programLabel: primary.programLabel,
                   beneficiaryCount: primary.beneficiaryCount,
+                  outcomeAchievementPct,
                   reportReadinessPct: primary.reportReadinessPct,
-                  utilPct: health.utilisationPct,
                   nextReportDue: health.nextReportDue,
                   healthStatus: health.status,
                 };
@@ -907,23 +897,34 @@ const CSR: React.FC = () => {
                     <div className="csr-tags">
                       {card.tags.map(tag => <span key={tag} className="csr-tag">{tag}</span>)}
                     </div>
-                    {/* Win-probability badge — "AI: X%" label; shows "Override: X%" when
-                        a manually-entered value takes precedence over the computed score. */}
-                    <div style={{ fontSize: '0.65rem', color: 'var(--color-text-tertiary)', marginTop: 2, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--color-text-tertiary)', marginTop: 2, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
                       <span
-                        title={isManualOverride ? 'Manually set — AI would score ' + aiProb + '%' : 'AI-computed from stage, activity & compliance'}
+                        title={isManualOverride ? `AI score: ${aiProb}%` : 'AI-computed from stage, activity & compliance'}
                         style={{
                           background: displayProb >= 70 ? '#dcfce7' : displayProb >= 40 ? '#fef9c3' : '#fee2e2',
                           color: displayProb >= 70 ? '#166534' : displayProb >= 40 ? '#854d0e' : '#991b1b',
-                          borderRadius: 4, padding: '1px 5px', fontWeight: 700, fontSize: '0.6rem',
+                          borderRadius: 4, padding: '1px 5px', fontWeight: 700, fontSize: '0.6rem', whiteSpace: 'nowrap',
                         }}
                       >
                         {isManualOverride ? 'Override' : 'AI'}: {displayProb}%
                       </span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        placeholder="–"
+                        title="Override AI win probability (0–100; clear to revert to AI)"
+                        value={card.win_probability != null ? card.win_probability : ''}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => {
+                          e.stopPropagation();
+                          const v = e.target.value === '' ? undefined : Math.min(100, Math.max(0, Number(e.target.value)));
+                          updateCSRCard(card.id, { win_probability: v });
+                        }}
+                        style={{ width: 38, fontSize: '0.55rem', border: '1px solid #d1d5db', borderRadius: 3, padding: '1px 3px', textAlign: 'center' }}
+                      />
                       {touchHint ? <span>· {touchHint}</span> : null}
                     </div>
-                    {/* Live programme KPI strip — shown for MoU + Project Live cards.
-                        Surfaces: programme, beneficiaries, report readiness, utilisation, next report. */}
                     {kpi && (
                       <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.375rem', fontSize: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
                         {kpi.programLabel && (
@@ -936,17 +937,17 @@ const CSR: React.FC = () => {
                             <Users size={8} /> {kpi.beneficiaryCount}
                           </span>
                         )}
-                        {(() => {
-                          const u = kpi.utilPct ?? 0;
-                          return (
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 2, background: u < 25 ? '#fee2e2' : u < 60 ? '#fef9c3' : '#f0fdf4', color: u < 25 ? '#991b1b' : u < 60 ? '#854d0e' : '#166534', borderRadius: 4, padding: '1px 5px' }}>
-                              <TrendingUp size={8} /> {u}%
-                            </span>
-                          );
-                        })()}
+                        {kpi.outcomeAchievementPct != null && (
+                          <span
+                            title="Avg % improvement from baseline across measured outcomes"
+                            style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.outcomeAchievementPct >= 70 ? '#f0fdf4' : kpi.outcomeAchievementPct >= 30 ? '#fef9c3' : '#fee2e2', color: kpi.outcomeAchievementPct >= 70 ? '#166534' : kpi.outcomeAchievementPct >= 30 ? '#854d0e' : '#991b1b', borderRadius: 4, padding: '1px 5px' }}
+                          >
+                            {kpi.outcomeAchievementPct}% outcome
+                          </span>
+                        )}
                         {kpi.reportReadinessPct > 0 && (
                           <span
-                            title="% of enrolled beneficiaries with a measured outcome in the last 90 days (data readiness)"
+                            title="% of enrolled beneficiaries with a measured outcome in the last 90 days"
                             style={{ display: 'flex', alignItems: 'center', gap: 2, background: kpi.reportReadinessPct >= 70 ? '#f0fdf4' : '#fef9c3', color: kpi.reportReadinessPct >= 70 ? '#166534' : '#854d0e', borderRadius: 4, padding: '1px 5px' }}
                           >
                             {kpi.reportReadinessPct}% data
