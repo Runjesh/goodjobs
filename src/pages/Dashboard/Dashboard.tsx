@@ -10,7 +10,7 @@ import {
   Sparkles, Target, Activity, UserPlus, ClipboardCheck, PlusCircle,
   ReceiptText, GitMerge
 } from 'lucide-react';
-import type { MisReviewIntent } from '../../store/useStore';
+import type { MisReviewIntent, Transaction, Beneficiary, CSRCard } from '../../store/useStore';
 import type { ProgramBudget } from '../../utils/programFinance';
 import { useStore } from '../../store/useStore';
 import { isVisibleToday, type Task } from '../../utils/tasks';
@@ -360,23 +360,24 @@ function deriveFromStore(
 interface GoingWellChip { id: string; label: string; icon: React.ElementType; color: string; }
 
 function computeGoingWell(
-  transactions: any[],
+  transactions: Transaction[],
   misReviewIntents: MisReviewIntent[],
-  csrCards: any[],
-  beneficiaryOutcomes: { date: string; beneficiaryId: string }[],
+  csrCards: CSRCard[],
+  beneficiaryOutcomes: import('../../utils/outcomes').BeneficiaryOutcome[],
+  beneficiaries: Beneficiary[],
 ): GoingWellChip[] {
   const chips: GoingWellChip[] = [];
   const since24h = Date.now() - 86_400_000;
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  const recentTx = transactions.filter((t: any) => Number(t.timestamp ?? 0) > since24h && Number(t.amount) > 0);
+  const recentTx = transactions.filter(t => Number(t.timestamp ?? 0) > since24h && t.amount > 0);
   if (recentTx.length > 0) {
-    const total = recentTx.reduce((s: number, t: any) => s + Number(t.amount), 0);
+    const total = recentTx.reduce((s, t) => s + t.amount, 0);
     const fmt = total >= 1e5 ? `₹${(total/1e5).toFixed(1)}L` : `₹${(total/1000).toFixed(0)}K`;
     chips.push({ id: 'gw-donations', label: `${fmt} donated today (${recentTx.length} transaction${recentTx.length > 1 ? 's' : ''})`, icon: IndianRupee, color: '#059669' });
   }
 
-  const approvedToday = misReviewIntents.filter((i: MisReviewIntent) => (i.status === 'approved' || i.status === 'edited') && i.decidedAt && new Date(i.decidedAt).getTime() > since24h);
+  const approvedToday = misReviewIntents.filter(i => (i.status === 'approved' || i.status === 'edited') && i.decidedAt && new Date(i.decidedAt).getTime() > since24h);
   if (approvedToday.length > 0)
     chips.push({ id: 'gw-intents', label: `${approvedToday.length} MIS intent${approvedToday.length > 1 ? 's' : ''} approved today`, icon: CheckCircle2, color: '#0891b2' });
 
@@ -724,7 +725,7 @@ const Dashboard: React.FC = () => {
   // Preset only governs layout ordering — Finance users must always get Finance tiles.
   const quickActions   = useMemo(() => getQuickActions(role, transactions, beneficiaries, campaigns, pendingIntents), [role, transactions, beneficiaries, campaigns, pendingIntents]);
   const roleStats      = useMemo(() => getRoleStats(layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns), [layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns]);
-  const goingWellChips = useMemo(() => computeGoingWell(transactions, misReviewIntents, csrCards, beneficiaryOutcomes), [transactions, misReviewIntents, csrCards, beneficiaryOutcomes]);
+  const goingWellChips = useMemo(() => computeGoingWell(transactions, misReviewIntents, csrCards, beneficiaryOutcomes, beneficiaries), [transactions, misReviewIntents, csrCards, beneficiaryOutcomes, beneficiaries]);
 
   // ── Feature 4: Debounced Zustand subscription — re-run brief within 2s of any
   //    relevant store mutation. Uses plain subscribe(state, prevState) form so it
