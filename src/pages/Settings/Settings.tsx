@@ -27,6 +27,7 @@ const Settings: React.FC = () => {
   const { user, login, updateUser } = useAuth();
   const setNgoDetails              = useStore(s => s.setNgoDetails);
   const updatePendingTeamMember    = useStore(s => s.updatePendingTeamMember);
+  const removePendingTeamMember    = useStore(s => s.removePendingTeamMember);
   const pendingTeamMembers         = useStore(s => s.pendingTeamMembers);
   // Data slices for full-org export
   const exportDonors               = useStore(s => s.donors);
@@ -200,10 +201,14 @@ const Settings: React.FC = () => {
 
       const zip = new JSZip();
 
+      // Helper: safely serialize nested objects as JSON strings inside a cell
+      const ser = (v: unknown) => v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+
       zip.file('donors.csv', toCsv(exportDonors.map(d => ({
-        id: d.id, name: d.name, type: d.type, total_given: d.totalGiven,
-        last_gift: d.lastGift, pan: d.pan, location: d.location,
-        email: d.email ?? '', phone: d.phone ?? '', tags: (d.tags ?? []).join(';'),
+        id: d.id, name: d.name, initial: d.initial, type: d.type,
+        total_given: d.totalGiven, last_gift: d.lastGift, pan: d.pan,
+        location: d.location, email: d.email ?? '', phone: d.phone ?? '',
+        tags: (d.tags ?? []).join(';'), meta: ser(d.meta),
       }))));
 
       zip.file('transactions.csv', toCsv(exportTransactions.map(t => ({
@@ -211,29 +216,49 @@ const Settings: React.FC = () => {
         amount: t.amount, method: t.method,
         campaign_id: t.campaignId, campaign_title: t.campaignTitle,
         programme_id: t.programmeId ?? '', grant_id: t.grantId ?? '',
-        date: t.date,
+        date: t.date, timestamp: t.timestamp,
       }))));
 
-      zip.file('beneficiaries.csv', toCsv(exportBeneficiaries.map(b => ({
-        id: b.id, name: b.name, program: b.program, location: b.location,
-        aadhaar: b.aadhaar ? 'yes' : 'no', family_size: b.familySize,
-      }))));
+      // Beneficiaries include joined outcomes rows for each beneficiary
+      const outcomesByBen = new Map<string, typeof exportOutcomes>();
+      exportOutcomes.forEach(o => {
+        const arr = outcomesByBen.get(o.beneficiaryId) ?? [];
+        arr.push(o);
+        outcomesByBen.set(o.beneficiaryId, arr);
+      });
+      zip.file('beneficiaries.csv', toCsv(exportBeneficiaries.map(b => {
+        const outs = (outcomesByBen.get(b.id) ?? []).map(o =>
+          `${o.metricLabel}:${o.current}${o.unit ? o.unit : ''}`
+        ).join(';');
+        return {
+          id: b.id, name: b.name, program: b.program, location: b.location,
+          aadhaar: b.aadhaar ? 'yes' : 'no', family_size: b.familySize,
+          details: ser(b.details), outcomes: outs,
+        };
+      })));
 
       zip.file('grants.csv', toCsv(exportGrants.map(g => ({
         id: g.id, company: g.company, amount: g.amount, project: g.project,
-        tags: (g.tags ?? []).join(';'), status: g.col, date: g.date,
-        report_due_date: g.report_due_date ?? '', win_probability: g.win_probability ?? '',
+        tags: (g.tags ?? []).join(';'), status: g.col, agent: g.agent ?? '',
+        date: g.date, report_due_date: g.report_due_date ?? '',
+        win_probability: g.win_probability ?? '',
+        last_activity_at: g.last_activity_at ?? '',
+        stage_entered_at: g.stage_entered_at ?? '',
+        updated_at: g.updated_at ?? '', created_at: g.created_at ?? '',
+        details: ser(g.details),
       }))));
 
       zip.file('compliance_docs.csv', toCsv(exportCompliance.map(c => ({
         id: c.id, name: c.name, type: c.type, status: c.status,
         expiry: c.expiry, registration_number: c.registration_number ?? '',
         assigned_to: c.assigned_to ?? '', uploaded_at: c.uploadedAt,
+        details: ser(c.details),
       }))));
 
       zip.file('volunteers.csv', toCsv(exportVolunteers.map(v => ({
         id: v.id, name: v.name, skills: (v.skills ?? []).join(';'),
         hours: v.hours, verified: v.verified ? 'yes' : 'no',
+        profile: ser(v.profile),
       }))));
 
       zip.file('form_submissions.csv', toCsv(exportMisIntents.map(m => ({
@@ -248,8 +273,10 @@ const Settings: React.FC = () => {
       zip.file('programme_outcomes.csv', toCsv(exportOutcomes.map(o => ({
         id: o.id, beneficiary_id: o.beneficiaryId, program_id: o.programId,
         metric: o.metric, metric_label: o.metricLabel, baseline: o.baseline,
-        current: o.current, unit: o.unit ?? '', higher_is_better: o.higherIsBetter ? 'yes' : 'no',
+        current: o.current, unit: o.unit ?? '',
+        higher_is_better: o.higherIsBetter ? 'yes' : 'no',
         measured_at: o.measuredAt, note: o.note ?? '',
+        toc_node_id: o.tocNodeId ?? '',
       }))));
 
       const blob = await zip.generateAsync({ type: 'blob' });
@@ -279,13 +306,15 @@ const Settings: React.FC = () => {
       // Single source of truth: write to Zustand so Finance, Compliance, and
       // every other module always reads the same canonical org identity.
       setNgoDetails({
-        name:    data?.ngo?.name    || ngoName,
-        reg_no:  data?.ngo?.reg_no  ?? regNo,
+        name:     data?.ngo?.name    || ngoName,
+        reg_no:   data?.ngo?.reg_no  ?? regNo,
         fcra_reg: data?.ngo?.fcra_reg ?? fcraReg,
-        pan:     data?.ngo?.pan     ?? panNo,
-        state:   data?.ngo?.state   ?? ngoState,
-        // eighty_g_no is intentionally omitted — it is the Compliance Registry's
-        // responsibility (single source of truth). Finance reads it from there.
+        pan:      data?.ngo?.pan     ?? panNo,
+        state:    data?.ngo?.state   ?? ngoState,
+        // 80G number: carry through from compliance docs if available, else keep
+        // existing value in store (Compliance Registry is the canonical source,
+        // but Settings must propagate whatever is currently resolved).
+        eighty_g_no: eightyGNo || undefined,
       });
       toast.success('NGO details saved.');
     } catch {
@@ -531,6 +560,18 @@ const Settings: React.FC = () => {
                         <option value="FINANCE">Finance Officer</option>
                         <option value="FIELD_OPS">Field Officer</option>
                       </select>
+                      <button
+                        type="button"
+                        title="Remove member"
+                        aria-label={`Remove ${member.email}`}
+                        onClick={() => {
+                          removePendingTeamMember(member.email);
+                          toast(`${member.email} removed from the workspace.`, { icon: '✕' });
+                        }}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: 'var(--color-text-tertiary)', flexShrink: 0 }}
+                      >
+                        <XIcon size={16} />
+                      </button>
                     </div>
                   ))}
                 </div>
