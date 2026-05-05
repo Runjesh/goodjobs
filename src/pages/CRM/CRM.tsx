@@ -99,6 +99,9 @@ const CRM: React.FC = () => {
 
   const [detailTab, setDetailTab] = useState<'overview' | 'history'>('overview');
   const [lastOutreachStatus, setLastOutreachStatus] = useState<'idle' | 'sent' | 'delivered'>('idle');
+  /** Id of the donor whose single-send last updated the header delivery pill.
+   *  The pill is only shown when this matches the currently active donor. */
+  const [lastOutreachDonorId, setLastOutreachDonorId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeDonorId || viewMode === 'heatmap') return;
@@ -636,6 +639,9 @@ const CRM: React.FC = () => {
             });
             setTimeout(() => updateOutreachEntry(entryId, { status: 'delivered' }), 2000);
           });
+          // Scope header pill to active donor (single sends); for bulk, null it out.
+          if (!bulkMode && activeDonor) setLastOutreachDonorId(String(activeDonor.id));
+          else setLastOutreachDonorId(null);
           setLastOutreachStatus('sent');
           setTimeout(() => setLastOutreachStatus('delivered'), 2000);
         }
@@ -694,6 +700,8 @@ const CRM: React.FC = () => {
           });
           setTimeout(() => updateOutreachEntry(entryId, { status: 'delivered' }), 2000);
         });
+        if (!bulkMode && activeDonor) setLastOutreachDonorId(String(activeDonor.id));
+        else setLastOutreachDonorId(null);
         setLastOutreachStatus('sent');
         setTimeout(() => setLastOutreachStatus('delivered'), 2000);
       }
@@ -1158,7 +1166,9 @@ const CRM: React.FC = () => {
                         (gift, completed milestone, or outreach log entry). Uses the
                         last channel the donor was contacted on, not just preferred. */}
                     {daysSinceLastContact >= 60 && (() => {
-                      const lastProg = donorTransactions.find(t => t.programmeId)?.programmeId;
+                      const lastProg = [...donorTransactions]
+                        .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+                        .find(t => t.programmeId)?.programmeId;
                       const progName = lastProg ? formatProgId(lastProg) : null;
                       const donorFirstName = activeDonor.name.split(' ')[0];
                       const attentionMsg = progName
@@ -1245,7 +1255,7 @@ const CRM: React.FC = () => {
                   <Trash2 size={16} />
                 </button>
               </div>
-              {lastOutreachStatus !== 'idle' && (
+              {lastOutreachStatus !== 'idle' && lastOutreachDonorId === String(activeDonor?.id) && (
                 <div className={`outreach-delivery-pill outreach-delivery-pill--${lastOutreachStatus}`} style={{ marginTop: '0.5rem' }}>
                   {lastOutreachStatus === 'delivered'
                     ? <><CheckCircle2 size={12} /> Delivered</>
