@@ -191,6 +191,7 @@
 }
 .priority-item:hover { background: var(--color-bg-main); }
 .priority-item--escalated .priority-item-text { font-weight: 600; }
+.priority-item--clickable:hover { background: var(--color-bg-main); box-shadow: 0 0 0 1px rgba(0,0,0,0.06) inset; }
 
 .priority-item-dot {
   width: 6px; height: 6px;

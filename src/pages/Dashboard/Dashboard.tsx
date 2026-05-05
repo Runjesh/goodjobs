@@ -248,8 +248,8 @@ function deriveFromStore(
       items.push({
         id: `clawback-${b.programId}`,
         text: `Clawback risk: ${grantName} — only ${utilPct}% utilised past halfway mark`,
-        action: 'View grant finance',
-        path: b.grantId ? `/grants/${encodeURIComponent(String(b.grantId))}` : '/finance?filter=clawback',
+        action: 'Review in Finance',
+        path: `/finance?filter=clawback${b.grantId ? `&grantId=${encodeURIComponent(String(b.grantId))}` : ''}`,
         level: 'urgent',
         ageDays: 0,
       });
@@ -361,9 +361,11 @@ function computeGoingWell(
   transactions: any[],
   misReviewIntents: MisReviewIntent[],
   csrCards: any[],
+  beneficiaryOutcomes: { date: string; beneficiaryId: string }[],
 ): GoingWellChip[] {
   const chips: GoingWellChip[] = [];
   const since24h = Date.now() - 86_400_000;
+  const todayStr = new Date().toISOString().slice(0, 10);
 
   const recentTx = transactions.filter((t: any) => Number(t.timestamp ?? 0) > since24h && Number(t.amount) > 0);
   if (recentTx.length > 0) {
@@ -375,6 +377,15 @@ function computeGoingWell(
   const approvedToday = misReviewIntents.filter((i: MisReviewIntent) => (i.status === 'approved' || i.status === 'edited') && i.decidedAt && new Date(i.decidedAt).getTime() > since24h);
   if (approvedToday.length > 0)
     chips.push({ id: 'gw-intents', label: `${approvedToday.length} MIS intent${approvedToday.length > 1 ? 's' : ''} approved today`, icon: CheckCircle2, color: '#0891b2' });
+
+  // Beneficiaries enrolled — proxy: unique beneficiaries with an outcome recorded today
+  const enrolledToday = new Set(
+    beneficiaryOutcomes
+      .filter(o => o.date && o.date.slice(0, 10) === todayStr)
+      .map(o => o.beneficiaryId)
+  );
+  if (enrolledToday.size > 0)
+    chips.push({ id: 'gw-beneficiaries', label: `${enrolledToday.size} beneficiar${enrolledToday.size > 1 ? 'ies' : 'y'} enrolled or active today`, icon: Users, color: '#059669' });
 
   const recentlyAdvanced = csrCards.filter((c: any) => {
     const upd = c.updated_at ?? c.last_activity_at;
@@ -533,11 +544,14 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
           {visible.map((item, idx) => (
             <motion.li
               key={item.id}
-              className={`priority-item ${item.ageDays && item.ageDays >= 5 ? 'priority-item--escalated' : ''}`}
+              className={`priority-item ${item.ageDays && item.ageDays >= 5 ? 'priority-item--escalated' : ''} ${item.path ? 'priority-item--clickable' : ''}`}
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
               transition={{ delay: idx * 0.04 }}
+              onClick={item.path && !item.actionType ? () => onAction(item.path!) : undefined}
+              style={item.path && !item.actionType ? { cursor: 'pointer' } : undefined}
+              title={item.path && !item.actionType ? `Go to ${item.path}` : undefined}
             >
               <span className="priority-item-dot" style={{ background: meta.color }} />
               <span className="priority-item-text">{item.text}</span>
@@ -679,8 +693,9 @@ const Dashboard: React.FC = () => {
   const { user }   = useAuth();
   const { donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards } = useStore();
   const sliceTasks       = useStore(s => s.tasks);
-  const misReviewIntents = useStore(s => s.misReviewIntents);
-  const programBudgets   = useStore(s => s.programBudgets);
+  const misReviewIntents  = useStore(s => s.misReviewIntents);
+  const programBudgets    = useStore(s => s.programBudgets);
+  const beneficiaryOutcomes = useStore(s => s.beneficiaryOutcomes);
 
   const [briefItems,   setBriefItems]   = useState<PriorityItem[]>([]);
   const [briefLoading, setBriefLoading] = useState(true);
@@ -697,15 +712,19 @@ const Dashboard: React.FC = () => {
   const pendingIntents = useMemo(() => misReviewIntents.filter(i => i.status === 'pending').length, [misReviewIntents]);
   const quickActions   = useMemo(() => getQuickActions(layoutRole, transactions, beneficiaries, campaigns, pendingIntents), [layoutRole, transactions, beneficiaries, campaigns, pendingIntents]);
   const roleStats      = useMemo(() => getRoleStats(layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns), [layoutRole, transactions, beneficiaries, complianceDocs, donors, campaigns]);
-  const goingWellChips = useMemo(() => computeGoingWell(transactions, misReviewIntents, csrCards), [transactions, misReviewIntents, csrCards]);
+  const goingWellChips = useMemo(() => computeGoingWell(transactions, misReviewIntents, csrCards, beneficiaryOutcomes), [transactions, misReviewIntents, csrCards, beneficiaryOutcomes]);
 
   // ── Feature 4: Debounced store subscription — re-run brief within 2s of any
-  //    change to donors, transactions, beneficiaries, misReviewIntents, or csrCards ──
+  //    relevant change including status edits, not just length changes ──
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const storeKey = useMemo(
-    () => [donors.length, transactions.length, beneficiaries.length, misReviewIntents.length, csrCards.length].join(','),
-    [donors.length, transactions.length, beneficiaries.length, misReviewIntents.length, csrCards.length],
-  );
+  const storeKey = useMemo(() => {
+    const intentSig = misReviewIntents.map(i => `${i.id}:${i.status}:${i.decidedAt ?? ''}`).join('|');
+    const donorSig  = donors.map(d => `${d.id}:${d.lastGift ?? ''}:${d.totalGiven}`).join('|');
+    const txSig     = transactions.map(t => t.id).join('|');
+    const benSig    = beneficiaries.map(b => b.id).join('|');
+    const csrSig    = csrCards.map((c: any) => `${c.id}:${c.col}:${c.updated_at ?? ''}`).join('|');
+    return [intentSig, donorSig, txSig, benSig, csrSig].join('///');
+  }, [misReviewIntents, donors, transactions, beneficiaries, csrCards]);
   const prevStoreKey = useRef(storeKey);
   useEffect(() => {
     if (storeKey === prevStoreKey.current) return;
