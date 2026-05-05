@@ -248,6 +248,13 @@ const Compliance: React.FC = () => {
             ...(docForm.issuing_authority.trim() ? { issuing_authority: docForm.issuing_authority.trim() } : {}),
             ...(docForm.registration_ref.trim() ? { registration_ref: docForm.registration_ref.trim() } : {}),
             ...(docForm.review_notes.trim() ? { review_notes: docForm.review_notes.trim() } : {}),
+            // NGO identity from single-source-of-truth Zustand slice — ensures
+            // compliance documents carry canonical org metadata at upload time.
+            ngo_name:     ngoDetails.name     || undefined,
+            ngo_pan:      ngoDetails.pan      || undefined,
+            ngo_reg_no:   ngoDetails.reg_no   || undefined,
+            ngo_fcra_reg: ngoDetails.fcra_reg || undefined,
+            ngo_80g_no:   ngoDetails.eighty_g_no || undefined,
           },
         }),
       });

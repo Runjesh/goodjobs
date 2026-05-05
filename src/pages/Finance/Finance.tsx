@@ -39,7 +39,9 @@ const Finance: React.FC = () => {
   const [entry, setEntry] = useState<{
     description: string; amount: number; type: 'Expense' | 'Income' | 'Transfer'; fund: string;
     grantId: string; budgetHeadId: string; donorId: string; programmeId: string;
-  }>({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '' });
+    /** Income-receipt auto-fill fields — populated from the linked CRM donor. */
+    receiptDonorName: string; receiptDonorPan: string;
+  }>({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '', receiptDonorName: '', receiptDonorPan: '' });
   const [donorSearch, setDonorSearch] = useState('');
   const [classification, setClassification] = useState<{category: string, confidence: number} | null>(null);
   const [isClassifying, setIsClassifying] = useState(false);
@@ -325,7 +327,7 @@ const Finance: React.FC = () => {
       toast.success(`Saved locally: ₹${Number(entry.amount).toLocaleString()} (${entry.type})${tagSuffix}. Will sync when the server is reachable.`);
     }
     setShowEntryModal(false);
-    setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '' });
+    setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '', receiptDonorName: '', receiptDonorPan: '' });
     setDonorSearch('');
   };
 
@@ -1014,7 +1016,18 @@ const Finance: React.FC = () => {
             <div style={{ height: grantsVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
               {grantsVirtualizer.getVirtualItems().map(vr => {
                 const grant = grants[vr.index];
-                const progress = (grant.spent / grant.total) * 100;
+                // Live spend: sum journal expense entries tagged to this grant
+                // (via grantTag or direct grantId). Replaces the stored grant.spent
+                // field so the progress bar always reflects booked transactions.
+                const liveSpent = journalEntries
+                  .filter(e =>
+                    e.entryType === 'Expense' && (
+                      (e.grantTag && String(e.grantTag.grantId) === String(grant.id)) ||
+                      (!e.grantTag && e.grantId && String(e.grantId) === String(grant.id))
+                    )
+                  )
+                  .reduce((sum, e) => sum + Math.abs(Number(e.amount) || 0), 0);
+                const progress = grant.total > 0 ? (liveSpent / grant.total) * 100 : 0;
                 return (
                   <div
                     key={grant.id}
@@ -1277,25 +1290,24 @@ const Finance: React.FC = () => {
                       const val = ev.target.value;
                       setDonorSearch(val);
                       const match = donors.find(d => d.name.toLowerCase() === val.toLowerCase());
-                      setEntry(prev => ({ ...prev, donorId: match ? match.id : '' }));
+                      setEntry(prev => ({
+                        ...prev,
+                        donorId: match ? match.id : '',
+                        // Auto-fill receipt fields from the linked CRM donor so the
+                        // 80G receipt has the correct name + PAN without manual entry.
+                        receiptDonorName: match ? match.name : prev.receiptDonorName,
+                        receiptDonorPan:  match ? (match.pan || '') : prev.receiptDonorPan,
+                      }));
                     }}
                   />
                   <datalist id="fin-donor-list">
                     {donors.map(d => <option key={d.id} value={d.name} />)}
                   </datalist>
-                  {entry.donorId && (() => {
-                    const linked = donors.find(d => d.id === entry.donorId);
-                    return (
-                      <div style={{ fontSize: '0.7rem', marginTop: 2 }}>
-                        <span style={{ color: 'var(--color-success)' }}>Linked to CRM donor</span>
-                        {linked && entry.type === 'Income' && (
-                          <span style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>
-                            · Receipt: <strong>{linked.name}</strong>{linked.pan ? ` · PAN ${linked.pan}` : ''}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  {entry.donorId && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--color-success)', marginTop: 2 }}>
+                      Linked to CRM donor
+                    </div>
+                  )}
                 </div>
                 <div className="input-group" style={{ marginBottom: 0 }}>
                   <label className="input-label">Programme (optional)</label>
@@ -1334,6 +1346,17 @@ const Finance: React.FC = () => {
                           if (res.ok) {
                             const data = await res.json();
                             setClassification(data);
+                            // Map AI category to a programme — try an exact
+                            // case-insensitive match first, then a prefix match.
+                            if (data?.category && !entry.programmeId) {
+                              const cat = String(data.category).toLowerCase();
+                              const mapped = allProgrammes.find(p =>
+                                p.toLowerCase() === cat ||
+                                p.toLowerCase().startsWith(cat.slice(0, Math.max(5, cat.length))) ||
+                                cat.startsWith(p.toLowerCase().slice(0, Math.max(5, p.length)))
+                              );
+                              if (mapped) setEntry(prev => ({ ...prev, programmeId: mapped }));
+                            }
                           }
                         } catch (err) {} finally { setIsClassifying(false); }
                       }
@@ -1377,6 +1400,27 @@ const Finance: React.FC = () => {
                   <option>Restricted Grant</option>
                 </select>
               </div>
+              {/* Income receipt fields — auto-filled from the linked CRM donor.
+                  Both fields are editable so the user can correct auto-fill.
+                  These values are sent to the backend for 80G receipt generation. */}
+              {entry.type === 'Income' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Donor name (receipt)</label>
+                    <input className="input-field" placeholder="Auto-filled from donor"
+                      value={entry.receiptDonorName}
+                      onChange={e => setEntry(prev => ({ ...prev, receiptDonorName: e.target.value }))}
+                    />
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label className="input-label">Donor PAN (receipt)</label>
+                    <input className="input-field" placeholder="Auto-filled from donor"
+                      value={entry.receiptDonorPan}
+                      onChange={e => setEntry(prev => ({ ...prev, receiptDonorPan: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              )}
               {entry.type === 'Expense' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
                   <div className="input-group" style={{ marginBottom: 0 }}>
