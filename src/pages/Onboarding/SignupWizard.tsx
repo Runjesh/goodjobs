@@ -172,7 +172,8 @@ const SignupWizard: React.FC = () => {
   const seedStoreFromWizardState = useCallback((data: WizardData) => {
     const store = useStore.getState();
     // Cause area → grant matching prefilter.
-    const ca = data.orgProfile?.causeArea ?? user?.orgProfile?.causeArea;
+    // causeArea lives on firstProgram (the step where the user picks their cause).
+    const ca = data.firstProgram?.causeArea;
     if (ca && !store.ngoDetails.causeArea) {
       store.setNgoDetails({ causeArea: ca });
     }
@@ -186,7 +187,9 @@ const SignupWizard: React.FC = () => {
     invites.forEach((i) =>
       store.addPendingTeamMember({ email: i.email.trim(), role: i.role, invitedAt: new Date().toISOString() }),
     );
-  }, [user?.orgProfile?.causeArea]);
+  // No deps on user — all data comes from the WizardData argument.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const advance = useCallback((status: 'completed' | 'skipped') => {
     setState((prev) => {

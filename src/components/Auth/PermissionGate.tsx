@@ -67,25 +67,32 @@ const PermissionGate: React.FC<PermissionGateProps> = ({
   const role: UserRole = requiredRole ?? inferRequiredRole(module, action);
   const roleLabel = ROLE_META[role]?.label ?? role;
 
-  const child = React.cloneElement(children, {
-    disabled: true,
-    'aria-disabled': true,
-    style: { ...(children.props.style ?? {}), opacity: 0.45, cursor: 'not-allowed' },
-    onClick: (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setShowTip(true);
-    },
-  });
-
   return (
     <span
       ref={wrapRef}
       style={{ position: 'relative', display: 'inline-flex' }}
       onMouseEnter={() => setShowTip(true)}
       onMouseLeave={() => setShowTip(false)}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowTip((v) => !v);
+      }}
+      aria-disabled="true"
     >
-      {child}
+      {/* Overlay absorbs pointer events so the child can't fire its own click. */}
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 1,
+          cursor: 'not-allowed',
+        }}
+      />
+      <span style={{ opacity: 0.45, pointerEvents: 'none', display: 'contents' }}>
+        {children}
+      </span>
       {showTip && (
         <span
           role="tooltip"
