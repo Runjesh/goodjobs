@@ -600,6 +600,8 @@ const CRM: React.FC = () => {
         // the backend returns it; otherwise infer all-success.
         let sent = sendableIds.length;
         let failed: string[] = [];
+        // successIds defaults to all sendable; overridden with exact ok-flagged ids from backend.
+        let successIds: Array<string | number> = [...sendableIds];
         try {
           const data = (await res.json()) as OutreachResponse;
           if (Array.isArray(data?.results)) {
@@ -607,6 +609,7 @@ const CRM: React.FC = () => {
             failed = data.results
               .filter(r => !r.ok)
               .map(r => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
+            successIds = data.results.filter(r => r.ok).map(r => r.donor_id);
           }
         } catch { /* keep defaults */ }
         const skipped = missingEmail.map(id => donorMap.get(String(id))?.name || String(id));
@@ -616,19 +619,12 @@ const CRM: React.FC = () => {
         const failedSummary = failed.length ? ` · ${failed.length} failed: ${trunc(failed)}` : '';
         const skippedSummary = skipped.length ? ` · ${skipped.length} skipped (no email): ${trunc(skipped)}` : '';
         toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}${skippedSummary}`, { icon: '📧', duration: 8000 });
-        // Keep composer open if anything failed/skipped so the user sees the
-        // expandable list; close cleanly when everything succeeded.
-        if (failed.length === 0 && skipped.length === 0) {
-          setShowComposer(false);
-          setSelectedIds(new Set());
-          setBulkMode(false);
-          setLastOutreachStatus('sent');
-          const sentDonorIds = bulkMode
-            ? sendableIds.filter(id => !failed.some(n => n === donorMap.get(String(id))?.name))
-            : (activeDonor ? [String(activeDonor.id)] : []);
+        // Log a touchpoint entry for every successfully sent recipient regardless
+        // of whether any others failed (partial-success should still record contact).
+        if (successIds.length > 0) {
           const now = Date.now();
-          sentDonorIds.forEach((did, i) => {
-            const entryId = `${now}-${i}`;
+          successIds.forEach((did, i) => {
+            const entryId = `${now}-email-${i}`;
             addOutreachEntry({
               id: entryId,
               donorId: String(did),
@@ -642,6 +638,12 @@ const CRM: React.FC = () => {
           });
           setLastOutreachStatus('sent');
           setTimeout(() => setLastOutreachStatus('delivered'), 2000);
+        }
+        // Keep composer open if anything failed/skipped so the user sees the list.
+        if (failed.length === 0 && skipped.length === 0) {
+          setShowComposer(false);
+          setSelectedIds(new Set());
+          setBulkMode(false);
         }
         return;
       }
@@ -661,6 +663,7 @@ const CRM: React.FC = () => {
       if (!res.ok) throw new Error('send');
       let sent = donorIds.length;
       let failed: string[] = [];
+      let successIds: Array<string | number> = [...donorIds];
       try {
         const data = (await res.json()) as OutreachResponse;
         if (Array.isArray(data?.results)) {
@@ -668,22 +671,18 @@ const CRM: React.FC = () => {
           failed = data.results
             .filter(r => !r.ok)
             .map(r => donorMap.get(String(r.donor_id))?.name || String(r.donor_id));
+          successIds = data.results.filter(r => r.ok).map(r => r.donor_id);
         }
       } catch { /* keep defaults */ }
       setLastSendFailures(failed);
       const trunc = (names: string[]) => names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3} more` : '');
       const failedSummary = failed.length ? ` · ${failed.length} failed: ${trunc(failed)}` : '';
       toast.success(`Sent ${sent}/${donorIds.length}${failedSummary}`, { icon: '📲', duration: 8000 });
-      if (failed.length === 0) {
-        setShowComposer(false);
-        setSelectedIds(new Set());
-        setBulkMode(false);
-        const sentDonorIds = bulkMode
-          ? donorIds.filter(id => !failed.some(n => n === donorMap.get(String(id))?.name))
-          : (activeDonor ? [String(activeDonor.id)] : []);
+      // Log a touchpoint for every successfully sent donor (partial success included).
+      if (successIds.length > 0) {
         const now = Date.now();
-        sentDonorIds.forEach((did, i) => {
-          const entryId = `${now}-${i}`;
+        successIds.forEach((did, i) => {
+          const entryId = `${now}-wa-${i}`;
           addOutreachEntry({
             id: entryId,
             donorId: String(did),
@@ -697,6 +696,11 @@ const CRM: React.FC = () => {
         });
         setLastOutreachStatus('sent');
         setTimeout(() => setLastOutreachStatus('delivered'), 2000);
+      }
+      if (failed.length === 0) {
+        setShowComposer(false);
+        setSelectedIds(new Set());
+        setBulkMode(false);
       }
     } catch {
       toast.error('Failed to send (backend not reachable).');
