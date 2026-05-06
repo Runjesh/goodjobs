@@ -28,6 +28,8 @@ from core.auth import (
 )
 from core.observability import init_sentry
 from jobs.lapse_detector import run_lapse_detection
+from jobs.scheduled_export import run_scheduled_exports
+from core.export_builder import build_ngo_export_zip
 from core.analytics import predict_revenue, detect_anomalies, calculate_propensity_score, suggest_campaign_goal, classify_fcra_transaction
 from agents.orchestrator import process_orchestration
 from core.gen_ai import summarize_conversations, analyze_sentiment, draft_annual_report
@@ -96,6 +98,7 @@ CRM_OUTREACH_LOG_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 DONOR_LIFECYCLE_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Any]]] = {}
 FINANCE_EVENTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 NOTIFICATIONS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+EXPORT_SCHEDULE_MEM_BY_NGO: Dict[str, Dict[str, Any]] = {}
 
 
 def _get_mem_inbox_state(ngo_id: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
@@ -2922,6 +2925,11 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+
+class ExportScheduleRequest(BaseModel):
+    enabled: bool
+    frequency: str  # "weekly" or "monthly"
+
 @app.post("/auth/register", tags=["Auth"])
 def register_ngo(body: RegisterNgoRequest):
     """
@@ -3126,6 +3134,7 @@ def get_settings(current_user: TokenUser = Depends(get_current_user)):
                 "profile": {"full_name": s["profile"].get("full_name")},
                 "ngo": {**s["ngo"], "ngo_id": current_user.ngo_id, "meta": s.get("ngo_meta", {})},
                 "notification_prefs": s.get("notification_prefs", {}),
+                "export_schedule": EXPORT_SCHEDULE_MEM_BY_NGO.get(current_user.ngo_id, {"enabled": False, "frequency": "weekly"}),
             }
         cur = conn.cursor()
         cur.execute("SELECT full_name FROM users WHERE id = %s::uuid", (current_user.user_id,))
@@ -3157,6 +3166,23 @@ def get_settings(current_user: TokenUser = Depends(get_current_user)):
             p = cur.fetchone()
         except Exception:
             p = None
+        # export_schedule: try dedicated table, fall back to memory store
+        eq = None
+        try:
+            cur.execute(
+                """
+                SELECT schedule
+                FROM ngo_export_schedules
+                WHERE ngo_id = %s::uuid
+                """,
+                (current_user.ngo_id,),
+            )
+            eq = cur.fetchone()
+        except Exception:
+            eq = None
+        export_schedule = (eq[0] if eq else None) or EXPORT_SCHEDULE_MEM_BY_NGO.get(
+            current_user.ngo_id, {"enabled": False, "frequency": "weekly"}
+        )
         return {
             "profile": {"full_name": (u[0] if u else "")},
             "ngo": {
@@ -3169,6 +3195,7 @@ def get_settings(current_user: TokenUser = Depends(get_current_user)):
                 "meta": ngo_meta,
             },
             "notification_prefs": (p[0] if p else {}),
+            "export_schedule": export_schedule,
         }
 
 
@@ -3502,6 +3529,39 @@ def remove_team_member(
 
 
 @app.on_event("startup")
+def _start_export_scheduler() -> None:
+    """
+    Register the daily export-schedule check with APScheduler.
+    Runs every day at 06:00 IST.  The job's own _should_run_today() gate ensures
+    it only sends for NGOs whose weekly/monthly cadence falls on today.
+
+    Failure modes:
+      - ImportError  : APScheduler not installed → logs warning, app continues.
+      - Any other    : re-raised so misconfiguration is visible at startup.
+    """
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+    except ImportError:
+        print(
+            "⚠  APScheduler not installed — automatic scheduled exports disabled.\n"
+            "   Add 'apscheduler>=3.10.0' to backend/requirements.txt and restart."
+        )
+        return
+
+    scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
+    scheduler.add_job(
+        run_scheduled_exports,
+        trigger=CronTrigger(hour=6, minute=0, timezone="Asia/Kolkata"),
+        id="scheduled_export",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.start()
+    print("✅ Export scheduler started — daily check at 06:00 IST.")
+
+
+@app.on_event("startup")
 async def _load_revoked_members_from_db() -> None:
     """
     Rehydrate the in-process revocation blocklist from the DB on startup so
@@ -3556,6 +3616,40 @@ def post_settings_notifications(body: NotificationPrefsRequest, current_user: To
         return {"ok": True, "notification_prefs": row[0] if row else body.prefs, "source": "db"}
 
 
+@app.post("/settings/export-schedule", tags=["Settings"])
+def post_settings_export_schedule(body: ExportScheduleRequest, current_user: TokenUser = Depends(get_current_user)):
+    """Save the scheduled automatic export preference for the NGO."""
+    freq = body.frequency if body.frequency in ("weekly", "monthly") else "weekly"
+    schedule = {"enabled": body.enabled, "frequency": freq, "email": current_user.email}
+    # Always persist to memory store (shared between memory and DB mode for resilience)
+    EXPORT_SCHEDULE_MEM_BY_NGO[current_user.ngo_id] = schedule
+    with db_conn() as conn:
+        if conn is None:
+            return {"ok": True, "export_schedule": schedule, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ngo_export_schedules (
+                ngo_id UUID PRIMARY KEY,
+                schedule JSONB NOT NULL DEFAULT '{}'::jsonb,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO ngo_export_schedules (ngo_id, schedule)
+            VALUES (%s::uuid, %s::jsonb)
+            ON CONFLICT (ngo_id)
+            DO UPDATE SET schedule = EXCLUDED.schedule, updated_at = CURRENT_TIMESTAMP
+            RETURNING schedule
+            """,
+            (current_user.ngo_id, json.dumps(schedule)),
+        )
+        row = cur.fetchone()
+        return {"ok": True, "export_schedule": row[0] if row else schedule, "source": "db"}
+
+
 @app.post("/auth/change-password", tags=["Auth"])
 def change_password(body: ChangePasswordRequest, current_user: TokenUser = Depends(get_current_user)):
     # Demo auth
@@ -3593,220 +3687,41 @@ def dpdp_export(current_user: TokenUser = Depends(get_current_user)):
     Returns a ZIP containing one CSV per entity type.  In production the data
     is fetched from the database; in demo / memory mode the in-memory stores
     are used so the download is never empty.
+    Uses the shared build_ngo_export_zip() so on-demand and scheduled exports
+    produce identical output.
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     filename = f"goodjobs_export_{today}.zip"
-
-    def _make_csv(rows: list[dict]) -> str:
-        if not rows:
-            return ""
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()), extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-        return buf.getvalue()
-
-    def _ser(v: Any) -> str:
-        if v is None:
-            return ""
-        if isinstance(v, (dict, list)):
-            return json.dumps(v, ensure_ascii=False)
-        return str(v)
-
     ngo_id = current_user.ngo_id
     s = get_settings(current_user)
-    exported_at = datetime.now(timezone.utc).isoformat()
+    ngo_info = s.get("ngo", {})
 
     with db_conn() as conn:
-        # ── donors ──────────────────────────────────────────────────────────
-        if conn is not None:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT id::text, full_name, COALESCE(donor_type,'') as donor_type,
-                       COALESCE(total_lifetime_value,0)::float as total_given,
-                       COALESCE(pan_masked,'') as pan,
-                       COALESCE(location_text,'') as location,
-                       COALESCE(email,'') as email,
-                       COALESCE(phone,'') as phone,
-                       COALESCE(tags,'{}') as tags
-                FROM donors WHERE ngo_id = %s::uuid ORDER BY created_at DESC
-                """,
-                (ngo_id,),
-            )
-            donors_rows = [
-                {"id": r[0], "name": r[1], "type": r[2], "total_given": r[3],
-                 "pan": r[4], "location": r[5], "email": r[6], "phone": r[7],
-                 "tags": ";".join(list(r[8] or []))}
-                for r in cur.fetchall()
-            ]
-        else:
+        if conn is None:
+            # Seed in-memory stores before passing them to the builder
             _seed_memory_crm(ngo_id)
-            donors_rows = [
-                {"id": _ser(d.get("id")), "name": _ser(d.get("name")),
-                 "type": _ser(d.get("type")), "total_given": _ser(d.get("totalGiven")),
-                 "pan": _ser(d.get("pan")), "location": _ser(d.get("location")),
-                 "email": _ser(d.get("email")), "phone": _ser(d.get("phone")),
-                 "tags": ";".join(d.get("tags") or [])}
-                for d in DONORS_MEM_BY_NGO.get(ngo_id, [])
-            ]
-
-        # ── transactions ─────────────────────────────────────────────────────
-        if conn is not None:
-            cur.execute(
-                """
-                SELECT id::text, donor_id::text, COALESCE(donor_name,'') as donor_name,
-                       amount::float, COALESCE(method,'') as method,
-                       COALESCE(campaign_id::text,'') as campaign_id,
-                       COALESCE(campaign_title,'') as campaign_title,
-                       created_at
-                FROM transactions WHERE ngo_id = %s::uuid ORDER BY created_at DESC
-                """,
-                (ngo_id,),
-            )
-            tx_rows = [
-                {"id": r[0], "donor_id": r[1], "donor_name": r[2], "amount": r[3],
-                 "method": r[4], "campaign_id": r[5], "campaign_title": r[6],
-                 "date": _ser(r[7])}
-                for r in cur.fetchall()
-            ]
-        else:
-            tx_rows = [
-                {"id": _ser(t.get("id")), "donor_id": _ser(t.get("donorId")),
-                 "donor_name": _ser(t.get("donorName")), "amount": _ser(t.get("amount")),
-                 "method": _ser(t.get("method")), "campaign_id": _ser(t.get("campaignId")),
-                 "campaign_title": _ser(t.get("campaignTitle")), "date": _ser(t.get("date"))}
-                for t in TX_MEM_BY_NGO.get(ngo_id, [])
-            ]
-
-        # ── beneficiaries ─────────────────────────────────────────────────────
-        if conn is not None:
-            cur.execute(
-                """
-                SELECT id, name, program, location, aadhaar, family_size,
-                       COALESCE(details,'{}') as details
-                FROM program_beneficiaries WHERE ngo_id = %s ORDER BY created_at DESC
-                """,
-                (ngo_id,),
-            )
-            ben_rows = [
-                {"id": _ser(r[0]), "name": _ser(r[1]), "program": _ser(r[2]),
-                 "location": _ser(r[3]), "aadhaar": "yes" if r[4] else "no",
-                 "family_size": _ser(r[5]), "details": _ser(r[6])}
-                for r in cur.fetchall()
-            ]
-        else:
             _seed_memory_beneficiaries(ngo_id)
-            ben_rows = [
-                {"id": _ser(b.get("id")), "name": _ser(b.get("name")),
-                 "program": _ser(b.get("program")), "location": _ser(b.get("location")),
-                 "aadhaar": "yes" if b.get("aadhaar") else "no",
-                 "family_size": _ser(b.get("familySize")), "details": _ser(b.get("details"))}
-                for b in BENEFICIARIES_MEM_BY_NGO.get(ngo_id, [])
-            ]
-
-        # ── CSR / grants ──────────────────────────────────────────────────────
-        if conn is not None:
-            cur.execute(
-                """
-                SELECT id::text, company, amount::float, project,
-                       COALESCE(tags,'{}') as tags, status, COALESCE(agent,'') as agent,
-                       COALESCE(report_due_date,'') as report_due_date,
-                       COALESCE(win_probability::text,'') as win_probability
-                FROM csr_pipeline WHERE ngo_id = %s::uuid ORDER BY created_at DESC
-                """,
-                (ngo_id,),
-            )
-            grant_rows = [
-                {"id": r[0], "company": r[1], "amount": r[2], "project": r[3],
-                 "tags": ";".join(list(r[4] or [])), "status": r[5], "agent": r[6],
-                 "report_due_date": r[7], "win_probability": r[8]}
-                for r in cur.fetchall()
-            ]
-        else:
             _seed_memory_csr(ngo_id)
-            grant_rows = [
-                {"id": _ser(g.get("id")), "company": _ser(g.get("company")),
-                 "amount": _ser(g.get("amount")), "project": _ser(g.get("project")),
-                 "tags": ";".join(g.get("tags") or []), "status": _ser(g.get("col")),
-                 "agent": _ser(g.get("agent")), "report_due_date": _ser(g.get("report_due_date")),
-                 "win_probability": _ser(g.get("win_probability"))}
-                for g in CSR_CARDS_MEM_BY_NGO.get(ngo_id, [])
-            ]
-
-        # ── compliance docs ───────────────────────────────────────────────────
-        if conn is not None:
-            cur.execute(
-                """
-                SELECT id::text, name, doc_type, status, expiry_date,
-                       COALESCE(registration_number,'') as reg_no,
-                       COALESCE(assigned_to,'') as assigned_to,
-                       uploaded_at
-                FROM compliance_documents WHERE ngo_id = %s::uuid ORDER BY uploaded_at DESC
-                """,
-                (ngo_id,),
-            )
-            comp_rows = [
-                {"id": r[0], "name": r[1], "type": r[2], "status": r[3],
-                 "expiry": _ser(r[4]), "registration_number": r[5],
-                 "assigned_to": r[6], "uploaded_at": _ser(r[7])}
-                for r in cur.fetchall()
-            ]
-        else:
-            comp_rows = [
-                {"id": _ser(c.get("id")), "name": _ser(c.get("name")),
-                 "type": _ser(c.get("type")), "status": _ser(c.get("status")),
-                 "expiry": _ser(c.get("expiry")),
-                 "registration_number": _ser(c.get("registration_number")),
-                 "assigned_to": _ser(c.get("assigned_to")),
-                 "uploaded_at": _ser(c.get("uploadedAt"))}
-                for c in COMPLIANCE_DOCS_MEM_BY_NGO.get(ngo_id, [])
-            ]
-
-        # ── volunteers ────────────────────────────────────────────────────────
-        if conn is not None:
-            cur.execute(
-                """
-                SELECT id::text, name, COALESCE(skills,'{}') as skills,
-                       COALESCE(hours_logged,0)::float as hours, verified
-                FROM volunteers WHERE ngo_id = %s::uuid ORDER BY created_at DESC
-                """,
-                (ngo_id,),
-            )
-            vol_rows = [
-                {"id": r[0], "name": r[1], "skills": ";".join(list(r[2] or [])),
-                 "hours": r[3], "verified": "yes" if r[4] else "no"}
-                for r in cur.fetchall()
-            ]
-        else:
             _seed_memory_volunteer_roster(ngo_id)
-            vol_rows = [
-                {"id": _ser(v.get("id")), "name": _ser(v.get("name")),
-                 "skills": ";".join(v.get("skills") or []),
-                 "hours": _ser(v.get("hours")), "verified": "yes" if v.get("verified") else "no"}
-                for v in VOLUNTEERS_ROSTER_MEM_BY_NGO.get(ngo_id, [])
-            ]
+            mem_stores = {
+                "donors":        list(DONORS_MEM_BY_NGO.get(ngo_id, [])),
+                "transactions":  list(TX_MEM_BY_NGO.get(ngo_id, [])),
+                "beneficiaries": list(BENEFICIARIES_MEM_BY_NGO.get(ngo_id, [])),
+                "grants":        list(CSR_CARDS_MEM_BY_NGO.get(ngo_id, [])),
+                "compliance":    list(COMPLIANCE_DOCS_MEM_BY_NGO.get(ngo_id, [])),
+                "volunteers":    list(VOLUNTEERS_ROSTER_MEM_BY_NGO.get(ngo_id, [])),
+            }
+        else:
+            mem_stores = {}
 
-    # ── Build ZIP in-memory ───────────────────────────────────────────────────
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        manifest = {
-            "exported_by": current_user.email,
-            "exported_at": exported_at,
-            "ngo": s.get("ngo", {}),
-            "files": ["manifest.json", "donors.csv", "transactions.csv",
-                      "beneficiaries.csv", "grants.csv", "compliance_docs.csv",
-                      "volunteers.csv"],
-        }
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
-        zf.writestr("donors.csv", _make_csv(donors_rows))
-        zf.writestr("transactions.csv", _make_csv(tx_rows))
-        zf.writestr("beneficiaries.csv", _make_csv(ben_rows))
-        zf.writestr("grants.csv", _make_csv(grant_rows))
-        zf.writestr("compliance_docs.csv", _make_csv(comp_rows))
-        zf.writestr("volunteers.csv", _make_csv(vol_rows))
+        zip_bytes = build_ngo_export_zip(
+            ngo_id=ngo_id,
+            exported_by=current_user.email,
+            ngo_info=ngo_info,
+            conn=conn,
+            mem_stores=mem_stores,
+        )
 
-    zip_bytes = buf.getvalue()
     return Response(
         content=zip_bytes,
         media_type="application/zip",

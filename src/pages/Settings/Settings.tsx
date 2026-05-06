@@ -158,6 +158,9 @@ const Settings: React.FC = () => {
   const [pwNext, setPwNext] = useState('');
   const [pwConfirm, setPwConfirm] = useState('');
   const [loadingSettings, setLoadingSettings] = useState(false);
+  const [exportScheduleEnabled, setExportScheduleEnabled] = useState(false);
+  const [exportScheduleFreq, setExportScheduleFreq] = useState<'weekly' | 'monthly'>('weekly');
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
   const meta = user ? ROLE_META[user.role] : null;
 
@@ -190,12 +193,37 @@ const Settings: React.FC = () => {
         if (data?.notification_prefs && typeof data.notification_prefs === 'object') {
           setNotifs(prev => ({ ...prev, ...data.notification_prefs }));
         }
+        if (data?.export_schedule && typeof data.export_schedule === 'object') {
+          if (typeof data.export_schedule.enabled === 'boolean') setExportScheduleEnabled(data.export_schedule.enabled);
+          if (data.export_schedule.frequency === 'weekly' || data.export_schedule.frequency === 'monthly') {
+            setExportScheduleFreq(data.export_schedule.frequency);
+          }
+        }
       } finally {
         setLoadingSettings(false);
       }
     };
     load();
   }, [user]);
+
+  const handleSaveExportSchedule = async () => {
+    setSavingSchedule(true);
+    try {
+      const res = await apiFetch('/settings/export-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: exportScheduleEnabled, frequency: exportScheduleFreq }),
+      });
+      if (!res.ok) throw new Error('schedule');
+      toast.success(exportScheduleEnabled
+        ? `Scheduled ${exportScheduleFreq} exports enabled. Reports will be emailed to ${user?.email}.`
+        : 'Scheduled exports disabled.');
+    } catch {
+      toast.error('Failed to save export schedule.');
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
 
   const handleSaveProfile = async () => {
     if (!user) return;
@@ -873,6 +901,65 @@ const Settings: React.FC = () => {
                     <Trash2 size={14} /> Request Erasure (§13)
                   </button>
                 </div>
+
+                {/* Scheduled Exports */}
+                <div style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                  <div style={{ padding: '0.875rem 1rem', borderBottom: exportScheduleEnabled ? '1px solid var(--color-border-light)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Mail size={14} style={{ color: 'var(--color-primary)' }} /> Scheduled Automatic Exports
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '0.2rem' }}>
+                        Receive a full data export ZIP by email on a recurring schedule
+                      </div>
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={exportScheduleEnabled} onChange={e => setExportScheduleEnabled(e.target.checked)} />
+                      <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>{exportScheduleEnabled ? 'On' : 'Off'}</span>
+                    </label>
+                  </div>
+                  {exportScheduleEnabled && (
+                    <div style={{ padding: '0.875rem 1rem', background: 'var(--color-bg-main)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 500, whiteSpace: 'nowrap' }}>Frequency:</span>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          {(['weekly', 'monthly'] as const).map(f => (
+                            <button
+                              key={f}
+                              onClick={() => setExportScheduleFreq(f)}
+                              style={{
+                                padding: '0.3rem 0.75rem',
+                                borderRadius: 'var(--radius-sm)',
+                                border: `1px solid ${exportScheduleFreq === f ? 'var(--color-primary)' : 'var(--color-border-light)'}`,
+                                background: exportScheduleFreq === f ? 'var(--color-primary)' : 'transparent',
+                                color: exportScheduleFreq === f ? '#fff' : 'var(--color-text-secondary)',
+                                fontSize: '0.8rem',
+                                fontWeight: exportScheduleFreq === f ? 600 : 400,
+                                cursor: 'pointer',
+                                textTransform: 'capitalize',
+                              }}
+                            >{f}</button>
+                          ))}
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                          {exportScheduleFreq === 'weekly' ? '— every Monday at 6:00 AM IST' : '— 1st of every month at 6:00 AM IST'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', padding: '0.5rem 0.75rem', background: '#f0fdf4', borderRadius: 'var(--radius-sm)', border: '1px solid #bbf7d0' }}>
+                        📧 Export ZIP will be emailed to <strong>{user?.email}</strong>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="btn btn-primary"
+                  style={{ alignSelf: 'flex-start' }}
+                  onClick={handleSaveExportSchedule}
+                  disabled={savingSchedule}
+                >
+                  <Save size={14} /> {savingSchedule ? 'Saving…' : 'Save Export Schedule'}
+                </button>
+
                 <div style={{ padding: '1rem', background: 'var(--color-bg-main)', borderRadius: 'var(--radius-md)', fontSize: '0.8rem' }}>
                   <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Data Fiduciary Information</div>
                   <div style={{ color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
