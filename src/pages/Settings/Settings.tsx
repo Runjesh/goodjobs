@@ -11,6 +11,7 @@ import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradeP
 import { useTier, useUpgradeListener } from '../../hooks/useTier';
 import { canAddTeamMember, normalizeTier, tierLimits } from '../../utils/trial';
 import { useStore } from '../../store/useStore';
+import { isMockEnabled } from '../../api/mockBackend';
 
 const TABS = [
   { id: 'profile',  label: 'Profile',      icon: <User size={16} /> },
@@ -184,6 +185,30 @@ const Settings: React.FC = () => {
   };
 
   const handleExportData = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const filename = `goodjobs_export_${today}.zip`;
+    // In production (real backend), delegate to the /dpdp/export endpoint which
+    // has access to the full database — Zustand may only be partially hydrated.
+    if (!isMockEnabled()) {
+      try {
+        const res = await apiFetch('/dpdp/export', { noMockFallback: true });
+        if (res.ok) {
+          const ct = res.headers.get('content-type') ?? '';
+          const blob = ct.includes('application/zip')
+            ? await res.blob()
+            : new Blob([JSON.stringify(await res.json(), null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = ct.includes('application/zip') ? filename : `goodjobs_export_${today}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          toast.success('Your data export has been downloaded.');
+          return;
+        }
+      } catch { /* fall through to client-side build */ }
+    }
+    // Mock / dev mode — build the ZIP client-side from the Zustand store.
     try {
       const toCsv = (rows: Record<string, unknown>[], fallbackHeaders?: string[]): string => {
         if (rows.length === 0) return fallbackHeaders ? fallbackHeaders.join(',') + '\n' : '';
@@ -283,7 +308,7 @@ const Settings: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `goodjobs_export_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
       toast.success('Full data export downloaded as ZIP.', { duration: 4000 });

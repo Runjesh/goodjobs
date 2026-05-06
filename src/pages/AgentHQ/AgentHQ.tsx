@@ -16,6 +16,30 @@ import ComplianceCascadeQueue from '../../components/AgentHQ/ComplianceCascadeQu
 import { useStore } from '../../store/useStore';
 import { useAuth } from '../../context/AuthContext';
 
+// ── Offline decision queue ────────────────────────────────────────────────────
+const OFFLINE_QUEUE_KEY = 'goodjobs.pending_decisions';
+type QueuedDecision = {
+  id: string;
+  decision: 'approved' | 'rejected';
+  directive: string;
+  agentName: string;
+  risk?: string;
+  queuedAt: string;
+};
+function getQueuedDecisions(): QueuedDecision[] {
+  try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) ?? '[]'); } catch { return []; }
+}
+function saveQueuedDecisions(q: QueuedDecision[]): void {
+  try { localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q)); } catch { /* quota */ }
+}
+function enqueueDecision(d: QueuedDecision): void {
+  const q = getQueuedDecisions();
+  if (!q.find(x => x.id === d.id)) saveQueuedDecisions([...q, d]);
+}
+function dequeueDecision(id: string): void {
+  saveQueuedDecisions(getQueuedDecisions().filter(x => x.id !== id));
+}
+
 type QueueItem = {
   id: string;
   directive: string;
@@ -58,7 +82,7 @@ interface AuditLogEntry {
   type: string;
   agent?: string;
   risk?: string;
-  outcome?: 'approved' | 'rejected' | 'failed' | 'expired' | 'applied';
+  outcome?: 'approved' | 'rejected' | 'failed' | 'expired' | 'applied' | 'queued_offline' | string;
   payload: string;
 }
 
@@ -631,6 +655,55 @@ const AgentHQ: React.FC = () => {
     }
   };
 
+  // ── Offline queue replay ─────────────────────────────────────────────────────
+  // Replays any decisions stored under goodjobs.pending_decisions when the
+  // device comes back online or the tab regains focus.
+  useEffect(() => {
+    const replay = async () => {
+      const queue = getQueuedDecisions();
+      if (queue.length === 0) return;
+      const replayed: string[] = [];
+      for (const d of queue) {
+        try {
+          const res = await apiFetch(`/intent/queue/${encodeURIComponent(d.id)}/decision`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ decision: d.decision }),
+          });
+          if (!res.ok) continue;
+          if (d.decision === 'approved') {
+            const execRes = await apiFetch(`/intent/queue/${encodeURIComponent(d.id)}/execute`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dry_run: false }),
+            });
+            if (!execRes.ok) continue;
+          }
+          dequeueDecision(d.id);
+          replayed.push(d.id);
+          appendAuditLog({
+            type: 'intent_decision',
+            agent: d.agentName,
+            risk: d.risk,
+            outcome: `${d.decision} (replayed — queued offline)`,
+            payload: d.directive,
+          });
+        } catch { /* still offline — leave in queue */ }
+      }
+      if (replayed.length > 0) {
+        toast.success(`Synced ${replayed.length} queued decision${replayed.length > 1 ? 's' : ''} from offline queue.`);
+        loadApprovals();
+      }
+    };
+    window.addEventListener('online', replay);
+    window.addEventListener('focus', replay);
+    return () => {
+      window.removeEventListener('online', replay);
+      window.removeEventListener('focus', replay);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     loadApprovals();
     (async () => {
@@ -700,13 +773,20 @@ const AgentHQ: React.FC = () => {
         payload: item?.directive || id,
       });
     } catch {
-      toast.error('Failed to approve/execute.');
+      // Backend unreachable — queue the decision for automatic replay when back online.
+      enqueueDecision({
+        id, decision: 'approved',
+        directive: item?.directive || id,
+        agentName, risk: item?.risk_level,
+        queuedAt: new Date().toISOString(),
+      });
+      toast('Queued offline — will replay when back online.', { icon: '📶' });
       appendAuditLog({
         type: 'intent_decision',
         agent: agentName,
         risk: item?.risk_level,
-        outcome: 'failed',
-        payload: `Approve failed: ${id}`,
+        outcome: 'queued_offline',
+        payload: `Approve queued for offline replay: ${id}`,
       });
     }
   };
@@ -811,7 +891,20 @@ const AgentHQ: React.FC = () => {
         payload: item?.directive || id,
       });
     } catch {
-      toast.error('Failed to reject.');
+      enqueueDecision({
+        id, decision: 'rejected',
+        directive: item?.directive || id,
+        agentName, risk: item?.risk_level,
+        queuedAt: new Date().toISOString(),
+      });
+      toast('Rejection queued offline — will replay when back online.', { icon: '📶' });
+      appendAuditLog({
+        type: 'intent_decision',
+        agent: agentName,
+        risk: item?.risk_level,
+        outcome: 'queued_offline',
+        payload: `Reject queued for offline replay: ${id}`,
+      });
     }
   };
 

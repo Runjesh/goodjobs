@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe, Tag, PackageOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { jsPDF } from 'jspdf';
+import JSZip from 'jszip';
 import PermissionGate from '../../components/Auth/PermissionGate';
 import './Finance.css';
 import { apiFetch } from '../../api/client';
@@ -127,8 +129,8 @@ function createZip(files: Array<{ name: string; content: string }>): Uint8Array 
   return result;
 }
 
-// ── 80G receipt HTML generator ────────────────────────────────────────────────
-function generate80GReceiptHtml(opts: {
+// ── 80G receipt PDF generator ─────────────────────────────────────────────────
+function generate80GReceiptPdf(opts: {
   receiptNo: string;
   donorName: string;
   donorPan: string;
@@ -138,48 +140,111 @@ function generate80GReceiptHtml(opts: {
   ngoName: string;
   ngoPan: string;
   eighty_g_no: string;
-}): string {
-  const amountWords = (n: number) => {
+}): jsPDF {
+  const amountWords = (n: number): string => {
     if (n === 0) return 'Zero';
     const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
     const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-    const convert = (num: number): string => {
-      if (num < 20) return ones[num];
-      if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? ' ' + ones[num % 10] : '');
-      if (num < 1000) return ones[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' ' + convert(num % 100) : '');
-      if (num < 100000) return convert(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + convert(num % 1000) : '');
-      return convert(Math.floor(num / 100000)) + ' Lakh' + (num % 100000 ? ' ' + convert(num % 100000) : '');
+    const cvt = (x: number): string => {
+      if (x < 20) return ones[x];
+      if (x < 100) return tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
+      if (x < 1000) return ones[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' + cvt(x % 100) : '');
+      if (x < 100000) return cvt(Math.floor(x / 1000)) + ' Thousand' + (x % 1000 ? ' ' + cvt(x % 1000) : '');
+      return cvt(Math.floor(x / 100000)) + ' Lakh' + (x % 100000 ? ' ' + cvt(x % 100000) : '');
     };
-    return convert(Math.round(n)) + ' Only';
+    return cvt(Math.round(n)) + ' Only';
   };
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>80G Receipt ${opts.receiptNo}</title>
-<style>body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;padding:20px;border:2px solid #333}
-h2{text-align:center;margin:0 0 4px}p{margin:4px 0}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0}
-.row{display:flex;gap:8px}.label{font-weight:600;min-width:160px}
-.footer{margin-top:32px;font-size:0.85em;color:#555;border-top:1px solid #999;padding-top:8px}
-</style></head><body>
-<h2>${opts.ngoName}</h2>
-<p style="text-align:center">80G Donation Receipt under Section 80G of the Income Tax Act, 1961</p>
-<p style="text-align:center">80G Certificate No: <strong>${opts.eighty_g_no || 'N/A'}</strong> &nbsp;|&nbsp; PAN: <strong>${opts.ngoPan || 'N/A'}</strong></p>
-<hr/>
-<div class="grid">
-  <div><div class="row"><span class="label">Receipt No:</span><span>${opts.receiptNo}</span></div></div>
-  <div><div class="row"><span class="label">Date:</span><span>${opts.date}</span></div></div>
-  <div><div class="row"><span class="label">Donor Name:</span><span>${opts.donorName}</span></div></div>
-  <div><div class="row"><span class="label">Donor PAN:</span><span>${opts.donorPan || 'N/A'}</span></div></div>
-  <div><div class="row"><span class="label">Amount (₹):</span><span><strong>₹${Number(opts.amount).toLocaleString('en-IN')}</strong></span></div></div>
-  <div><div class="row"><span class="label">Amount in words:</span><span>${amountWords(opts.amount)}</span></div></div>
-</div>
-<p><span class="label">Purpose:</span> ${opts.description || 'Donation'}</p>
-<p>This receipt is issued for the donation received and qualifies for deduction under Section 80G of the Income Tax Act, 1961.</p>
-<div class="footer">
-  <p>For ${opts.ngoName}</p>
-  <p style="margin-top:40px">Authorised Signatory</p>
-  <p><em>This is a computer-generated receipt. No signature required.</em></p>
-</div>
-</body></html>`;
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const W = 210;
+  const M = 18;
+  let y = 16;
+
+  // Border
+  doc.setDrawColor(60, 60, 60);
+  doc.setLineWidth(0.6);
+  doc.rect(10, 10, W - 20, 277);
+
+  // NGO name
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  doc.setTextColor(15, 118, 110); // teal-700
+  doc.text(opts.ngoName, W / 2, y, { align: 'center' });
+  y += 7;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(60, 60, 60);
+  doc.text('80G Donation Receipt — Section 80G, Income Tax Act 1961', W / 2, y, { align: 'center' });
+  y += 5;
+  doc.text(
+    `80G Cert No: ${opts.eighty_g_no || 'N/A'}   |   NGO PAN: ${opts.ngoPan || 'N/A'}`,
+    W / 2, y, { align: 'center' }
+  );
+  y += 4;
+  doc.setDrawColor(180, 180, 180);
+  doc.line(M, y, W - M, y);
+  y += 7;
+
+  // Fields — two-column grid
+  const labelW = 38;
+  const col2 = W / 2 + 3;
+  const lh = 7;
+  const field = (label: string, value: string, x: number, yy: number) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(80, 80, 80);
+    doc.text(label + ':', x, yy);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(20, 20, 20);
+    doc.text(value, x + labelW, yy);
+  };
+
+  field('Receipt No', opts.receiptNo, M, y);
+  field('Date', opts.date, col2, y);
+  y += lh;
+  field('Donor Name', opts.donorName, M, y);
+  field('Donor PAN', opts.donorPan || 'N/A', col2, y);
+  y += lh;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(15, 118, 110);
+  doc.text(`Amount: Rs. ${Number(opts.amount).toLocaleString('en-IN')}`, M, y);
+  y += lh;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(60, 60, 60);
+  field('In words', amountWords(opts.amount), M, y);
+  y += lh;
+  field('Purpose', opts.description || 'Donation', M, y);
+  y += 6;
+
+  doc.setDrawColor(200, 200, 200);
+  doc.line(M, y, W - M, y);
+  y += 7;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(70, 70, 70);
+  const note = 'This receipt is issued for the donation received and qualifies for tax deduction under Section 80G of the Income Tax Act, 1961.';
+  const noteLines = doc.splitTextToSize(note, W - 2 * M);
+  doc.text(noteLines, M, y);
+  y += (noteLines.length * 5) + 14;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(40, 40, 40);
+  doc.text(`For ${opts.ngoName}`, M, y);
+  y += 18;
+  doc.line(M, y, M + 55, y);
+  y += 4;
+  doc.text('Authorised Signatory', M, y);
+  y += 8;
+  doc.setFontSize(7.5);
+  doc.setTextColor(150, 150, 150);
+  doc.text('Computer-generated receipt. No physical signature required.', M, y);
+
+  return doc;
 }
 
 const Finance: React.FC = () => {
@@ -571,9 +636,9 @@ const Finance: React.FC = () => {
       category:      entryToSave.category      || undefined,
     });
 
-    // Feature 2: If income, auto-download the receipt HTML.
+    // Feature 2: If income, auto-download the 80G receipt as PDF.
     if (entryToSave.type === 'Income' && receiptNo) {
-      const html = generate80GReceiptHtml({
+      const doc = generate80GReceiptPdf({
         receiptNo,
         donorName:    entryToSave.receiptDonorName || entryToSave.donorId || 'Donor',
         donorPan:     entryToSave.receiptDonorPan  || '',
@@ -584,13 +649,7 @@ const Finance: React.FC = () => {
         ngoPan:       ngoDetails.pan || '',
         eighty_g_no:  eightyGRegNo,
       });
-      const blob = new Blob([html], { type: 'text/html' });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `${receiptNo.replace(/\//g, '_')}.html`;
-      a.click();
-      URL.revokeObjectURL(url);
+      doc.save(`${receiptNo.replace(/\//g, '_')}.pdf`);
     }
 
     const tagSuffix = tag ? ' · tagged' : '';
@@ -679,7 +738,8 @@ const Finance: React.FC = () => {
         return;
       }
 
-      const zipFiles: Array<{ name: string; content: string }> = [];
+      const zip = new JSZip();
+      let generatedCount = 0;
       for (const je of pending) {
         const donor = donors.find(d => d.id === je.donorId);
         // In mock / offline mode: generate number from the localStorage counter.
@@ -709,10 +769,10 @@ const Finance: React.FC = () => {
           } catch { /* network error — receiptNo stays null */ }
           if (!receiptNo) {
             toast.error(`Receipt skipped for entry "${je.description.slice(0, 40)}" — server did not return a receipt number.`, { duration: 5000 });
-            continue; // skip this entry; do NOT consume a localStorage sequence number
+            continue;
           }
         }
-        const html = generate80GReceiptHtml({
+        const doc = generate80GReceiptPdf({
           receiptNo,
           donorName:   donor?.name  || je.description || 'Donor',
           donorPan:    donor?.pan   || '',
@@ -724,24 +784,18 @@ const Finance: React.FC = () => {
           eighty_g_no: eightyGRegNo,
         });
         const safeName = receiptNo.replace(/\//g, '_');
-        zipFiles.push({ name: `${safeName}.html`, content: html });
+        zip.file(`${safeName}.pdf`, doc.output('arraybuffer'));
+        generatedCount++;
         // Mark the entry as receipted so future bulk runs skip it.
         upsertJournalEntry({ ...je, receiptNo });
       }
 
-      // Use zipFiles.length (actual generated count) not pending.length — some
-      // entries may have been skipped due to missing server receipt numbers.
-      const generatedCount = zipFiles.length;
       if (generatedCount === 0) {
         toast.error('No receipts were generated — all pending entries were skipped (server did not return receipt numbers).', { duration: 7000 });
         return;
       }
-      const zipBytes = createZip(zipFiles);
-      // Cast to ArrayBuffer to satisfy the strict BlobPart type check —
-      // Uint8Array's .buffer is typed as ArrayBufferLike (which includes
-      // SharedArrayBuffer) but Blob only accepts ArrayBuffer.
-      const blob = new Blob([zipBytes.buffer as ArrayBuffer], { type: 'application/zip' });
-      const url  = URL.createObjectURL(blob);
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url  = URL.createObjectURL(zipBlob);
       const a    = document.createElement('a');
       a.href     = url;
       a.download = `80G_Receipts_${monthStr}.zip`;
@@ -749,7 +803,7 @@ const Finance: React.FC = () => {
       URL.revokeObjectURL(url);
       const skippedCount = pending.length - generatedCount;
       toast.success(
-        `Generated ${generatedCount} receipt${generatedCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} skipped — see warnings above)` : ''} — extract the ZIP to get individual HTML files.`,
+        `Generated ${generatedCount} PDF receipt${generatedCount > 1 ? 's' : ''}${skippedCount > 0 ? ` (${skippedCount} skipped — see warnings above)` : ''} — extract the ZIP to open individual PDFs.`,
         { duration: 7000 }
       );
     } catch (err) {
