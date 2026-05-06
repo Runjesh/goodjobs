@@ -25,6 +25,7 @@ const Signup       = lazy(() => import('./pages/Auth/Signup'));
 const SignupWizard = lazy(() => import('./pages/Onboarding/SignupWizard'));
 const DonationPage = lazy(() => import('./pages/DonationPage/DonationPage'));
 const Settings     = lazy(() => import('./pages/Settings/Settings'));
+const Landing      = lazy(() => import('./pages/Landing/Landing'));
 
 function App() {
   return (
@@ -55,6 +56,7 @@ function App() {
       />
       <Suspense fallback={<PageLoading />}>
         <Routes>
+          <Route path="/landing" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/give/:campaignSlug" element={<DonationPage />} />
