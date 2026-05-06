@@ -72,6 +72,35 @@ const Settings: React.FC = () => {
   const [inviteRole, setInviteRole] = useState('PROGRAM_HEAD');
   const [teamUpgradeOpen, setTeamUpgradeOpen] = useState(false);
   const [confirmRemoveEmail, setConfirmRemoveEmail] = useState<string | null>(null);
+  const [removingEmail, setRemovingEmail] = useState<string | null>(null);
+
+  const handleRemoveMember = async (email: string) => {
+    setRemovingEmail(email);
+    try {
+      const res = await apiFetch('/team/member', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+        noMockFallback: true,
+      });
+      if (!res.ok) {
+        let detail = 'Failed to remove member. Please try again.';
+        try {
+          const err = await res.json();
+          if (err?.detail) detail = err.detail;
+        } catch { /* ignore */ }
+        toast.error(detail);
+        return;
+      }
+      removePendingTeamMember(email);
+      setConfirmRemoveEmail(null);
+      toast(`${email} removed from the workspace.`, { icon: '✕' });
+    } catch {
+      toast.error('Could not reach the server. Please try again.');
+    } finally {
+      setRemovingEmail(null);
+    }
+  };
 
   const sendInvite = () => {
     const email = inviteEmail.trim();
@@ -612,13 +641,10 @@ const Settings: React.FC = () => {
                             type="button"
                             className="btn btn-danger"
                             style={{ padding: '3px 12px', fontSize: '0.78rem', height: 30 }}
-                            onClick={() => {
-                              removePendingTeamMember(member.email);
-                              setConfirmRemoveEmail(null);
-                              toast(`${member.email} removed from the workspace.`, { icon: '✕' });
-                            }}
+                            disabled={removingEmail === member.email}
+                            onClick={() => handleRemoveMember(member.email)}
                           >
-                            Remove
+                            {removingEmail === member.email ? 'Removing…' : 'Remove'}
                           </button>
                           <button
                             type="button"

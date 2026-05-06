@@ -24,7 +24,7 @@ from core.rag_pipeline import ingest_document
 from core.tally_xml_export import build_tally_xml
 from core.auth import (
     get_current_user, get_current_user_optional, require_role, create_access_token,
-    demo_authenticate, TokenUser, DEMO_USERS
+    demo_authenticate, TokenUser, DEMO_USERS, revoke_member
 )
 from core.observability import init_sentry
 from jobs.lapse_detector import run_lapse_detection
@@ -3383,6 +3383,144 @@ def create_invites(body: NgoInviteRequest, current_user: TokenUser = Depends(get
             if row:
                 queued.append({"email": row[0], "role": row[1], "status": row[2], "invitedAt": row[3]})
         return {"queued": len(queued), "invites": queued, "source": "db"}
+
+
+class RemoveTeamMemberRequest(BaseModel):
+    email: str
+
+
+@app.delete("/team/member", tags=["Settings"])
+def remove_team_member(
+    body: RemoveTeamMemberRequest,
+    current_user: TokenUser = Depends(require_role("ed", "admin")),
+):
+    """
+    Offboard a team member by email.
+
+    Membership is confirmed against (in order of priority):
+      1. The ngo_invites table / INVITES_MEM_BY_NGO in-memory store.
+      2. The users table (DB mode) / DEMO_USERS dict (memory mode), scoped to
+         the caller's NGO.
+
+    Revocation is unconditionally applied once membership is confirmed —
+    it is decoupled from whether an invite row exists, so users who joined
+    via direct account creation are also correctly offboarded.
+
+    Only organisation admins (ED / admin role) may call this endpoint.
+    Returns 404 if the email is not a recognised member of this NGO.
+    """
+    email = body.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required.")
+
+    # Prevent accidental self-removal.
+    if email == current_user.email.lower():
+        raise HTTPException(status_code=400, detail="You cannot remove yourself.")
+
+    member_confirmed = False
+
+    with db_conn() as conn:
+        if conn is None:
+            # ── Memory mode ─────────────────────────────────────────────────
+            # 1. Check invite store.
+            existing = INVITES_MEM_BY_NGO.get(current_user.ngo_id, [])
+            next_list = [i for i in existing if i["email"].lower() != email]
+            if len(next_list) < len(existing):
+                INVITES_MEM_BY_NGO[current_user.ngo_id] = next_list
+                member_confirmed = True
+
+            # 2. Check DEMO_USERS scoped to caller's NGO (covers pre-seeded
+            #    accounts that never went through the invite flow).
+            if not member_confirmed:
+                demo = DEMO_USERS.get(email)
+                if demo and demo.get("ngo_id") == current_user.ngo_id:
+                    member_confirmed = True
+        else:
+            # ── DB mode ─────────────────────────────────────────────────────
+            cur = conn.cursor()
+            # 1. Remove invite row (returns the email if it existed).
+            try:
+                _invites_table_init(cur)
+                cur.execute(
+                    """
+                    DELETE FROM ngo_invites
+                    WHERE ngo_id = %s::uuid AND LOWER(email) = %s
+                    RETURNING email
+                    """,
+                    (current_user.ngo_id, email),
+                )
+                if cur.fetchone():
+                    member_confirmed = True
+            except Exception:
+                pass
+
+            # 2. Even if no invite row existed, confirm via the users table so
+            #    that accounts created through other flows are also offboardable.
+            if not member_confirmed:
+                try:
+                    cur.execute(
+                        """
+                        SELECT id FROM users
+                        WHERE ngo_id = %s::uuid AND LOWER(email) = %s
+                        LIMIT 1
+                        """,
+                        (current_user.ngo_id, email),
+                    )
+                    if cur.fetchone():
+                        member_confirmed = True
+                except Exception:
+                    pass
+
+    if not member_confirmed:
+        raise HTTPException(status_code=404, detail="Team member not found in this organisation.")
+
+    # Invalidate any active JWT for this email within the NGO.
+    # This is always reached once membership is confirmed, regardless of
+    # which source confirmed it.
+    revoke_member(current_user.ngo_id, email)
+
+    # Persist the revocation in DB so it survives server restarts.
+    # We upsert a 'revoked' status row; ngo_invites is the natural home since
+    # it already tracks NGO ↔ email relationships with a UNIQUE constraint.
+    with db_conn() as conn:
+        if conn is not None:
+            cur = conn.cursor()
+            try:
+                _invites_table_init(cur)
+                cur.execute(
+                    """
+                    INSERT INTO ngo_invites (ngo_id, email, role, status)
+                    VALUES (%s::uuid, %s, 'member', 'revoked')
+                    ON CONFLICT (ngo_id, email) DO UPDATE SET status = 'revoked'
+                    """,
+                    (current_user.ngo_id, email),
+                )
+            except Exception:
+                pass
+
+    return {"ok": True, "email": email, "revoked": True}
+
+
+@app.on_event("startup")
+async def _load_revoked_members_from_db() -> None:
+    """
+    Rehydrate the in-process revocation blocklist from the DB on startup so
+    that offboarding decisions made before a restart take effect immediately.
+    No-op when the DB is not configured (memory-only mode).
+    """
+    with db_conn() as conn:
+        if conn is None:
+            return
+        cur = conn.cursor()
+        try:
+            _invites_table_init(cur)
+            cur.execute(
+                "SELECT ngo_id::text, email FROM ngo_invites WHERE status = 'revoked'"
+            )
+            for ngo_id, email in cur.fetchall():
+                revoke_member(str(ngo_id), email)
+        except Exception:
+            pass
 
 
 @app.post("/settings/notifications", tags=["Settings"])

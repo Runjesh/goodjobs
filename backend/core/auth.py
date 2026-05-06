@@ -5,11 +5,27 @@ Provides token verification, current user extraction, and RBAC enforcement.
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Dict, Set
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from pydantic import BaseModel
+
+# ── Revoked members blocklist ─────────────────────────────────────────────────
+# Maps ngo_id → set of lower-cased emails that have been removed by an admin.
+# Requests bearing a valid JWT for a revoked email are rejected with 401.
+# In production this would live in Redis or a DB table; in demo mode it is an
+# in-process dict that persists for the lifetime of the server process.
+_REVOKED_MEMBERS: Dict[str, Set[str]] = {}
+
+
+def revoke_member(ngo_id: str, email: str) -> None:
+    """Flag email as offboarded for the given NGO. Subsequent token checks fail."""
+    _REVOKED_MEMBERS.setdefault(ngo_id, set()).add(email.strip().lower())
+
+
+def is_member_revoked(ngo_id: str, email: str) -> bool:
+    return email.strip().lower() in _REVOKED_MEMBERS.get(ngo_id, set())
 
 # ── Config ────────────────────────────────────────────────────────────────────
 JWT_SECRET = os.getenv("JWT_SECRET", "sevasuite-dev-secret-change-in-production")
@@ -55,7 +71,7 @@ def _decode_token(token: str) -> TokenUser:
     """Verify and decode a JWT. Raises HTTPException on failure."""
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return TokenUser(
+        user = TokenUser(
             user_id=payload["sub"],
             email=payload["email"],
             role=payload["role"],
@@ -69,6 +85,14 @@ def _decode_token(token: str) -> TokenUser:
             detail=f"Invalid or expired token: {e}",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Reject tokens belonging to members that have been offboarded.
+    if is_member_revoked(user.ngo_id, user.email):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Access revoked. Please contact your organisation administrator.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 # ── FastAPI Dependencies ──────────────────────────────────────────────────────
 async def get_current_user(
