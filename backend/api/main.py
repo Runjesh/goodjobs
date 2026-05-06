@@ -92,6 +92,10 @@ VOLUNTEERS_ROSTER_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 FINANCE_GRANTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 INBOX_STATE_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
 CRM_OUTREACH_LOG_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+# WhatsApp delivery-status store.
+# Shape: {outreach_id: {ngo_id, channel, created_at, recipients: {donor_id: {wamid, status, updated_at, error?}}}}
+# Statuses follow the WhatsApp Business API vocabulary: sent | delivered | read | failed.
+WA_TOUCHPOINT_STATUS_MEM: Dict[str, Dict[str, Any]] = {}
 # Donor lifecycle state — milestones / skipped / lapseRiskAck per donor.
 # Mirrors the JSONB blob stored in donors.meta.lifecycle when a DB is wired
 # up. Shape: {ngo_id: {donor_id: {state: dict, updated_at: iso}}}.
@@ -3583,6 +3587,23 @@ async def _load_revoked_members_from_db() -> None:
             pass
 
 
+@app.on_event("startup")
+async def _warn_missing_whatsapp_secret() -> None:
+    """
+    Emit a startup warning when WHATSAPP_APP_SECRET is absent.
+    Without it the /crm/whatsapp/webhook endpoint cannot validate
+    X-Hub-Signature-256 headers, leaving delivery-status updates
+    open to spoofing.  Always set this env var in production.
+    """
+    import logging as _logging
+    if not os.getenv("WHATSAPP_APP_SECRET", "").strip():
+        _logging.getLogger("goodjobs").warning(
+            "WHATSAPP_APP_SECRET is not set — webhook signature validation is "
+            "disabled.  Set this env var in production to prevent spoofed "
+            "delivery-status updates on /crm/whatsapp/webhook."
+        )
+
+
 @app.post("/settings/notifications", tags=["Settings"])
 def post_settings_notifications(body: NotificationPrefsRequest, current_user: TokenUser = Depends(get_current_user)):
     with db_conn() as conn:
@@ -4122,14 +4143,166 @@ class CrmOutreachRequest(BaseModel):
     mode: str = "send"  # send | draft | voice_event
 
 
+async def _demo_deliver_status(outreach_id: str, donor_ids: List[str]) -> None:
+    """Simulates WhatsApp delivery confirmation after a short delay in demo mode."""
+    import asyncio
+    await asyncio.sleep(3)
+    entry = WA_TOUCHPOINT_STATUS_MEM.get(outreach_id)
+    if not entry:
+        return
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for did in donor_ids:
+        rec = entry.get("recipients", {}).get(did)
+        if rec and rec.get("status") == "sent":
+            rec["status"] = "delivered"
+            rec["updated_at"] = now_iso
+
+
+def _update_touchpoint_by_wamid(wamid: str, new_status: str) -> Optional[str]:
+    """
+    Find a recipient record by wamid across all in-flight outreach sessions and update its
+    status.  Returns the ngo_id of the matching session so callers can scope DB updates to
+    the correct tenant.
+    """
+    valid = {"sent", "delivered", "read", "failed"}
+    if new_status not in valid:
+        return None
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for entry in WA_TOUCHPOINT_STATUS_MEM.values():
+        for rec in entry.get("recipients", {}).values():
+            if rec.get("wamid") == wamid:
+                rec["status"] = new_status
+                rec["updated_at"] = now_iso
+                return entry.get("ngo_id")
+    return None
+
+
+def _wa_send_message(access_token: str, phone_number_id: str, to_phone: str, message: str) -> Optional[str]:
+    """
+    Call WhatsApp Business API (Cloud API) to send a text message.
+    Returns the wamid on success, raises on failure.
+    """
+    import urllib.request
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+    payload = json.dumps({
+        "messaging_product": "whatsapp",
+        "to": to_phone,
+        "type": "text",
+        "text": {"body": message[:4096]},
+    }).encode()
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read())
+    messages = data.get("messages") or []
+    if messages:
+        return str(messages[0].get("id") or "")
+    return None
+
+
 @app.post("/crm/outreach", tags=["CRM"])
-def post_crm_outreach(body: CrmOutreachRequest, current_user: TokenUser = Depends(require_role("ed", "crm"))):
+async def post_crm_outreach(
+    body: CrmOutreachRequest,
+    background_tasks: BackgroundTasks,
+    current_user: TokenUser = Depends(require_role("ed", "crm")),
+):
     """
-    Minimal backend wiring for CRM messaging actions.
-    In production this would enqueue WhatsApp/Email jobs; for now we just persist an audit log (DB if present, else memory).
+    Send WhatsApp/email outreach to one or more donors.
+
+    WhatsApp path: if WHATSAPP_ACCESS_TOKEN + WHATSAPP_PHONE_NUMBER_ID are set,
+    calls the WhatsApp Business Cloud API directly and stores the returned wamid so
+    webhook delivery receipts can be matched.  In demo mode a background task
+    simulates delivered status after ~3 s.
+
+    Returns {outreach_id, results: [{donor_id, wamid, ok, error?}]} so the
+    frontend can poll /crm/outreach/{outreach_id}/status for real-time delivery
+    status without reloading the page.
     """
+    outreach_id = f"out_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    is_send = body.mode == "send"  # only actually dispatch messages when mode == "send"
+
+    wa_token = os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
+    wa_phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    use_real_wa = bool(is_send and wa_token and wa_phone_id and body.channel == "whatsapp")
+
+    results: List[Dict[str, Any]] = []
+    recipients: Dict[str, Dict[str, Any]] = {}
+
+    donor_phone_map: Dict[str, str] = {}
+    if use_real_wa:
+        with db_conn() as conn:
+            if conn is not None:
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT id::text, phone FROM donors WHERE ngo_id = %s AND id::text = ANY(%s)",
+                        (current_user.ngo_id, [str(d) for d in body.donor_ids]),
+                    )
+                    for row in cur.fetchall():
+                        if row[1]:
+                            donor_phone_map[str(row[0])] = str(row[1])
+                except Exception:
+                    pass
+            else:
+                for d in DONORS_MEM_BY_NGO.get(current_user.ngo_id, []):
+                    if str(d.get("id")) in [str(x) for x in body.donor_ids]:
+                        ph = (d.get("phone") or "").strip()
+                        if ph:
+                            donor_phone_map[str(d["id"])] = ph
+
+    message_text = (body.message or "")[:4096]
+
+    for donor_id in body.donor_ids:
+        did_str = str(donor_id)
+        wamid: Optional[str] = None
+        ok = True
+        error: Optional[str] = None
+
+        if use_real_wa:
+            phone = donor_phone_map.get(did_str, "")
+            if not phone:
+                ok = False
+                error = "No phone number on file"
+            else:
+                try:
+                    wamid = _wa_send_message(wa_token, wa_phone_id, phone, message_text)
+                except Exception as exc:
+                    ok = False
+                    error = str(exc)[:200]
+
+        if is_send and ok and not wamid:
+            wamid = f"wamid.demo.{outreach_id}.{did_str}"
+
+        results.append({"donor_id": donor_id, "wamid": wamid, "ok": ok, "error": error})
+        recipients[did_str] = {
+            "wamid": wamid,
+            "status": "sent" if (is_send and ok) else ("failed" if (is_send and not ok) else "draft"),
+            "updated_at": now_iso,
+            "error": error,
+        }
+
+    WA_TOUCHPOINT_STATUS_MEM[outreach_id] = {
+        "ngo_id": current_user.ngo_id,
+        "channel": body.channel,
+        "created_at": now_iso,
+        "recipients": recipients,
+    }
+
+    if is_send and not use_real_wa and body.channel == "whatsapp":
+        sent_ids = [str(d) for d in body.donor_ids if recipients.get(str(d), {}).get("status") == "sent"]
+        if sent_ids:
+            background_tasks.add_task(_demo_deliver_status, outreach_id, sent_ids)
+
     event = {
-        "id": f"out_{int(datetime.now(timezone.utc).timestamp() * 1000)}",
+        "id": outreach_id,
         "ngo_id": current_user.ngo_id,
         "by": current_user.email,
         "mode": body.mode,
@@ -4137,10 +4310,9 @@ def post_crm_outreach(body: CrmOutreachRequest, current_user: TokenUser = Depend
         "donor_ids": body.donor_ids,
         "subject": body.subject,
         "template_id": body.template_id,
-        "message": (body.message or "")[:5000],
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "message": message_text,
+        "created_at": now_iso,
     }
-    # DB optional: store in a generic audit log table if it exists (non-fatal if not configured)
     with db_conn() as conn:
         if conn is not None:
             try:
@@ -4151,13 +4323,165 @@ def post_crm_outreach(body: CrmOutreachRequest, current_user: TokenUser = Depend
                     VALUES (%s, %s, %s, %s::jsonb)
                     ON CONFLICT (id) DO NOTHING
                     """,
-                    (event["id"], current_user.ngo_id, "crm_outreach", json.dumps(event)),
+                    (outreach_id, current_user.ngo_id, "crm_outreach", json.dumps(event)),
                 )
+                if recipients:
+                    cur.executemany(
+                        """
+                        INSERT INTO touchpoints (id, ngo_id, outreach_id, donor_id, channel, wamid, status, error_msg, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (id) DO NOTHING
+                        """,
+                        [
+                            (
+                                f"tp_{outreach_id}_{did}",
+                                current_user.ngo_id,
+                                outreach_id,
+                                did,
+                                body.channel,
+                                recipients[did].get("wamid"),
+                                recipients[did].get("status", "sent"),
+                                recipients[did].get("error"),
+                            )
+                            for did in recipients
+                        ],
+                    )
             except Exception:
                 pass
         else:
             CRM_OUTREACH_LOG_MEM_BY_NGO.setdefault(current_user.ngo_id, []).append(event)
-    return {"status": "queued" if body.mode == "send" else "saved", "event": event}
+
+    return {
+        "status": "queued" if body.mode == "send" else "saved",
+        "outreach_id": outreach_id,
+        "results": results,
+        "event": event,
+    }
+
+
+@app.get("/crm/outreach/{outreach_id}/status", tags=["CRM"])
+def get_outreach_status(outreach_id: str, current_user: TokenUser = Depends(get_current_user)):
+    """
+    Poll per-donor delivery status for a specific outreach batch.
+    Returns {outreach_id, channel, recipients: {donor_id: {wamid, status, updated_at}}}.
+    Statuses: sent | delivered | read | failed.
+    """
+    entry = WA_TOUCHPOINT_STATUS_MEM.get(outreach_id)
+    if not entry:
+        with db_conn() as conn:
+            if conn is not None:
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT donor_id, wamid, status, error_msg, updated_at FROM touchpoints WHERE ngo_id = %s AND outreach_id = %s",
+                        (current_user.ngo_id, outreach_id),
+                    )
+                    rows = cur.fetchall()
+                    if rows:
+                        recips = {}
+                        for row in rows:
+                            recips[str(row[0])] = {
+                                "wamid": row[1],
+                                "status": row[2] or "sent",
+                                "updated_at": row[4].isoformat() if hasattr(row[4], "isoformat") else str(row[4]),
+                                "error": row[3],
+                            }
+                        return {"outreach_id": outreach_id, "channel": "whatsapp", "recipients": recips}
+                except Exception:
+                    pass
+        raise HTTPException(status_code=404, detail="Outreach not found")
+    if entry.get("ngo_id") != current_user.ngo_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return {
+        "outreach_id": outreach_id,
+        "channel": entry.get("channel"),
+        "recipients": entry.get("recipients", {}),
+    }
+
+
+@app.get("/crm/whatsapp/webhook", tags=["CRM"])
+def verify_whatsapp_webhook(
+    request: Request,
+):
+    """
+    WhatsApp Business API webhook verification (GET challenge).
+    WhatsApp sends: ?hub.mode=subscribe&hub.verify_token=<token>&hub.challenge=<challenge>
+    Configure WHATSAPP_WEBHOOK_VERIFY_TOKEN env var to match your Meta App Dashboard setting.
+    """
+    params = request.query_params
+    hub_mode = params.get("hub.mode")
+    hub_challenge = params.get("hub.challenge", "")
+    hub_verify_token = params.get("hub.verify_token", "")
+    verify_token = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "goodjobs_webhook_verify")
+    if hub_mode == "subscribe" and hub_verify_token == verify_token:
+        return Response(content=hub_challenge, media_type="text/plain")
+    raise HTTPException(status_code=403, detail="Webhook verification failed — check WHATSAPP_WEBHOOK_VERIFY_TOKEN")
+
+
+@app.post("/crm/whatsapp/webhook", tags=["CRM"])
+async def receive_whatsapp_webhook(request: Request):
+    """
+    Receive delivery status updates from WhatsApp Business API.
+    Expects the standard Cloud API webhook payload.
+    Delivery status vocabulary: sent | delivered | read | failed.
+
+    Security: when WHATSAPP_APP_SECRET is set, validates the X-Hub-Signature-256 header
+    (HMAC-SHA256 of the raw request body) before processing.  This prevents forged status
+    updates — always configure this env var in production.
+
+    Always returns HTTP 200 so WhatsApp does not retry indefinitely.
+    """
+    import hmac as _hmac
+    import hashlib as _hashlib
+
+    body = await request.body()
+
+    app_secret = os.getenv("WHATSAPP_APP_SECRET", "").strip()
+    if app_secret:
+        sig_header = request.headers.get("X-Hub-Signature-256", "")
+        if not sig_header.startswith("sha256="):
+            return Response(content='{"ok":false,"reason":"missing_signature"}', status_code=400, media_type="application/json")
+        expected_sig = "sha256=" + _hmac.new(app_secret.encode(), body, _hashlib.sha256).hexdigest()
+        if not _hmac.compare_digest(sig_header, expected_sig):
+            return Response(content='{"ok":false,"reason":"invalid_signature"}', status_code=403, media_type="application/json")
+
+    try:
+        payload = json.loads(body)
+    except Exception:
+        return {"ok": True}
+
+    try:
+        for entry in payload.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                for status_obj in value.get("statuses", []):
+                    wamid = status_obj.get("id")
+                    new_status = status_obj.get("status")
+                    _VALID_WA_STATUSES = {"sent", "delivered", "read", "failed"}
+                    if wamid and new_status and new_status in _VALID_WA_STATUSES:
+                        ngo_id_for_update = _update_touchpoint_by_wamid(wamid, new_status)
+                        with db_conn() as conn:
+                            if conn is not None:
+                                try:
+                                    cur = conn.cursor()
+                                    if ngo_id_for_update:
+                                        cur.execute(
+                                            "UPDATE touchpoints SET status = %s, updated_at = NOW() WHERE ngo_id = %s AND wamid = %s",
+                                            (new_status, ngo_id_for_update, wamid),
+                                        )
+                                    else:
+                                        # In-memory map miss (e.g. process restart): derive ngo_id
+                                        # from the existing DB row so the update stays tenant-scoped.
+                                        cur.execute(
+                                            "UPDATE touchpoints SET status = %s, updated_at = NOW() WHERE wamid = %s AND ngo_id = (SELECT ngo_id FROM touchpoints WHERE wamid = %s LIMIT 1)",
+                                            (new_status, wamid, wamid),
+                                        )
+                                except Exception:
+                                    pass
+    except Exception:
+        pass
+
+    return {"ok": True}
 
 
 # ── Finance: wire previously-demo actions to backend ──────────────────────────

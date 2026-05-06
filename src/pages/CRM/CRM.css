@@ -689,6 +689,14 @@
   background: color-mix(in srgb, #16a34a 12%, transparent);
   color: #15803d;
 }
+.outreach-delivery-pill--read {
+  background: color-mix(in srgb, #0891b2 14%, transparent);
+  color: #0e7490;
+}
+.outreach-delivery-pill--failed {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: var(--color-danger);
+}
 
 /* ── Detail panel tabs ───────────────────────────────────── */
 .detail-tabs {

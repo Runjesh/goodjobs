@@ -113,7 +113,7 @@ const CRM: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const [detailTab, setDetailTab] = useState<'overview' | 'history'>('overview');
-  const [lastOutreachStatus, setLastOutreachStatus] = useState<'idle' | 'sent' | 'delivered'>('idle');
+  const [lastOutreachStatus, setLastOutreachStatus] = useState<'idle' | 'sent' | 'delivered' | 'read' | 'failed'>('idle');
   /** Id of the donor whose single-send last updated the header delivery pill.
    *  The pill is only shown when this matches the currently active donor. */
   const [lastOutreachDonorId, setLastOutreachDonorId] = useState<string | null>(null);
@@ -559,9 +559,64 @@ const CRM: React.FC = () => {
   const [lastSendFailures, setLastSendFailures] = useState<string[]>([]);
   const [lastSendSkipped, setLastSendSkipped] = useState<string[]>([]);
 
+  /**
+   * Poll /crm/outreach/{outreachId}/status until all recipients reach a
+   * terminal status (delivered | read | failed) or until maxAttempts is hit.
+   * Updates outreachLog entries and the header delivery pill in real-time.
+   * When delivery failures are detected, sets lastSendFailures (with readable
+   * donor names) and reopens the composer so the failure list is visible.
+   * Declared here — after all required useState hooks — to avoid TDZ errors.
+   */
+  const startDeliveryPolling = useCallback((
+    outreachId: string,
+    recipients: Array<{ entryId: string; donorId: string; donorName: string }>,
+    headerDonorId: string | null,
+  ) => {
+    const MAX_ATTEMPTS = 15;
+    const INTERVAL_MS = 2500;
+    let attempts = 0;
+    const reportedFailedNames = new Set<string>();
+    const interval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await apiFetch(`/crm/outreach/${outreachId}/status`);
+        if (!res.ok) { clearInterval(interval); return; }
+        const data = await res.json() as { recipients?: Record<string, { status: string }> };
+        const serverRecips = data.recipients || {};
+        let allTerminal = true;
+        const newFailedNames: string[] = [];
+        for (const { entryId, donorId, donorName } of recipients) {
+          const rec = serverRecips[donorId];
+          if (!rec) { allTerminal = false; continue; }
+          const st = rec.status as 'sent' | 'delivered' | 'read' | 'failed';
+          if (st === 'delivered' || st === 'read') {
+            updateOutreachEntry(entryId, { status: st });
+            if (headerDonorId === donorId) setLastOutreachStatus(st);
+          } else if (st === 'failed') {
+            updateOutreachEntry(entryId, { status: 'failed' });
+            if (headerDonorId === donorId) setLastOutreachStatus('failed');
+            if (!reportedFailedNames.has(donorName)) {
+              reportedFailedNames.add(donorName);
+              newFailedNames.push(donorName);
+            }
+          } else {
+            allTerminal = false;
+          }
+        }
+        if (newFailedNames.length > 0) {
+          setLastSendFailures(prev => [...new Set([...prev, ...newFailedNames])]);
+          setShowComposer(true);
+        }
+        if (allTerminal || attempts >= MAX_ATTEMPTS) clearInterval(interval);
+      } catch {
+        clearInterval(interval);
+      }
+    }, INTERVAL_MS);
+  }, [updateOutreachEntry, setLastOutreachStatus, setLastSendFailures, setShowComposer]);
+
   /** Shape of the per-recipient response from /crm/outreach{,/email}. */
-  interface OutreachResultRow { donor_id: string | number; ok: boolean; error?: string }
-  interface OutreachResponse { results?: OutreachResultRow[] }
+  interface OutreachResultRow { donor_id: string | number; ok: boolean; wamid?: string; error?: string }
+  interface OutreachResponse { results?: OutreachResultRow[]; outreach_id?: string }
 
   const handleSendComposer = async () => {
     const donorIds = bulkMode ? Array.from(selectedIds) : (activeDonor?.id ? [activeDonor.id] : []);
@@ -641,7 +696,7 @@ const CRM: React.FC = () => {
         // of whether any others failed (partial-success should still record contact).
         if (successIds.length > 0) {
           const now = Date.now();
-          successIds.forEach((did, i) => {
+          const emailEntries = successIds.map((did, i) => {
             const entryId = `${now}-email-${i}`;
             addOutreachEntry({
               id: entryId,
@@ -652,13 +707,18 @@ const CRM: React.FC = () => {
               template: selectedTemplate.label,
               status: 'sent',
             });
-            setTimeout(() => updateOutreachEntry(entryId, { status: 'delivered' }), 2000);
+            return { entryId, donorId: String(did) };
           });
           // Scope header pill to active donor (single sends); for bulk, null it out.
           if (!bulkMode && activeDonor) setLastOutreachDonorId(String(activeDonor.id));
           else setLastOutreachDonorId(null);
           setLastOutreachStatus('sent');
-          setTimeout(() => setLastOutreachStatus('delivered'), 2000);
+          // Email: no wamid tracking — email providers don't send webhooks here,
+          // so we fall back to a short optimistic delay for the UI.
+          setTimeout(() => {
+            emailEntries.forEach(({ entryId }) => updateOutreachEntry(entryId, { status: 'delivered' }));
+            setLastOutreachStatus('delivered');
+          }, 2000);
         }
         // Keep composer open if anything failed/skipped so the user sees the list.
         if (failed.length === 0 && skipped.length === 0) {
@@ -685,8 +745,10 @@ const CRM: React.FC = () => {
       let sent = donorIds.length;
       let failed: string[] = [];
       let successIds: Array<string | number> = [...donorIds];
+      let waOutreachId: string | null = null;
       try {
         const data = (await res.json()) as OutreachResponse;
+        waOutreachId = data.outreach_id ?? null;
         if (Array.isArray(data?.results)) {
           sent = data.results.filter(r => r.ok).length;
           failed = data.results
@@ -702,7 +764,7 @@ const CRM: React.FC = () => {
       // Log a touchpoint for every successfully sent donor (partial success included).
       if (successIds.length > 0) {
         const now = Date.now();
-        successIds.forEach((did, i) => {
+        const waEntries = successIds.map((did, i) => {
           const entryId = `${now}-wa-${i}`;
           addOutreachEntry({
             id: entryId,
@@ -712,13 +774,26 @@ const CRM: React.FC = () => {
             channel: 'whatsapp',
             template: selectedTemplate.label,
             status: 'sent',
+            outreachId: waOutreachId ?? undefined,
           });
-          setTimeout(() => updateOutreachEntry(entryId, { status: 'delivered' }), 2000);
+          return {
+            entryId,
+            donorId: String(did),
+            donorName: donorMap.get(String(did))?.name || String(did),
+          };
         });
+        const headerDonorId = (!bulkMode && activeDonor) ? String(activeDonor.id) : null;
         if (!bulkMode && activeDonor) setLastOutreachDonorId(String(activeDonor.id));
         else setLastOutreachDonorId(null);
         setLastOutreachStatus('sent');
-        setTimeout(() => setLastOutreachStatus('delivered'), 2000);
+        if (waOutreachId) {
+          startDeliveryPolling(waOutreachId, waEntries, headerDonorId);
+        } else {
+          setTimeout(() => {
+            waEntries.forEach(({ entryId }) => updateOutreachEntry(entryId, { status: 'delivered' }));
+            setLastOutreachStatus('delivered');
+          }, 2000);
+        }
       }
       if (failed.length === 0) {
         setShowComposer(false);
@@ -1272,8 +1347,12 @@ const CRM: React.FC = () => {
               </div>
               {lastOutreachStatus !== 'idle' && lastOutreachDonorId === String(activeDonor?.id) && (
                 <div className={`outreach-delivery-pill outreach-delivery-pill--${lastOutreachStatus}`} style={{ marginTop: '0.5rem' }}>
-                  {lastOutreachStatus === 'delivered'
+                  {lastOutreachStatus === 'read'
+                    ? <><CheckCircle2 size={12} /> Read</>
+                    : lastOutreachStatus === 'delivered'
                     ? <><CheckCircle2 size={12} /> Delivered</>
+                    : lastOutreachStatus === 'failed'
+                    ? <><AlertTriangle size={12} /> Delivery failed</>
                     : <><Send size={12} /> Sent — confirming delivery…</>}
                 </div>
               )}
@@ -1344,8 +1423,12 @@ const CRM: React.FC = () => {
                               </div>
                             </div>
                             <span className={`outreach-delivery-pill outreach-delivery-pill--${entry.status}`}>
-                              {entry.status === 'delivered'
+                              {entry.status === 'read'
+                                ? <><CheckCircle2 size={11} /> Read</>
+                                : entry.status === 'delivered'
                                 ? <><CheckCircle2 size={11} /> Delivered</>
+                                : entry.status === 'failed'
+                                ? <><AlertTriangle size={11} /> Failed</>
                                 : <><Send size={11} /> Sent</>}
                             </span>
                           </div>

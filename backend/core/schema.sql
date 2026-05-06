@@ -443,6 +443,27 @@ CREATE TABLE IF NOT EXISTS inbox_item_states (
 
 CREATE INDEX IF NOT EXISTS idx_inbox_states_ngo ON inbox_item_states(ngo_id);
 
+-- ── 16. WhatsApp Touchpoints — per-recipient delivery tracking ──────────────
+-- One row per donor per outreach batch. wamid is the message ID returned by
+-- WhatsApp Business Cloud API; status is updated by the /crm/whatsapp/webhook
+-- endpoint as delivery receipts arrive.
+CREATE TABLE IF NOT EXISTS touchpoints (
+    id          TEXT PRIMARY KEY,
+    ngo_id      UUID NOT NULL,
+    outreach_id TEXT NOT NULL,
+    donor_id    TEXT NOT NULL,
+    channel     TEXT NOT NULL DEFAULT 'whatsapp',
+    wamid       TEXT,
+    status      TEXT NOT NULL DEFAULT 'sent',  -- sent | delivered | read | failed
+    error_msg   TEXT,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_touchpoints_ngo      ON touchpoints(ngo_id);
+CREATE INDEX IF NOT EXISTS idx_touchpoints_outreach  ON touchpoints(outreach_id);
+CREATE INDEX IF NOT EXISTS idx_touchpoints_wamid     ON touchpoints(wamid) WHERE wamid IS NOT NULL;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Row Level Security (RLS) — One DB, many NGOs, zero data leakage
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -458,6 +479,7 @@ ALTER TABLE agent_audit_log    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE consent_registry   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE data_erasure_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE breach_log         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE touchpoints        ENABLE ROW LEVEL SECURITY;
 
 -- Helper function: read ngo_id from session variable
 CREATE OR REPLACE FUNCTION current_ngo_id() RETURNS UUID AS $$
@@ -485,6 +507,9 @@ CREATE POLICY ngo_isolate_erasure
 
 CREATE POLICY ngo_isolate_breach
     ON breach_log USING (ngo_id = current_ngo_id());
+
+CREATE POLICY ngo_isolate_touchpoints
+    ON touchpoints USING (ngo_id = current_ngo_id());
 
 -- ── Seed data: default NGO + demo users ────────────────────────────────────
 -- Passwords are demo-only hashes (bcrypt of "demo1234").

@@ -205,7 +205,9 @@ export interface OutreachEntry {
   date: string;
   channel: 'whatsapp' | 'email';
   template: string;
-  status: 'sent' | 'delivered';
+  status: 'sent' | 'delivered' | 'read' | 'failed';
+  /** Backend outreach_id — used to poll /crm/outreach/{id}/status for real delivery receipts. */
+  outreachId?: string;
 }
 
 interface AppState {
