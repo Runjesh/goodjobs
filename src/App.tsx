@@ -1,6 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
 import Layout from './components/Layout/Layout';
 import PageLoading from './components/ui/PageLoading';
@@ -26,6 +26,17 @@ const SignupWizard = lazy(() => import('./pages/Onboarding/SignupWizard'));
 const DonationPage = lazy(() => import('./pages/DonationPage/DonationPage'));
 const Settings     = lazy(() => import('./pages/Settings/Settings'));
 const Landing      = lazy(() => import('./pages/Landing/Landing'));
+
+/* Unauthenticated → Landing page. Authenticated → app Layout with Outlet. */
+const RootGate: React.FC = () => {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <Landing />;
+  return (
+    <ProtectedRoute>
+      <Layout />
+    </ProtectedRoute>
+  );
+};
 
 function App() {
   return (
@@ -56,12 +67,13 @@ function App() {
       />
       <Suspense fallback={<PageLoading />}>
         <Routes>
+          {/* Public standalone routes */}
           <Route path="/landing" element={<Landing />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
+          <Route path="/login"   element={<Login />} />
+          <Route path="/signup"  element={<Signup />} />
           <Route path="/give/:campaignSlug" element={<DonationPage />} />
 
-          {/* Onboarding wizard — protected, but renders without the main Layout chrome. */}
+          {/* Onboarding wizard — protected, renders without main Layout chrome */}
           <Route
             path="/onboarding"
             element={
@@ -71,14 +83,8 @@ function App() {
             }
           />
 
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
+          {/* Root: Landing for guests, app for signed-in users */}
+          <Route path="/" element={<RootGate />}>
             {/* ── Primary Workspaces ─────────────────────────────── */}
             <Route index element={<Dashboard />} />
             <Route path="programs"    element={<ProtectedRoute module="programs"><Programs /></ProtectedRoute>} />
