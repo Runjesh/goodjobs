@@ -5,10 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+import csv
 import hashlib
+import io
 import json
 import os
 import re
+import zipfile
 
 from agents.donor_nurture_agent import donor_nurture_app
 from agents.finance_compliance_agent import finance_agent
@@ -3447,13 +3450,233 @@ def revoke_other_sessions(current_user: TokenUser = Depends(get_current_user)):
 
 @app.get("/dpdp/export", tags=["DPDP"])
 def dpdp_export(current_user: TokenUser = Depends(get_current_user)):
+    """
+    DPDP Act 2023 — full organisation data export.
+    Returns a ZIP containing one CSV per entity type.  In production the data
+    is fetched from the database; in demo / memory mode the in-memory stores
+    are used so the download is never empty.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filename = f"goodjobs_export_{today}.zip"
+
+    def _make_csv(rows: list[dict]) -> str:
+        if not rows:
+            return ""
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()), extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+        return buf.getvalue()
+
+    def _ser(v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, (dict, list)):
+            return json.dumps(v, ensure_ascii=False)
+        return str(v)
+
+    ngo_id = current_user.ngo_id
     s = get_settings(current_user)
-    return {
-        "user": {"user_id": current_user.user_id, "email": current_user.email, "role": current_user.role, "full_name": s["profile"].get("full_name")},
-        "ngo": s.get("ngo", {}),
-        "notification_prefs": s.get("notification_prefs", {}),
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-    }
+    exported_at = datetime.now(timezone.utc).isoformat()
+
+    with db_conn() as conn:
+        # ── donors ──────────────────────────────────────────────────────────
+        if conn is not None:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id::text, full_name, COALESCE(donor_type,'') as donor_type,
+                       COALESCE(total_lifetime_value,0)::float as total_given,
+                       COALESCE(pan_masked,'') as pan,
+                       COALESCE(location_text,'') as location,
+                       COALESCE(email,'') as email,
+                       COALESCE(phone,'') as phone,
+                       COALESCE(tags,'{}') as tags
+                FROM donors WHERE ngo_id = %s::uuid ORDER BY created_at DESC
+                """,
+                (ngo_id,),
+            )
+            donors_rows = [
+                {"id": r[0], "name": r[1], "type": r[2], "total_given": r[3],
+                 "pan": r[4], "location": r[5], "email": r[6], "phone": r[7],
+                 "tags": ";".join(list(r[8] or []))}
+                for r in cur.fetchall()
+            ]
+        else:
+            _seed_memory_crm(ngo_id)
+            donors_rows = [
+                {"id": _ser(d.get("id")), "name": _ser(d.get("name")),
+                 "type": _ser(d.get("type")), "total_given": _ser(d.get("totalGiven")),
+                 "pan": _ser(d.get("pan")), "location": _ser(d.get("location")),
+                 "email": _ser(d.get("email")), "phone": _ser(d.get("phone")),
+                 "tags": ";".join(d.get("tags") or [])}
+                for d in DONORS_MEM_BY_NGO.get(ngo_id, [])
+            ]
+
+        # ── transactions ─────────────────────────────────────────────────────
+        if conn is not None:
+            cur.execute(
+                """
+                SELECT id::text, donor_id::text, COALESCE(donor_name,'') as donor_name,
+                       amount::float, COALESCE(method,'') as method,
+                       COALESCE(campaign_id::text,'') as campaign_id,
+                       COALESCE(campaign_title,'') as campaign_title,
+                       created_at
+                FROM transactions WHERE ngo_id = %s::uuid ORDER BY created_at DESC
+                """,
+                (ngo_id,),
+            )
+            tx_rows = [
+                {"id": r[0], "donor_id": r[1], "donor_name": r[2], "amount": r[3],
+                 "method": r[4], "campaign_id": r[5], "campaign_title": r[6],
+                 "date": _ser(r[7])}
+                for r in cur.fetchall()
+            ]
+        else:
+            tx_rows = [
+                {"id": _ser(t.get("id")), "donor_id": _ser(t.get("donorId")),
+                 "donor_name": _ser(t.get("donorName")), "amount": _ser(t.get("amount")),
+                 "method": _ser(t.get("method")), "campaign_id": _ser(t.get("campaignId")),
+                 "campaign_title": _ser(t.get("campaignTitle")), "date": _ser(t.get("date"))}
+                for t in TX_MEM_BY_NGO.get(ngo_id, [])
+            ]
+
+        # ── beneficiaries ─────────────────────────────────────────────────────
+        if conn is not None:
+            cur.execute(
+                """
+                SELECT id, name, program, location, aadhaar, family_size,
+                       COALESCE(details,'{}') as details
+                FROM program_beneficiaries WHERE ngo_id = %s ORDER BY created_at DESC
+                """,
+                (ngo_id,),
+            )
+            ben_rows = [
+                {"id": _ser(r[0]), "name": _ser(r[1]), "program": _ser(r[2]),
+                 "location": _ser(r[3]), "aadhaar": "yes" if r[4] else "no",
+                 "family_size": _ser(r[5]), "details": _ser(r[6])}
+                for r in cur.fetchall()
+            ]
+        else:
+            _seed_memory_beneficiaries(ngo_id)
+            ben_rows = [
+                {"id": _ser(b.get("id")), "name": _ser(b.get("name")),
+                 "program": _ser(b.get("program")), "location": _ser(b.get("location")),
+                 "aadhaar": "yes" if b.get("aadhaar") else "no",
+                 "family_size": _ser(b.get("familySize")), "details": _ser(b.get("details"))}
+                for b in BENEFICIARIES_MEM_BY_NGO.get(ngo_id, [])
+            ]
+
+        # ── CSR / grants ──────────────────────────────────────────────────────
+        if conn is not None:
+            cur.execute(
+                """
+                SELECT id::text, company, amount::float, project,
+                       COALESCE(tags,'{}') as tags, status, COALESCE(agent,'') as agent,
+                       COALESCE(report_due_date,'') as report_due_date,
+                       COALESCE(win_probability::text,'') as win_probability
+                FROM csr_pipeline WHERE ngo_id = %s::uuid ORDER BY created_at DESC
+                """,
+                (ngo_id,),
+            )
+            grant_rows = [
+                {"id": r[0], "company": r[1], "amount": r[2], "project": r[3],
+                 "tags": ";".join(list(r[4] or [])), "status": r[5], "agent": r[6],
+                 "report_due_date": r[7], "win_probability": r[8]}
+                for r in cur.fetchall()
+            ]
+        else:
+            _seed_memory_csr(ngo_id)
+            grant_rows = [
+                {"id": _ser(g.get("id")), "company": _ser(g.get("company")),
+                 "amount": _ser(g.get("amount")), "project": _ser(g.get("project")),
+                 "tags": ";".join(g.get("tags") or []), "status": _ser(g.get("col")),
+                 "agent": _ser(g.get("agent")), "report_due_date": _ser(g.get("report_due_date")),
+                 "win_probability": _ser(g.get("win_probability"))}
+                for g in CSR_CARDS_MEM_BY_NGO.get(ngo_id, [])
+            ]
+
+        # ── compliance docs ───────────────────────────────────────────────────
+        if conn is not None:
+            cur.execute(
+                """
+                SELECT id::text, name, doc_type, status, expiry_date,
+                       COALESCE(registration_number,'') as reg_no,
+                       COALESCE(assigned_to,'') as assigned_to,
+                       uploaded_at
+                FROM compliance_documents WHERE ngo_id = %s::uuid ORDER BY uploaded_at DESC
+                """,
+                (ngo_id,),
+            )
+            comp_rows = [
+                {"id": r[0], "name": r[1], "type": r[2], "status": r[3],
+                 "expiry": _ser(r[4]), "registration_number": r[5],
+                 "assigned_to": r[6], "uploaded_at": _ser(r[7])}
+                for r in cur.fetchall()
+            ]
+        else:
+            comp_rows = [
+                {"id": _ser(c.get("id")), "name": _ser(c.get("name")),
+                 "type": _ser(c.get("type")), "status": _ser(c.get("status")),
+                 "expiry": _ser(c.get("expiry")),
+                 "registration_number": _ser(c.get("registration_number")),
+                 "assigned_to": _ser(c.get("assigned_to")),
+                 "uploaded_at": _ser(c.get("uploadedAt"))}
+                for c in COMPLIANCE_DOCS_MEM_BY_NGO.get(ngo_id, [])
+            ]
+
+        # ── volunteers ────────────────────────────────────────────────────────
+        if conn is not None:
+            cur.execute(
+                """
+                SELECT id::text, name, COALESCE(skills,'{}') as skills,
+                       COALESCE(hours_logged,0)::float as hours, verified
+                FROM volunteers WHERE ngo_id = %s::uuid ORDER BY created_at DESC
+                """,
+                (ngo_id,),
+            )
+            vol_rows = [
+                {"id": r[0], "name": r[1], "skills": ";".join(list(r[2] or [])),
+                 "hours": r[3], "verified": "yes" if r[4] else "no"}
+                for r in cur.fetchall()
+            ]
+        else:
+            _seed_memory_volunteer_roster(ngo_id)
+            vol_rows = [
+                {"id": _ser(v.get("id")), "name": _ser(v.get("name")),
+                 "skills": ";".join(v.get("skills") or []),
+                 "hours": _ser(v.get("hours")), "verified": "yes" if v.get("verified") else "no"}
+                for v in VOLUNTEERS_ROSTER_MEM_BY_NGO.get(ngo_id, [])
+            ]
+
+    # ── Build ZIP in-memory ───────────────────────────────────────────────────
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        manifest = {
+            "exported_by": current_user.email,
+            "exported_at": exported_at,
+            "ngo": s.get("ngo", {}),
+            "files": ["manifest.json", "donors.csv", "transactions.csv",
+                      "beneficiaries.csv", "grants.csv", "compliance_docs.csv",
+                      "volunteers.csv"],
+        }
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
+        zf.writestr("donors.csv", _make_csv(donors_rows))
+        zf.writestr("transactions.csv", _make_csv(tx_rows))
+        zf.writestr("beneficiaries.csv", _make_csv(ben_rows))
+        zf.writestr("grants.csv", _make_csv(grant_rows))
+        zf.writestr("compliance_docs.csv", _make_csv(comp_rows))
+        zf.writestr("volunteers.csv", _make_csv(vol_rows))
+
+    zip_bytes = buf.getvalue()
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(zip_bytes)),
+        },
+    )
 
 # ── Donor Nurture Agent ─────────────────────────────────────────────────────────
 
