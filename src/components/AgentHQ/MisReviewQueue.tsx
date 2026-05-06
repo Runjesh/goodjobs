@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { ClipboardCheck, Check, Pencil, X } from 'lucide-react';
 import { useStore, type MisReviewIntent } from '../../store/useStore';
@@ -64,7 +64,8 @@ const MisReviewRow: React.FC<{ intent: MisReviewIntent }> = ({ intent }) => {
 };
 
 const MisReviewQueue: React.FC = () => {
-  const pending = useStore(s => s.misReviewIntents.filter(i => i.status === 'pending'));
+  const misReviewIntents = useStore(s => s.misReviewIntents);
+  const pending = useMemo(() => misReviewIntents.filter(i => i.status === 'pending'), [misReviewIntents]);
   if (pending.length === 0) return null;
 
   return (
