@@ -71,6 +71,7 @@ const Settings: React.FC = () => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('PROGRAM_HEAD');
   const [teamUpgradeOpen, setTeamUpgradeOpen] = useState(false);
+  const [confirmRemoveEmail, setConfirmRemoveEmail] = useState<string | null>(null);
 
   const sendInvite = () => {
     const email = inviteEmail.trim();
@@ -555,48 +556,80 @@ const Settings: React.FC = () => {
                     Team members
                   </div>
                   {pendingTeamMembers.map(member => (
-                    <div
-                      key={member.email}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '0.65rem 0.85rem',
-                        borderBottom: '1px solid var(--color-border-light)',
-                        fontSize: '0.85rem', gap: '0.75rem',
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.email}</div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
-                          Joined {new Date(member.invitedAt).toLocaleDateString('en-IN')}
+                    <div key={member.email}>
+                      <div
+                        style={{
+                          display: 'flex', alignItems: 'center',
+                          padding: '0.65rem 0.85rem',
+                          borderBottom: confirmRemoveEmail === member.email ? 'none' : '1px solid var(--color-border-light)',
+                          fontSize: '0.85rem', gap: '0.75rem',
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.email}</div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)' }}>
+                            Joined {new Date(member.invitedAt).toLocaleDateString('en-IN')}
+                          </div>
                         </div>
+                        <select
+                          className="input-field"
+                          style={{ width: 'auto', minWidth: 140, fontSize: '0.8rem', padding: '4px 8px', height: 34 }}
+                          value={member.role}
+                          disabled={confirmRemoveEmail === member.email}
+                          onChange={e => {
+                            updatePendingTeamMember(member.email, e.target.value);
+                            toast.success(`${member.email.split('@')[0]}'s role updated to ${ROLE_META[e.target.value as keyof typeof ROLE_META]?.label ?? e.target.value}.`);
+                          }}
+                        >
+                          <option value="ED">Executive Director</option>
+                          <option value="PROGRAM_HEAD">Program Head</option>
+                          <option value="FUNDRAISER">Fundraiser</option>
+                          <option value="FINANCE">Finance Officer</option>
+                          <option value="FIELD_OPS">Field Officer</option>
+                        </select>
+                        <button
+                          type="button"
+                          title="Remove member"
+                          aria-label={`Remove ${member.email}`}
+                          onClick={() => setConfirmRemoveEmail(member.email)}
+                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: 'var(--color-text-tertiary)', flexShrink: 0 }}
+                        >
+                          <XIcon size={16} />
+                        </button>
                       </div>
-                      <select
-                        className="input-field"
-                        style={{ width: 'auto', minWidth: 140, fontSize: '0.8rem', padding: '4px 8px', height: 34 }}
-                        value={member.role}
-                        onChange={e => {
-                          updatePendingTeamMember(member.email, e.target.value);
-                          toast.success(`${member.email.split('@')[0]}'s role updated to ${ROLE_META[e.target.value as keyof typeof ROLE_META]?.label ?? e.target.value}.`);
-                        }}
-                      >
-                        <option value="ED">Executive Director</option>
-                        <option value="PROGRAM_HEAD">Program Head</option>
-                        <option value="FUNDRAISER">Fundraiser</option>
-                        <option value="FINANCE">Finance Officer</option>
-                        <option value="FIELD_OPS">Field Officer</option>
-                      </select>
-                      <button
-                        type="button"
-                        title="Remove member"
-                        aria-label={`Remove ${member.email}`}
-                        onClick={() => {
-                          removePendingTeamMember(member.email);
-                          toast(`${member.email} removed from the workspace.`, { icon: '✕' });
-                        }}
-                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: 'var(--color-text-tertiary)', flexShrink: 0 }}
-                      >
-                        <XIcon size={16} />
-                      </button>
+                      {confirmRemoveEmail === member.email && (
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: '0.6rem',
+                          padding: '0.55rem 0.85rem',
+                          background: 'var(--color-danger-bg, #fef2f2)',
+                          borderBottom: '1px solid var(--color-border-light)',
+                          fontSize: '0.8rem',
+                        }}>
+                          <span style={{ flex: 1, color: 'var(--color-danger, #dc2626)', fontWeight: 500 }}>
+                            Remove <strong>{member.email}</strong> from workspace? This cannot be undone.
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            style={{ padding: '3px 12px', fontSize: '0.78rem', height: 30 }}
+                            onClick={() => {
+                              removePendingTeamMember(member.email);
+                              setConfirmRemoveEmail(null);
+                              toast(`${member.email} removed from the workspace.`, { icon: '✕' });
+                            }}
+                          >
+                            Remove
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '3px 12px', fontSize: '0.78rem', height: 30 }}
+                            onClick={() => setConfirmRemoveEmail(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
