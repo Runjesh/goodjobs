@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, X, Loader2, MessageSquare, Send } from 'lucide-react';
 import ActionCard from '../Common/ActionCard';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 
 const IntentBar: React.FC = () => {
+  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -132,7 +134,7 @@ const IntentBar: React.FC = () => {
                 summary={`Risk Level: ${resultCard.risk_level}. Ready to execute based on extracted context: ${JSON.stringify(resultCard.action_data)}`}
                 onApprove={() => {
                   toast('Queued. Review and execute in Agent HQ.', { duration: 2500 });
-                  window.location.hash = '/agent-hq';
+                  navigate('/agent-hq');
                   handleClear();
                 }}
                 onEdit={() => toast('Editing not available yet.', { duration: 1500 })}

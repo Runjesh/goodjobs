@@ -423,6 +423,7 @@ const Programs: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'beneficiaries.csv'; a.click();
+    URL.revokeObjectURL(url);
     toast.success('Beneficiary data exported to CSV!');
   };
 

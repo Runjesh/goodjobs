@@ -862,6 +862,7 @@ const Finance: React.FC = () => {
       a.href = url;
       a.download = `goodjobs_tally_${new Date().toISOString().split('T')[0]}.xml`;
       a.click();
+      URL.revokeObjectURL(url);
       toast.success('Tally Prime XML exported from backend.', { duration: 5000, icon: '💾' });
     } catch {
       toast.error('Failed to export Tally XML (backend not reachable).');
@@ -876,6 +877,7 @@ const Finance: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'grant_utilization.csv'; a.click();
+    URL.revokeObjectURL(url);
     toast.success('Grant utilization report exported!');
   };
 
@@ -948,6 +950,7 @@ const Finance: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `expenses_by_grant_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
     toast.success(`Exported ${rows.length - 1} tagged expenses.`);
   };
 

@@ -124,7 +124,8 @@ const Tasks: React.FC = () => {
       setFocusIdx(i => (visibleTasks.length > 0 && i >= visibleTasks.length ? visibleTasks.length - 1 : i));
       return;
     }
-    const token = decodeURIComponent(raw);
+    let token: string;
+    try { token = decodeURIComponent(raw); } catch { token = raw; }
     const next = new URLSearchParams(searchParams);
     next.delete('focus');
     if (!visibleTasks.length) {

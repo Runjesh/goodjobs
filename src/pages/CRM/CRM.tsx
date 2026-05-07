@@ -385,6 +385,9 @@ const CRM: React.FC = () => {
     });
   }, [donors, searchQuery, activeFilter, donorStages, lifecycleTick]);
 
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => () => { if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current); }, []);
+
   const donorListRef = useRef<HTMLDivElement>(null);
   const donorVirtualizer = useVirtualizer({
     count: filteredDonors.length,
@@ -576,11 +579,15 @@ const CRM: React.FC = () => {
     const INTERVAL_MS = 2500;
     let attempts = 0;
     const reportedFailedNames = new Set<string>();
-    const interval = setInterval(async () => {
+    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+    pollingIntervalRef.current = setInterval(async () => {
       attempts++;
+      const stop = () => {
+        if (pollingIntervalRef.current) { clearInterval(pollingIntervalRef.current); pollingIntervalRef.current = null; }
+      };
       try {
         const res = await apiFetch(`/crm/outreach/${outreachId}/status`);
-        if (!res.ok) { clearInterval(interval); return; }
+        if (!res.ok) { stop(); return; }
         const data = await res.json() as { recipients?: Record<string, { status: string }> };
         const serverRecips = data.recipients || {};
         let allTerminal = true;
@@ -607,9 +614,9 @@ const CRM: React.FC = () => {
           setLastSendFailures(prev => [...new Set([...prev, ...newFailedNames])]);
           setShowComposer(true);
         }
-        if (allTerminal || attempts >= MAX_ATTEMPTS) clearInterval(interval);
+        if (allTerminal || attempts >= MAX_ATTEMPTS) stop();
       } catch {
-        clearInterval(interval);
+        stop();
       }
     }, INTERVAL_MS);
   }, [updateOutreachEntry, setLastOutreachStatus, setLastSendFailures, setShowComposer]);
@@ -853,6 +860,7 @@ const CRM: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'donors_export.csv'; a.click();
+    URL.revokeObjectURL(url);
     toast.success(`Exported ${toExport.length} donor records!`);
   };
 
@@ -932,6 +940,7 @@ const CRM: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'donor_import_template.csv'; a.click();
+    URL.revokeObjectURL(url);
     toast('CSV template downloaded!', { icon: '📥' });
   };
 

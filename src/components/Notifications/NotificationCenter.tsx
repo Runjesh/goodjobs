@@ -121,7 +121,7 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
             <button className="action-btn-small" onClick={markAllRead} title="Mark all read"><Check size={14} /></button>
             <button
               className="action-btn-small"
-              onClick={() => { window.location.hash = '/settings'; onClose(); }}
+              onClick={() => { navigate('/settings'); onClose(); }}
               title="Settings"
             >
               <Settings size={14} />
