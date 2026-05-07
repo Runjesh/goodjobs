@@ -161,38 +161,7 @@
   --focus-ring-offset: 2px;
 }
 
-/* ── Dark Mode ───────────────────────────────────────── */
-html.dark {
-  --focus-ring-color: color-mix(in srgb, var(--color-primary) 65%, transparent);
-
-  /* Backgrounds */
-  --color-bg-main:        #0f172a;
-  --color-bg-card:        #1e293b;
-  --color-bg-elevated:    #334155;
-  --color-surface:        #1e293b;
-
-  /* Text */
-  --color-text-primary:   #f8fafc;
-  --color-text-secondary: #cbd5e1;
-  --color-text-tertiary:  #94a3b8;
-
-  /* Borders */
-  --color-border:         #334155;
-  --color-border-light:   #1e293b;
-
-  /* Adjust Primary for better contrast */
-  --color-primary:        #2dd4bf;
-  --color-primary-hover:  #14b8a6;
-  --color-primary-light:  #134e4a;
-
-  /* Shadows */
-  --shadow-xs:  0 1px 2px rgba(0,0,0,0.25);
-  --shadow-sm:  0 2px 8px rgba(0,0,0,0.35);
-  --shadow-md:  0 4px 16px rgba(0,0,0,0.4);
-  --shadow-lg:  0 8px 32px rgba(0,0,0,0.45);
-  --shadow-xl:  0 16px 48px rgba(0,0,0,0.5);
-  --shadow-card: 0 2px 8px rgba(0,0,0,.5);
-}
+/* Dark mode intentionally disabled — app always uses light theme */
 
 /* ── Reset ───────────────────────────────────────────── */
 *, *::before, *::after {
