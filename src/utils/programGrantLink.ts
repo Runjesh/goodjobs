@@ -94,13 +94,17 @@ export function grantHealthForProgram(
   let status: GrantHealthStatus = 'healthy';
 
   if (nextReportDue) {
-    const days = Math.ceil((new Date(nextReportDue).getTime() - now) / 86_400_000);
-    if (days < 0) status = 'overdue';
-    else if (days <= 14) status = 'at_risk';
+    const duMs = new Date(nextReportDue).getTime();
+    if (Number.isFinite(duMs)) {
+      const days = Math.ceil((duMs - now) / 86_400_000);
+      if (days < 0) status = 'overdue';
+      else if (days <= 14) status = 'at_risk';
+    }
   }
 
   for (const d of linkedDocs) {
-    const days = Math.ceil((new Date(d.expiry).getTime() - now) / 86_400_000);
+    const exMs = new Date(d.expiry).getTime();
+    const days = Number.isFinite(exMs) ? Math.ceil((exMs - now) / 86_400_000) : Infinity;
     if (d.status === 'Expired' || days < 0) {
       status = 'overdue';
     } else if ((d.status === 'Expiring Soon' || days <= 30) && status === 'healthy') {

@@ -903,6 +903,11 @@ const GrantDetail: React.FC = () => {
 
           {activeActiveTab === 'cascade' && (() => {
             const due = new Date(state.nextReportDue);
+            if (!Number.isFinite(due.getTime())) return (
+              <div className="grant-panel" style={{ color: 'var(--text-secondary)', padding: '1.5rem', textAlign: 'center' }}>
+                Set a report due date above to see the cascade timeline.
+              </div>
+            );
             const days = Math.ceil((due.getTime() - Date.now()) / 86400000);
             const markers = [
               { id: 'T-30', day: 30, label: 'T-30 · Soft reminder',           tone: 'ok'   as const },
