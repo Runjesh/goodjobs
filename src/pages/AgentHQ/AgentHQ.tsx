@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Bot, CheckCircle, ShieldAlert, Activity, Cpu, XCircle, Check, Eye,
@@ -386,7 +386,9 @@ function buildComplianceExpiryIntents(complianceDocs: ReturnType<typeof useStore
   const nowMs = Date.now();
   return complianceDocs.flatMap(doc => {
     if (!doc.expiry) return [];
-    const daysLeft = Math.ceil((new Date(doc.expiry).getTime() - nowMs) / 86_400_000);
+    const expiryMs = new Date(doc.expiry).getTime();
+    if (!Number.isFinite(expiryMs)) return [];          // guard: invalid date string
+    const daysLeft = Math.ceil((expiryMs - nowMs) / 86_400_000);
     if (daysLeft > 14 || daysLeft < -90) return [];
     const dayText = daysLeft < 0
       ? `expired ${Math.abs(daysLeft)}d ago`
@@ -407,7 +409,7 @@ function buildComplianceExpiryIntents(complianceDocs: ReturnType<typeof useStore
         ...(doc.assigned_to ? { '👤 Owner': doc.assigned_to } : {}),
       },
       reversibility: 'reversible',
-      expires_at: new Date(new Date(doc.expiry).getTime() + 7 * 86_400_000).toISOString(),
+      expires_at: new Date(expiryMs + 7 * 86_400_000).toISOString(),
       created_at: new Date().toISOString(),
       agent_reasoning: {
         triggered_by: `Document expiry within 14-day alert window (${dayText})`,
@@ -578,7 +580,10 @@ const AgentHQ: React.FC = () => {
   const complianceDocs   = useStore(s => s.complianceDocs);
   const donors           = useStore(s => s.donors);
   const beneficiaries    = useStore(s => s.beneficiaries);
-  const complianceExpiryIntents = buildComplianceExpiryIntents(complianceDocs);
+  const complianceExpiryIntents = useMemo(
+    () => buildComplianceExpiryIntents(complianceDocs),
+    [complianceDocs],
+  );
 
   // ── Core queue state ────────────────────────────────────────────────────────
   const [approvals, setApprovals]           = useState<QueueItem[]>([]);

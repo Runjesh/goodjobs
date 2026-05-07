@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
 import Layout from './components/Layout/Layout';
 import PageLoading from './components/ui/PageLoading';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 import { Toaster } from 'react-hot-toast';
 
 const Dashboard    = lazy(() => import('./pages/Dashboard/Dashboard'));
@@ -65,6 +66,7 @@ function App() {
           },
         }}
       />
+      <ErrorBoundary>
       <Suspense fallback={<PageLoading />}>
         <Routes>
           {/* Public standalone routes */}
@@ -110,6 +112,7 @@ function App() {
           </Route>
         </Routes>
       </Suspense>
+      </ErrorBoundary>
     </AuthProvider>
   );
 }

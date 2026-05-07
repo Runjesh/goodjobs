@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import ErrorBoundary from '../ui/ErrorBoundary';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
@@ -781,7 +782,9 @@ const Layout: React.FC = () => {
                 <TrialExpiredBanner />
                 <PastDueBanner />
                 <WelcomeBanner />
-                <Outlet />
+                <ErrorBoundary>
+                  <Outlet />
+                </ErrorBoundary>
               </div>
             </motion.div>
           </AnimatePresence>
