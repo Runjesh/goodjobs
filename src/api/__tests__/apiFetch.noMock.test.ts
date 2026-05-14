@@ -115,7 +115,12 @@ describe('hydrateDonorLifecycles', () => {
   });
 
   it('resolves quietly (no throw, no notify) on a non-OK response', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 }));
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
     let notified = 0;
     const off = subscribeLifecycleHydrated(() => { notified += 1; });
     await expect(hydrateDonorLifecycles()).resolves.toBeUndefined();

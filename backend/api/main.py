@@ -72,7 +72,7 @@ app = FastAPI(
 )
 
 # CORS — comma-separated origins in FRONTEND_ORIGINS (e.g. Railway app URL + local dev)
-_default_origins = "http://localhost:5173,https://goodjobs.co.in"
+_default_origins = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,https://goodjobs.co.in"
 _cors_env = (os.getenv("FRONTEND_ORIGINS") or _default_origins).strip()
 FRONTEND_ORIGIN_LIST = [o.strip() for o in _cors_env.split(",") if o.strip()]
 

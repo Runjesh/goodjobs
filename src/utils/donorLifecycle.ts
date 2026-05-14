@@ -1,11 +1,11 @@
 import type { Donor } from '../store/useStore';
+import { apiFetch } from '../api/client';
 
 /** Total giving above this (INR) — shown as “Major” in CRM giving-stage hints. */
 export const DONOR_MAJOR_THRESHOLD_INR = 500_000;
 
 const MS_PER_DAY = 86_400_000;
 const EV_HYDRATED = 'goodjobs:lifecycle-hydrated';
-const LS_LAPSE_ACK = 'gj.donor_lapse_risk_ack.v1';
 const LS_MILESTONES = 'gj.donor_milestones.v1';
 
 /** Active tenant id — Layout calls `setLifecycleScope` so milestone keys don't collide across orgs. */
@@ -17,10 +17,6 @@ export function setLifecycleScope(ngoId: string | null) {
 
 function milestonesStorageKey(): string {
   return lifecycleNgoId ? `${LS_MILESTONES}::${lifecycleNgoId}` : LS_MILESTONES;
-}
-
-function lapseAckStorageKey(): string {
-  return lifecycleNgoId ? `${LS_LAPSE_ACK}::${lifecycleNgoId}` : LS_LAPSE_ACK;
 }
 
 export type MilestoneId = 'thankyou' | 'impact' | 'fullimpact' | 'renewal';
@@ -44,27 +40,65 @@ export type LifecycleStage =
   | 'lapsed'
   | 'unknown';
 
-function emitHydrated() {
+/** Per-donor lifecycle blob in `localStorage` (see `donorV2Key`). */
+export type DonorPersistedState = {
+  milestones?: Partial<Record<MilestoneId, string>>;
+  skipped?: Partial<Record<MilestoneId, boolean>>;
+  lapseRiskAckAt?: string;
+};
+
+const MILESTONE_DEFS: { id: MilestoneId; label: string; description: string; day: number }[] = [
+  { id: 'thankyou', label: 'Thank-you', description: 'Within a few days of the gift', day: 3 },
+  { id: 'impact', label: 'Impact update', description: 'Day-30 stewardship', day: 30 },
+  { id: 'fullimpact', label: 'Full impact story', description: 'Day-90 deep engagement', day: 90 },
+  { id: 'renewal', label: 'Renewal conversation', description: 'Day-330 renewal window', day: 330 },
+];
+
+function milestoneTriggerDay(id: MilestoneId): number {
+  return MILESTONE_DEFS.find(d => d.id === id)?.day ?? 0;
+}
+
+function donorV2Key(donorId: string): string {
+  const ngo = lifecycleNgoId?.trim() || 'default';
+  return `goodjobs.${ngo}.donor.${donorId}.v2`;
+}
+
+export function loadDonorState(donorId: string | number): DonorPersistedState {
   try {
-    window.dispatchEvent(new CustomEvent(EV_HYDRATED));
+    const raw = localStorage.getItem(donorV2Key(String(donorId)));
+    if (!raw) return {};
+    const o = JSON.parse(raw) as unknown;
+    return o && typeof o === 'object' && !Array.isArray(o) ? (o as DonorPersistedState) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveDonorStateMerge(
+  donorId: string | number,
+  patch: Partial<DonorPersistedState>,
+  options: { silent?: boolean } = {},
+): DonorPersistedState {
+  const id = String(donorId);
+  const prev = loadDonorState(id);
+  const next: DonorPersistedState = {
+    ...prev,
+    ...patch,
+    milestones: { ...prev.milestones, ...patch.milestones },
+    skipped: { ...prev.skipped, ...patch.skipped },
+  };
+  try {
+    localStorage.setItem(donorV2Key(id), JSON.stringify(next));
   } catch {
     /* ignore */
   }
+  if (!options.silent) emitHydrated();
+  return next;
 }
 
-function readAckSet(): Set<string> {
+function emitHydrated() {
   try {
-    const raw = localStorage.getItem(lapseAckStorageKey());
-    const arr = raw ? (JSON.parse(raw) as unknown) : [];
-    return new Set(Array.isArray(arr) ? arr.map(String) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function writeAckSet(ids: Set<string>) {
-  try {
-    localStorage.setItem(lapseAckStorageKey(), JSON.stringify([...ids]));
+    window.dispatchEvent(new CustomEvent(EV_HYDRATED));
   } catch {
     /* ignore */
   }
@@ -111,9 +145,9 @@ export function daysSinceLastGift(lastGift: string, now = new Date()): number {
 function anchorDate(donor: Donor, now: Date): Date {
   const s = (donor.lastGift || '').trim();
   if (s && s !== 'N/A') {
-    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-    if (iso) {
-      return new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+    const parsed = Date.parse(s);
+    if (!Number.isNaN(parsed)) {
+      return new Date(parsed);
     }
   }
   return new Date(now.getTime() - daysSinceLastGift(donor.lastGift, now) * MS_PER_DAY);
@@ -126,17 +160,25 @@ function offsetDays(anchor: Date, days: number): Date {
 export function computeTouchpoints(donor: Donor, now = new Date()): Milestone[] {
   const id = String(donor.id);
   const store = readMilestones()[id] || {};
+  const gift = (donor.lastGift || '').trim();
+
+  if (!gift || gift === 'N/A') {
+    return MILESTONE_DEFS.map(def => ({
+      id: def.id,
+      label: def.label,
+      description: def.description,
+      dueDate: null,
+      doneDate: null,
+      state: 'upcoming' as const,
+    }));
+  }
+
   const anchor = anchorDate(donor, now);
+  const elapsed = Math.max(0, Math.floor((now.getTime() - anchor.getTime()) / MS_PER_DAY));
 
-  const defs: { id: MilestoneId; label: string; description: string; day: number }[] = [
-    { id: 'thankyou', label: 'Thank-you', description: 'Within a week of the gift', day: 7 },
-    { id: 'impact', label: 'Impact update', description: 'Day-30 stewardship', day: 30 },
-    { id: 'fullimpact', label: 'Full impact story', description: 'Day-90 deep engagement', day: 90 },
-    { id: 'renewal', label: 'Renewal conversation', description: 'Day-180 renewal window', day: 180 },
-  ];
-
-  return defs.map(def => {
-    const due = offsetDays(anchor, def.day);
+  return MILESTONE_DEFS.map(def => {
+    const T = def.day;
+    const due = offsetDays(anchor, T);
     const rec = store[def.id];
     const base = { id: def.id, label: def.label, description: def.description, dueDate: due, doneDate: null as Date | null };
     if (rec?.skipped) {
@@ -146,33 +188,66 @@ export function computeTouchpoints(donor: Donor, now = new Date()): Milestone[] 
       const doneDate = new Date(rec.doneAt);
       return { ...base, state: 'done' as const, doneDate };
     }
-    if (now.getTime() > due.getTime() + MS_PER_DAY) {
-      return { ...base, state: 'overdue' as const };
+    if (elapsed < T) {
+      return { ...base, state: 'upcoming' as const };
     }
-    if (now.getTime() >= due.getTime() - 0.5 * MS_PER_DAY) {
+    if (elapsed <= T + 7) {
       return { ...base, state: 'due' as const };
     }
-    return { ...base, state: 'upcoming' as const };
+    return { ...base, state: 'overdue' as const };
   });
 }
 
-export function nextDueMilestone(donor: Donor, now = new Date()): { state: 'due' | 'overdue' } | null {
-  for (const m of computeTouchpoints(donor, now)) {
-    if (m.state === 'due' || m.state === 'overdue') {
-      return { state: m.state };
-    }
+export function nextDueMilestone(
+  donor: Donor,
+  now = new Date(),
+): { id: MilestoneId; state: 'due' | 'overdue' | 'upcoming' } | null {
+  const tps = computeTouchpoints(donor, now);
+  const active = tps.filter(m => m.state !== 'done' && m.state !== 'skipped');
+  if (active.length === 0) return null;
+
+  const overdues = active.filter(m => m.state === 'overdue');
+  if (overdues.length) {
+    const id = overdues.reduce(
+      (best, m) => (milestoneTriggerDay(m.id) > milestoneTriggerDay(best) ? m.id : best),
+      overdues[0].id,
+    );
+    return { id, state: 'overdue' };
   }
+
+  const dues = active.filter(m => m.state === 'due');
+  if (dues.length) {
+    const id = dues.reduce(
+      (best, m) => (milestoneTriggerDay(m.id) < milestoneTriggerDay(best) ? m.id : best),
+      dues[0].id,
+    );
+    return { id, state: 'due' };
+  }
+
+  const upcomings = active.filter(m => m.state === 'upcoming');
+  if (upcomings.length) {
+    const id = upcomings.reduce(
+      (best, m) => (milestoneTriggerDay(m.id) < milestoneTriggerDay(best) ? m.id : best),
+      upcomings[0].id,
+    );
+    return { id, state: 'upcoming' };
+  }
+
   return null;
 }
 
-export function markMilestoneDone(donorId: string | number, milestoneId: MilestoneId, _now?: Date) {
+export function markMilestoneDone(donorId: string | number, milestoneId: MilestoneId, doneAtArg?: Date) {
   const id = String(donorId);
+  const doneAt = (doneAtArg ?? new Date()).toISOString();
   const all = readMilestones();
   const row = { ...(all[id] || {}) };
-  row[milestoneId] = { doneAt: new Date().toISOString() };
+  row[milestoneId] = { doneAt };
   all[id] = row;
   writeMilestones(all);
-  emitHydrated();
+  saveDonorStateMerge(id, {
+    milestones: { [milestoneId]: doneAt },
+    skipped: { [milestoneId]: false },
+  });
 }
 
 export function markMilestoneSkipped(donorId: string | number, milestoneId: MilestoneId) {
@@ -182,18 +257,55 @@ export function markMilestoneSkipped(donorId: string | number, milestoneId: Mile
   row[milestoneId] = { skipped: true };
   all[id] = row;
   writeMilestones(all);
-  emitHydrated();
+  saveDonorStateMerge(id, { skipped: { [milestoneId]: true } });
 }
+
+const STAGE_WEIGHT: Record<LifecycleStage, number> = {
+  acquisition: 50,
+  stewardship: 40,
+  renewal: 70,
+  lapse_risk: 100,
+  lapsed: 90,
+  unknown: 0,
+};
 
 /** Sort key for nurture queue — higher = more urgent. */
 export function urgencyScore(donor: Donor, now = new Date()): number {
-  const days = daysSinceLastGift(donor.lastGift, now);
-  let s = Math.min(1000, days * 3);
-  const m = nextDueMilestone(donor, now);
-  if (m?.state === 'overdue') s += 200;
-  else if (m?.state === 'due') s += 80;
-  s += Math.min(200, (Number(donor.totalGiven) || 0) / 50000);
-  return s;
+  const stage = computeStage(donor, now);
+  let w = STAGE_WEIGHT[stage];
+  const next = nextDueMilestone(donor, now);
+  if (next?.state === 'overdue') w += 30;
+  else if (next?.state === 'due') w += 20;
+
+  const gift = (donor.lastGift || '').trim();
+  if (!gift || gift === 'N/A') return w;
+
+  const anchor = anchorDate(donor, now);
+  const elapsed = Math.max(0, Math.floor((now.getTime() - anchor.getTime()) / MS_PER_DAY));
+  const tps = computeTouchpoints(donor, now);
+  let upcomingBump = 0;
+  for (const m of tps) {
+    if (m.state !== 'upcoming') continue;
+    const T = milestoneTriggerDay(m.id);
+    const bump = Math.max(0, 14 - (T - elapsed));
+    if (bump > upcomingBump) upcomingBump = bump;
+  }
+  return w + upcomingBump;
+}
+
+function recentLapseDemotion(donor: Donor, now: Date): boolean {
+  const id = String(donor.id);
+  const ackIso = loadDonorState(id).lapseRiskAckAt;
+  if (ackIso) {
+    const t = Date.parse(ackIso);
+    if (!Number.isNaN(t) && now.getTime() - t < 14 * MS_PER_DAY) return true;
+  }
+  const renewalDone = readMilestones()[id]?.renewal?.doneAt;
+  if (renewalDone) {
+    const t = Date.parse(renewalDone);
+    if (!Number.isNaN(t) && now.getTime() - t < 14 * MS_PER_DAY) return true;
+  }
+  return false;
 }
 
 /**
@@ -201,15 +313,19 @@ export function urgencyScore(donor: Donor, now = new Date()): number {
  * not from the static `donor.type` CRM label.
  */
 export function computeStage(donor: Donor, now = new Date()): LifecycleStage {
+  const raw = donor.lastGift;
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return 'unknown';
+  }
+
   const days = daysSinceLastGift(donor.lastGift, now);
-  if (days > 365) return 'lapsed';
-  if (days > 180) return 'lapse_risk';
-  const tp = computeTouchpoints(donor, now);
-  if (tp.some(m => m.id === 'renewal' && (m.state === 'due' || m.state === 'overdue'))) return 'renewal';
-  if (days > 120) return 'renewal';
-  if (days > 45) return 'stewardship';
-  if (days <= 45) return 'acquisition';
-  return 'unknown';
+  if (days >= 360) return 'lapsed';
+  if (days >= 330 && days < 360) {
+    return recentLapseDemotion(donor, now) ? 'renewal' : 'lapse_risk';
+  }
+  if (days >= 90) return 'renewal';
+  if (days >= 30) return 'stewardship';
+  return 'acquisition';
 }
 
 export function subscribeLifecycleHydrated(cb: () => void): () => void {
@@ -219,11 +335,24 @@ export function subscribeLifecycleHydrated(cb: () => void): () => void {
   return () => window.removeEventListener(EV_HYDRATED, fn);
 }
 
-export function ackLapseRisk(donorId: string | number): void {
-  const s = readAckSet();
-  s.add(String(donorId));
-  writeAckSet(s);
-  emitHydrated();
+export function ackLapseRisk(donorId: string | number, at: Date = new Date()): DonorPersistedState {
+  const iso = at.toISOString();
+  const state = saveDonorStateMerge(donorId, { lapseRiskAckAt: iso });
+
+  void (async () => {
+    try {
+      await apiFetch(`/crm/donors/${encodeURIComponent(String(donorId))}/lifecycle`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        noMockFallback: true,
+        body: JSON.stringify({ state: { lapseRiskAckAt: iso } }),
+      });
+    } catch {
+      /* non-fatal */
+    }
+  })();
+
+  return state;
 }
 
 /** CRM “giving stage” ribbon — New / Active / Lapsing / Lapsed / Major. */
@@ -310,7 +439,6 @@ const MILESTONE_IDS = new Set<string>(['thankyou', 'impact', 'fullimpact', 'rene
 export async function hydrateDonorLifecycles(): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
-    const { apiFetch } = await import('../api/client');
     const res = await apiFetch('/crm/donors/lifecycle');
     if (!res.ok) return;
     const data = (await res.json()) as { states?: Record<string, unknown> };
@@ -344,6 +472,19 @@ export async function hydrateDonorLifecycles(): Promise<void> {
         }
       }
       all[donorId] = row;
+
+      const v2M: Partial<Record<MilestoneId, string>> = {};
+      const v2S: Partial<Record<MilestoneId, boolean>> = {};
+      for (const mid of MILESTONE_IDS) {
+        const mId = mid as MilestoneId;
+        const done = row[mId]?.doneAt;
+        if (typeof done === 'string' && done) v2M[mId] = done;
+        if (row[mId]?.skipped) v2S[mId] = true;
+      }
+      const patch: Partial<DonorPersistedState> = { milestones: v2M, skipped: v2S };
+      const ackAt = server.lapseRiskAckAt;
+      if (typeof ackAt === 'string' && ackAt) patch.lapseRiskAckAt = ackAt;
+      saveDonorStateMerge(donorId, patch, { silent: true });
     }
     writeMilestones(all);
     emitHydrated();

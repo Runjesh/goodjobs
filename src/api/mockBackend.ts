@@ -535,17 +535,72 @@ const HANDLERS: Handler[] = [
     handle: () => jsonResponse({ status: 'saved', updated_at: new Date().toISOString(), source: 'mock' }),
   },
 
+  // ── Layout / module list endpoints — response keys MUST match FastAPI + what
+  //     Layout.tsx and feature pages parse (donors, cards, transactions, …).
+  //     A generic `{ items: [] }` caused 200 OK with wrong shape so the store
+  //     never hydrated and DEV demo seeds never ran.
+  {
+    test: (p, m) => m === 'GET' && p.startsWith('/crm/donors/lifecycle'),
+    handle: () => jsonResponse({ states: {}, source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/crm\/donors(\?|$)/.test(p),
+    handle: () => jsonResponse({ donors: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/finance\/transactions(\?|$)/.test(p),
+    handle: () => jsonResponse({ transactions: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/finance\/grants(\?|$)/.test(p),
+    handle: () => jsonResponse({ grants: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/fundraising\/campaigns(\?|$)/.test(p),
+    handle: () => jsonResponse({ campaigns: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/csr\/cards(\?|$)/.test(p),
+    handle: () => jsonResponse({ cards: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/volunteers\/roster(\?|$)/.test(p),
+    handle: () => jsonResponse({ volunteers: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/programs\/beneficiaries(\?|$)/.test(p),
+    handle: () => jsonResponse({ beneficiaries: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/compliance\/documents(\?|$)/.test(p),
+    handle: () => jsonResponse({ documents: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/compliance\/filings(\?|$)/.test(p),
+    handle: () => jsonResponse({ filings: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/compliance\/consents(\?|$)/.test(p),
+    handle: () => jsonResponse({ consents: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/compliance\/erasures(\?|$)/.test(p),
+    handle: () => jsonResponse({ requests: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/compliance\/breaches(\?|$)/.test(p),
+    handle: () => jsonResponse({ breaches: [], source: 'mock' }),
+  },
+  {
+    test: (p, m) => m === 'GET' && /^\/governance\/board-members(\?|$)/.test(p),
+    handle: () => jsonResponse({ members: [], source: 'mock' }),
+  },
+
   // ── Generic CRUD families: respond with optimistic success ─────────────────
   {
     test: (p, m) => m === 'GET' && (
-      p.startsWith('/crm/donors') ||
-      p.startsWith('/csr/cards') ||
-      p.startsWith('/programs/beneficiaries') ||
-      p.startsWith('/fundraising/campaigns') ||
-      p.startsWith('/finance/transactions') ||
-      p.startsWith('/finance/grants') ||
-      p.startsWith('/volunteers/') ||
-      p.startsWith('/compliance/') ||
+      (p.startsWith('/volunteers/') && !/^\/volunteers\/roster(\?|$)/.test(p)) ||
+      (p.startsWith('/compliance/') && !p.includes('.pdf')) ||
       p.startsWith('/governance/') ||
       p.startsWith('/inbox') ||
       p.startsWith('/notifications') ||
