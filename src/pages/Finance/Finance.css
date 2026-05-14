@@ -1,0 +1,320 @@
+.finance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.finance-card {
+  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.fcra-card {
+  border-color: #7C3AED;
+  background: linear-gradient(to bottom right, #ffffff, #F5F3FF);
+  box-shadow: 0 4px 12px -2px rgba(124, 58, 237, 0.15);
+}
+
+.fcra-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-xl);
+  background: #7C3AED;
+  color: white;
+}
+
+.fund-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fund-amount {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.fund-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  display: flex;
+  justify-content: space-between;
+}
+
+.fcra-limit-bar {
+  height: 6px;
+  background: #EDE9FE;
+  border-radius: var(--radius-xl);
+  margin-top: 0.5rem;
+  overflow: hidden;
+}
+
+.fcra-limit-fill {
+  height: 100%;
+  background: #7C3AED;
+  border-radius: var(--radius-xl);
+}
+
+.fcra-limit-fill.danger {
+  background: var(--color-danger);
+}
+
+.tally-sync-banner {
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  color: white;
+  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  box-shadow: var(--shadow-md);
+}
+
+.tally-info {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.tally-logo {
+  width: 48px;
+  height: 48px;
+  background: #facc15;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: #0f172a;
+  font-size: 1.25rem;
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #94a3b8;
+}
+
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  background: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.budget-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.budget-table th {
+  text-align: left;
+  padding: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.budget-table td {
+  padding: 1rem;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.budget-table tr:hover {
+  background: var(--color-bg-main);
+}
+
+.progress-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.progress-track {
+  flex: 1;
+  height: 6px;
+  background: var(--color-border-light);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+
+.progress-val {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: var(--radius-xl);
+}
+
+.variance-positive { color: var(--color-success); font-weight: 500; }
+.variance-negative { color: var(--color-danger); font-weight: 500; }
+
+.fcra-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.fcra-card-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: 0.5rem;
+}
+
+.fcra-limit-box {
+  width: 200px;
+  background: var(--color-bg-card);
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid #EDE9FE;
+}
+
+@media (max-width: 1024px) {
+  .finance-grid { grid-template-columns: repeat(2, 1fr); }
+  .tally-sync-banner { flex-direction: column; gap: 1rem; align-items: flex-start; }
+  .fcra-card { grid-column: span 2; }
+}
+
+@media (max-width: 640px) {
+  .finance-grid { grid-template-columns: 1fr; }
+  .fcra-card { grid-column: 1 / -1; }
+  .fcra-card-body { flex-direction: column; align-items: flex-start; gap: 1rem; }
+  .fcra-limit-box { width: 100%; }
+}
+
+/* ── FCRA Real-time Gauge ──────────────────────────────────────────────────── */
+.fcra-gauge-card {
+  border-left-width: 3px !important;
+  border-left-style: solid !important;
+}
+
+.fcra-status-pill {
+  display: inline-flex;
+  align-items: center;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fcra-gauge-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding-top: 0.25rem;
+}
+
+.fcra-gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.fcra-gauge-big-pct {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  min-width: 80px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fcra-gauge-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fcra-gauge-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.fcra-gauge-track {
+  position: relative;
+  height: 12px;
+  background: rgba(0,0,0,0.07);
+  border-radius: 99px;
+  overflow: visible;
+}
+
+.fcra-gauge-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 99px;
+  min-width: 2px;
+}
+
+.fcra-gauge-marker {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 18px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+
+.fcra-gauge-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 0 2px;
+}
+
+.fcra-gauge-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  background: rgba(255,255,255,0.5);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+.fcra-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.fcra-detail-row strong {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.fcra-gauge-empty {
+  font-size: 0.8rem;
+  color: var(--color-text-tertiary);
+  padding: 0.5rem 0;
+  font-style: italic;
+}

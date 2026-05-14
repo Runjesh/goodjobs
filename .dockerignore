@@ -1,0 +1,11 @@
+node_modules
+dist
+backend/.venv
+.git
+playwright-report
+test-results
+dev-dist
+**/__pycache__
+*.pyc
+.env
+.env.*

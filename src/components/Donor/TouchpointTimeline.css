@@ -1,0 +1,160 @@
+.touchpoint-timeline {
+  background: var(--color-bg-card, #fff);
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: var(--radius-lg, 12px);
+  padding: 1rem 1.1rem 0.85rem;
+}
+
+.touchpoint-timeline-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.touchpoint-timeline-header h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--color-text-primary, #0f172a);
+}
+
+.touchpoint-timeline-sub {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary, #94a3b8);
+}
+
+.touchpoint-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.touchpoint-item {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.6rem;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.touchpoint-item--due,
+.touchpoint-item--overdue {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.touchpoint-item--overdue {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.touchpoint-item--done {
+  opacity: 0.92;
+}
+
+.touchpoint-item--skipped {
+  opacity: 0.6;
+}
+
+.touchpoint-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+.touchpoint-body {
+  min-width: 0;
+}
+
+.touchpoint-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.touchpoint-label {
+  font-weight: 600;
+  font-size: 0.825rem;
+  color: var(--color-text-primary, #0f172a);
+}
+
+.touchpoint-state-pill {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.touchpoint-meta {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary, #475569);
+  margin-top: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.touchpoint-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.touchpoint-approve,
+.touchpoint-skip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--color-text-secondary, #475569);
+  transition: all 0.15s;
+}
+
+.touchpoint-approve {
+  background: #0F766E;
+  color: #fff;
+  border-color: #0F766E;
+}
+
+.touchpoint-approve:hover {
+  background: #0e6a64;
+}
+
+.touchpoint-skip:hover {
+  background: var(--color-bg-main, #f8fafc);
+  color: var(--color-text-primary, #0f172a);
+}
+
+@media (max-width: 640px) {
+  .touchpoint-item {
+    grid-template-columns: 24px 1fr;
+  }
+  .touchpoint-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    margin-top: 0.25rem;
+  }
+}

@@ -1,0 +1,54 @@
+.demo-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.12), rgba(220, 38, 38, 0.1));
+  color: #b45309;
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: max-width 200ms ease, padding 200ms ease;
+  max-width: 130px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.demo-mode-pill:hover {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.18), rgba(220, 38, 38, 0.16));
+}
+
+.demo-mode-pill.is-expanded {
+  max-width: 540px;
+  padding: 0.4rem 0.65rem 0.4rem 0.75rem;
+  white-space: normal;
+}
+
+.demo-mode-pill-label { letter-spacing: 0.02em; }
+
+.demo-mode-pill-detail {
+  font-weight: 400;
+  font-size: 0.7rem;
+  color: #92400e;
+  line-height: 1.35;
+  margin-left: 0.25rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid rgba(217, 119, 6, 0.4);
+}
+
+.demo-mode-pill-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #b45309;
+  padding: 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: auto;
+}
+.demo-mode-pill-dismiss:hover { background: rgba(180, 83, 9, 0.12); }

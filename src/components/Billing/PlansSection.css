@@ -1,0 +1,202 @@
+.plans-section { display: flex; flex-direction: column; gap: 1.25rem; }
+
+.plans-current-card {
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 14px;
+  padding: 1.125rem 1.25rem;
+  background: linear-gradient(135deg, #f0fdfa 0%, #fff 60%);
+}
+.plans-current-card.is-pastdue {
+  background: linear-gradient(135deg, #fff1f2 0%, #fff 60%);
+  border-color: #fda4af;
+}
+
+.plans-current-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; margin-bottom: 1rem;
+}
+
+.plans-current-eyebrow {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary, #64748b);
+  margin-bottom: 0.125rem;
+}
+.plans-current-name {
+  font-size: 1.35rem; font-weight: 700;
+  color: var(--color-text-primary, #0f172a);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.plans-current-pill {
+  font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 3px 9px; border-radius: 99px;
+  background: #fee2e2; color: #DC2626;
+}
+.plans-current-pill.is-good { background: #d1fae5; color: #16A34A; }
+
+.plans-current-period {
+  font-size: 0.78rem; color: var(--color-text-secondary, #64748b);
+  margin-top: 0.25rem;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+
+.plans-current-pastdue {
+  margin-top: 0.5rem;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.78rem; color: #9a3412;
+  padding: 5px 10px; border-radius: 99px;
+  background: #ffedd5; border: 1px solid #fed7aa;
+}
+
+.plans-current-cta {
+  border: none; cursor: pointer;
+  padding: 8px 14px; border-radius: 8px;
+  font-size: 0.8rem; font-weight: 600;
+  background: #0F766E; color: #fff;
+  display: inline-flex; align-items: center; gap: 6px;
+  white-space: nowrap; flex-shrink: 0;
+}
+.plans-current-cta:hover { background: #115e59; }
+
+.plans-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.875rem;
+}
+@media (max-width: 640px) { .plans-usage-grid { grid-template-columns: 1fr; } }
+
+.plans-usage-row { display: flex; flex-direction: column; gap: 4px; }
+.plans-usage-row-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.78rem;
+}
+.plans-usage-row-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--color-text-secondary, #64748b); font-weight: 500;
+}
+.plans-usage-row-value { font-weight: 700; }
+.plans-usage-cap {
+  font-weight: 500; font-size: 0.72rem;
+  color: var(--color-text-secondary, #94a3b8);
+}
+.plans-usage-bar {
+  height: 5px; background: #e2e8f0;
+  border-radius: 99px; overflow: hidden;
+}
+.plans-usage-bar-fill {
+  height: 100%; transition: width 0.25s ease, background 0.25s ease;
+  border-radius: 99px;
+}
+
+.plans-upgrade-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+@media (max-width: 640px) { .plans-upgrade-tiles { grid-template-columns: 1fr; } }
+
+.plans-upgrade-tile {
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 12px; padding: 1rem 1.125rem;
+  background: #fff;
+  display: flex; flex-direction: column;
+}
+.plans-upgrade-tile.is-highlight {
+  border-color: #0F766E;
+  box-shadow: 0 4px 12px rgba(15, 118, 110, 0.1);
+}
+.plans-upgrade-tile-name {
+  font-size: 0.95rem; font-weight: 700;
+  color: var(--color-text-primary, #0f172a);
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 0.25rem;
+}
+.plans-upgrade-tile-badge {
+  font-size: 0.6rem; font-weight: 700;
+  background: #0F766E; color: #fff;
+  padding: 2px 7px; border-radius: 99px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.plans-upgrade-tile-price {
+  font-size: 1.25rem; font-weight: 800; color: #0F766E;
+  margin-bottom: 0.5rem;
+}
+.plans-upgrade-tile-price span {
+  font-size: 0.7rem; font-weight: 500;
+  color: var(--color-text-secondary, #64748b);
+  margin-left: 2px;
+}
+.plans-upgrade-tile ul {
+  list-style: none; padding: 0; margin: 0 0 0.75rem;
+  display: flex; flex-direction: column; gap: 4px;
+  flex: 1;
+}
+.plans-upgrade-tile ul li {
+  font-size: 0.78rem;
+  color: var(--color-text-primary, #0f172a);
+  display: flex; align-items: flex-start; gap: 5px;
+}
+.plans-upgrade-tile ul li svg {
+  color: #0F766E; flex-shrink: 0; margin-top: 2px;
+}
+.plans-upgrade-tile-cta {
+  background: #0F766E; color: #fff;
+  border: none; cursor: pointer;
+  padding: 8px 12px; border-radius: 8px;
+  font-size: 0.8rem; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+}
+.plans-upgrade-tile-cta:hover { background: #115e59; }
+
+.plans-dev-tools {
+  margin-top: 0.5rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px dashed #fdba74;
+}
+.plans-dev-tools-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.7rem; font-weight: 700;
+  color: #9a3412; text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+.plans-dev-tools-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.plans-dev-tools-actions button {
+  background: #fff; color: #9a3412;
+  border: 1px solid #fdba74; cursor: pointer;
+  padding: 5px 10px; border-radius: 6px;
+  font-size: 0.72rem; font-weight: 600;
+}
+.plans-dev-tools-actions button:hover { background: #fff7ed; }
+
+/* ── Invoice history (Task #13) ─────────────────────────────────────────── */
+.plans-invoice-history {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: var(--color-bg-card, #fff);
+  border: 1px solid var(--color-border-light, #e5e7eb);
+}
+.plans-invoice-history-head {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.78rem; color: var(--color-text-secondary);
+  margin-bottom: 0.5rem;
+}
+.plans-invoice-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.55rem 0; gap: 1rem;
+}
+.plans-invoice-row-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem; font-weight: 600;
+}
+.plans-invoice-row-meta {
+  font-size: 0.7rem; color: var(--color-text-tertiary);
+}
+.plans-invoice-row-amount { font-weight: 700; }
+.plans-invoice-empty {
+  font-size: 0.78rem; color: var(--color-text-tertiary);
+  padding: 0.4rem 0;
+}

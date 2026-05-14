@@ -1,0 +1,98 @@
+.grant-tranche-card {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  margin-top: 1rem;
+}
+.grant-tranche-card--empty {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+.grant-tranche-card--empty .btn { margin-left: auto; }
+
+.grant-tranche-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.grant-tranche-card-header h4 {
+  font-size: 0.9rem;
+  margin: 0;
+}
+.grant-tranche-card-hint {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.grant-tranche-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.grant-tranche-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  background: rgba(0,0,0,0.02);
+  border: 1px solid var(--color-border, #f3f4f6);
+  border-radius: 10px;
+}
+.grant-tranche-row-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.grant-tranche-row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.grant-tranche-row-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.grant-tranche-row-line1 strong { font-size: 0.95rem; }
+.grant-tranche-row-date {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+.grant-tranche-row-line2 {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.grant-tranche-row-uc {
+  color: var(--color-text-secondary, #6b7280);
+  font-weight: 400;
+  margin-left: 0.25rem;
+}
+.grant-tranche-row-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.btn-xs {
+  padding: 0.35rem 0.7rem !important;
+  font-size: 0.72rem !important;
+}
