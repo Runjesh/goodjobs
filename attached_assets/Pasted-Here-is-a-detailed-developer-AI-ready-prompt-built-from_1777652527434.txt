@@ -1,0 +1,380 @@
+Here is a detailed, developer/AI-ready prompt built from everything above:
+
+***
+
+## Master Prompt: Good Jobs Platform
+
+***
+
+**You are building Good Jobs — a free, open-source, AI-powered operations platform for nonprofits and social enterprises globally, with a primary focus on the Global South (India, Sub-Saharan Africa, Southeast Asia, Latin America).**
+
+***
+
+### Context & Problem Statement
+
+Most nonprofits — especially those with budgets under ₹1 crore — manage their entire operation across paper registers, WhatsApp groups, Excel sheets, and Word documents. They track 500 beneficiaries in notebooks. They compile grant reports by calling five people on WhatsApp. They type donor receipts one by one. No affordable, integrated tool exists for them.
+
+Existing nonprofit software (Salesforce NPSP, Bloomerang, Apricot) is priced in dollars, built for US nonprofits with IT teams, and completely inaccessible to the organizations doing the most critical work in the world.
+
+Good Jobs fixes this — entirely free and open source.
+
+***
+
+### What Good Jobs Is
+
+Good Jobs is **one unified platform** — not a collection of tools. It has three workspaces sharing a single data layer:
+
+```
+PROGRAMS WORKSPACE     FUNDING WORKSPACE      REPORTING WORKSPACE
+────────────────────   ──────────────────────  ──────────────────────
+Beneficiary Tracker    Donor CRM               M&E Dashboard
+Program Management     Grant Manager           Impact Report Generator
+Service Delivery       Budget Tracker          Funder Reports
+Volunteer + Events     Compliance Center       Donor Updates
+Field Data Forms       Receipt Generator       Analytics
+
+              SHARED DATA LAYER
+  (Beneficiaries · Programs · Grants · Donors ·
+   Documents · Tasks · Timeline · Notes · Locations)
+```
+
+The platform is navigated through five top-level sections:
+1. **Today** — role-based daily work screen
+2. **Programs** — beneficiaries, services, events, field forms
+3. **Funding** — donors, grants, budgets, receipts
+4. **Insights** — M&E dashboard, analytics, data quality
+5. **Reports** — funder reports, impact reports, donor updates
+6. **Settings** — org config, team, integrations
+
+***
+
+### Core Design Philosophy
+
+The platform must feel like a **trusted operations partner**, not a database. It should actively tell users what needs doing, not wait for them to go looking.
+
+Every design, feature, and flow must answer:
+- What does this NGO staff member need to do **right now**?
+- What is **at risk** if no action is taken?
+- What is **going well** that they should know?
+
+The system surfaces work. Users complete it. The AI handles everything repetitive in the background.
+
+***
+
+### The Today Screen (Most Important Screen)
+
+Every user lands on a role-based Today screen. It is **not** a dashboard of charts. It is a **daily work surface** with three sections:
+
+```
+┌──────────────────────────────────────────────────┐
+│ Good morning, [Name] 👋  [Org Name]              │
+├──────────────────────────────────────────────────┤
+│ 🔴 URGENT                                        │
+│  · Grant report due in 7 days — Tata Trusts Q2   │
+│  · 12 beneficiaries inactive > 14 days           │
+│  · 4 donor receipts pending                      │
+├──────────────────────────────────────────────────┤
+│ 🟡 NEEDS ATTENTION                               │
+│  · 3 volunteers unconfirmed for Saturday camp    │
+│  · Budget utilization at 91% — Education fund   │
+│  · Donor Ramesh Gupta — no update in 3 months   │
+│  · M&E data missing for 8 beneficiaries          │
+├──────────────────────────────────────────────────┤
+│ 🟢 GOING WELL                                    │
+│  · 234 beneficiaries active across 3 programs   │
+│  · ₹1.2L raised this month                      │
+│  · Health camp report submitted ✓               │
+└──────────────────────────────────────────────────┘
+```
+
+The Today screen is **role-specific**:
+
+| Role | Sees First |
+|---|---|
+| Executive Director | Funding health, grant compliance, donor risk, impact summary |
+| Program Head | Beneficiary status, drop-out alerts, service delivery, events |
+| Field Worker | Follow-up list, attendance, new intake, pending submissions |
+| Finance Officer | Receipts pending, budget alerts, spend variance, approvals |
+| Fundraising Manager | Donor pipeline, lapsed donors, campaign performance |
+
+***
+
+### The 5 Cross-Module Workflows (The Core of the System)
+
+These are the connective flows that make the platform feel like it *works* rather than just *stores*. Every data connection below must be implemented in the database and surfaced in the UI.
+
+***
+
+#### Workflow 1 — Program → Grant → Report *(The Core NGO Loop)*
+
+```
+Program created in Good Jobs
+    ↓
+Grant linked to that program
+    ↓
+Budget heads in grant auto-map to program activities
+    ↓
+Every beneficiary service logged = automatic KPI update
+    ↓
+Every expense entered = automatic utilization update
+    ↓
+30 days before report deadline:
+  Agent pre-fills funder report with:
+  - Beneficiaries served (from Program)
+  - Activities completed (from Program)
+  - Budget spent vs approved (from Grant)
+  - Outcomes achieved (from M&E)
+    ↓
+ED reviews draft, makes edits, approves (20 min)
+    ↓
+Report submitted, logged, archived automatically
+```
+
+**Required data connections:**
+- `grants.program_id → programs`
+- `programs → program_enrollments → beneficiaries`
+- `programs → service_logs`
+- `grants → grant_budget_heads`
+- `grant_reports` pulls from all above on generation
+
+***
+
+#### Workflow 2 — Beneficiary Drop-Out → Follow-Up → Case *(The Care Loop)*
+
+```
+No service_log for beneficiary in 14+ days
+    ↓
+System auto-flags status → inactive
+    ↓
+Task created: "Follow up with [Name]" → assigned field worker
+    ↓
+Field worker logs outcome:
+  visited / unreachable / migrated / recovered
+    ↓
+If recovered → re-enrolled, timeline updated, KPIs updated
+If exited → exit reason logged, program KPIs adjusted
+    ↓
+Monthly report auto-shows retention rate + exit reasons
+```
+
+**Required data connections:**
+- `service_logs.beneficiary_id → beneficiaries.status`
+- `tasks.related_record_id → beneficiaries`
+- `program_enrollments.status ← beneficiary status update`
+- `kpi_measurements ← enrollment count changes`
+
+***
+
+#### Workflow 3 — Donation → Program → Beneficiary Impact *(The Impact Proof Loop)*
+
+```
+Donation saved and tagged to program
+    ↓
+Donation links to grant/fund in Grant Tracker
+    ↓
+Program activities run, beneficiaries served
+    ↓
+Outcomes logged in Beneficiary Tracker
+    ↓
+At 90-day mark, agent drafts donor impact update:
+  "Your ₹50,000 reached X children in Y village.
+   Here are 3 outcomes measured. Here is a photo."
+    ↓
+ED approves → sent to donor via email + WhatsApp
+    ↓
+Donor retention probability increases significantly
+```
+
+**Required data connections:**
+- `donations.program_id → programs`
+- `programs → program_enrollments → beneficiaries`
+- `programs → service_logs (outcome data)`
+- `donors.impact_trail ← aggregated from above`
+
+***
+
+#### Workflow 4 — Event → Volunteer + Beneficiary → Record Update *(The Engagement Loop)*
+
+```
+Event created and linked to a Program
+    ↓
+Beneficiaries registered for the event
+    ↓
+Volunteers assigned to shifts
+    ↓
+QR attendance at entry for volunteers + beneficiaries
+    ↓
+Post-event (automatic):
+  → Volunteer certificates generated + sent (30 min)
+  → Beneficiary records updated with event attendance
+  → Event outcomes logged against Program KPIs
+  → Grant/donor report updated: "1 health camp, 200 served"
+```
+
+**Required data connections:**
+- `events.program_id → programs`
+- `event_registrations → volunteers, beneficiaries`
+- `service_logs ← auto-created from attendance records`
+- `kpi_measurements ← event outcomes`
+
+***
+
+#### Workflow 5 — Grant Deadline → Task → Report → Submission *(The Compliance Loop)*
+
+```
+Grant agreement PDF uploaded
+    ↓
+Agent extracts deadlines + deliverables
+    ↓
+T-30 days: WhatsApp alert to ED + Program Head + Finance
+    ↓
+T-14 days: Report draft auto-generated from live data
+    ↓
+T-7 days: Task assigned to ED "Review and approve report"
+    ↓
+ED approves → system sends to funder email
+    ↓
+Submission logged: date, recipient, document version
+    ↓
+T+7 days: reminder if acknowledgement not received
+    ↓
+Grant compliance status → "Submitted"
+```
+
+**Required data connections:**
+- `grants → grant_reports → grant_deliverables`
+- `grant_reports.content ← pulled from programs, M&E, budget`
+- `tasks.related_module = grant`
+- `audit_logs ← immutable submission record`
+
+***
+
+### Every Record Shows Its Relationships
+
+Every key record must have a **relationship panel** showing its connections across the platform:
+
+**On a Beneficiary record:**
+- Programs enrolled in
+- Events attended
+- Grants funding those programs
+- Staff owner + next follow-up due
+- Case notes + task queue
+
+**On a Grant record:**
+- Programs it funds
+- Beneficiary count from those programs
+- Budget utilization today
+- Next report deadline
+- Linked donors/funding sources
+
+**On a Donor record:**
+- Programs their gifts funded
+- Beneficiary impact trail
+- Last communication date
+- Next renewal likelihood
+- Pending receipt status
+
+**On a Program record:**
+- Active beneficiaries
+- Linked grants + compliance status
+- Upcoming events
+- M&E KPIs
+- Last funder report submitted
+
+***
+
+### The 10 AI Agents
+
+All agents run via n8n against OpenAI GPT-4o. Each agent is cross-module — they do not belong to one tool, they serve the entire workflow.
+
+| Agent | Schedule/Trigger | What It Does | Modules Used |
+|---|---|---|---|
+| Morning Brief | Daily 8AM | Role-based Today screen content | All |
+| Compliance Guardian | Daily 6AM | Grant deadline alerts + auto-tasks | Grants + Programs |
+| Beneficiary Care | Daily 7AM | Detects drop-outs, creates follow-up tasks | Beneficiaries + Programs |
+| Donor Stewardship | Weekly Monday | Lapse detection, impact update drafts | Donors + Programs + M&E |
+| Report Assembler | On report draft created | Pre-fills funder report from live data | Grants + Programs + M&E |
+| Impact Narrator | 90 days after donation | Personalized donor impact update | Beneficiaries + Donors |
+| Budget Watchdog | Daily | Alerts on budget head over/underspend | Grants + Finance |
+| OCR Intake | On image upload | Photo of paper form → draft beneficiary record | Beneficiaries |
+| Grant Parser | On PDF upload | Extracts deadlines + deliverables from grant PDF | Grants |
+| Data Quality | Weekly Sunday | Data quality score per module, alert to admin | All |
+
+***
+
+### Tech Stack
+
+```
+Frontend    : Next.js 14 (App Router) + shadcn/ui + Tailwind CSS
+Backend     : Node.js + Prisma ORM
+Database    : PostgreSQL (Supabase) + Redis (BullMQ queues)
+Auth        : NextAuth.js
+AI Agents   : n8n (self-hosted) + OpenAI GPT-4o
+OCR         : Google Document AI
+WhatsApp    : Meta Business API (via 360dialog or Gupshup)
+Email       : Resend
+Files       : Cloudflare R2 / UploadThing
+Deployment  : Vercel (frontend) + Railway (backend)
+Monitoring  : Sentry + PostHog
+License     : MIT (fully open source)
+```
+
+***
+
+### User Roles
+
+```
+super_admin      → full access
+admin            → full access except billing
+program_head     → Programs full, Funding view, Reports view
+field_worker     → own beneficiaries only, no funding access
+finance          → Funding full, Programs view
+fundraising      → Donors full, Programs view, Reports view
+readonly         → view only across all modules
+```
+
+***
+
+### Design Principles
+
+- **Mobile-first** — 60%+ users on Android phones
+- **Offline-capable** — service workers for field forms
+- **WhatsApp-native** — alerts, intake, approvals via WhatsApp
+- **Action before analytics** — surface tasks before charts
+- **Role before module** — each role gets tailored home screen
+- **Progressive disclosure** — summary first, detail on click
+- **Relationship visibility** — every record shows connections
+- **Never make users context-switch to act** — action available where problem is visible
+- **India-specific compliance** — 80G receipts, FCRA, DPDP Act 2023
+
+***
+
+### Design Language
+
+```
+Primary color     : Deep teal #0F766E
+Background        : Warm gray #F8FAFC
+Surface           : White #FFFFFF
+Text primary      : Slate #0F172A
+Text secondary    : #475569
+Success           : #16A34A
+Warning           : #F59E0B
+Danger            : #DC2626
+Font              : Inter or Geist
+Mobile nav        : Bottom bar (Today / Programs / Funding / More)
+Desktop nav       : Left sidebar (6 items)
+```
+
+***
+
+### What Good Jobs Must Feel Like
+
+Before: Six separate modules. Data stored, not connected. No starting point. User navigates between tools. Work feels manual.
+
+After: One platform, three workspaces. Every record shows its relationships. Role-based Today screen. Cross-module workflow agents. System surfaces what needs doing. Work feels guided.
+
+The software must feel less like a database and more like a **trusted operations partner** that knows what the NGO is trying to accomplish and actively helps them get there every single day.
+
+***
+
+*Good work deserves great infrastructure.*

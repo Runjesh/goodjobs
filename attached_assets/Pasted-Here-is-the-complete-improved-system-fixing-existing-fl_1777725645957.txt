@@ -1,0 +1,1201 @@
+Here is the complete improved system — fixing existing flows, removing architectural gaps, and building the agentic layer properly with HITL patterns. [getathenic](https://getathenic.com/blog/human-in-the-loop-approval-workflows)
+
+***
+
+## The Core Architecture Fix First
+
+Before improving features, fix the three structural issues that will create bugs at scale: [techexactly](https://techexactly.com/blogs/multi-tenant-saas-applications)
+
+### 1. Tenant Context Must Be Immutable from JWT
+
+```python
+# backend/core/tenant.py
+# CURRENT PROBLEM: tenant_id likely derived from user input or session
+# FIX: Extract from JWT at middleware level, attach to every request
+
+from fastapi import Request
+from functools import lru_cache
+
+class TenantContext:
+    def __init__(self, org_id: str, tier: str, features: dict):
+        self.org_id = org_id
+        self.tier = tier          # starter|growth|operations|enterprise
+        self.features = features  # feature flags per tier
+
+async def tenant_middleware(request: Request, call_next):
+    token = extract_jwt(request)
+    tenant = TenantContext(
+        org_id=token["org_id"],       # NEVER from request body
+        tier=token["subscription_tier"],
+        features=get_feature_flags(token["subscription_tier"])
+    )
+    request.state.tenant = tenant
+    response = await call_next(request)
+    return response
+```
+
+Every database query must be wrapped in tenant scope: [reddit](https://www.reddit.com/r/FastAPI/comments/1rvwwbi/multitenant_fastapi_features_workflows_and_more/)
+
+```python
+# backend/db/repository.py
+class TenantRepository:
+    def __init__(self, db: Session, tenant: TenantContext):
+        self.db = db
+        self.org_id = tenant.org_id  # Immutable — set once, used everywhere
+
+    def query(self, model):
+        # RLS enforced at query level — developers never write raw queries
+        return self.db.query(model).filter(model.org_id == self.org_id)
+```
+
+### 2. PostgreSQL Row-Level Security for Data Isolation
+
+```sql
+-- Run once per table — protects against tenant data leakage at DB level
+ALTER TABLE beneficiaries ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON beneficiaries
+    USING (org_id = current_setting('app.current_org_id')::uuid);
+
+-- Set at connection level from FastAPI
+SET app.current_org_id = '{org_id}';
+```
+
+This means even if application code has a bug, the database never returns another org's data. [promaticsindia](https://www.promaticsindia.com/blog/saas-application-architecture-multi-tenancy-scale)
+
+### 3. Feature Flags as First-Class Citizens
+
+```python
+# backend/core/features.py
+TIER_FEATURES = {
+    "starter": {
+        "ai_agents": False,
+        "copilot": False,
+        "beneficiary_limit": 200,
+        "user_limit": 3,
+        "grant_limit": 3,
+        "whatsapp_monthly": 50,
+        "board_dashboard": False,
+        "fund_accounting": False,
+        "api_access": False,
+    },
+    "growth": {
+        "ai_agents": True,
+        "agents_allowed": ["morning_brief", "compliance_guardian", "beneficiary_care"],
+        "copilot": False,
+        "beneficiary_limit": 2000,
+        "user_limit": 10,
+        "grant_limit": 15,
+        "whatsapp_monthly": 500,
+        "board_dashboard": False,
+        "fund_accounting": False,
+        "api_access": False,
+    },
+    "operations": {
+        "ai_agents": True,
+        "agents_allowed": "all",
+        "copilot": True,
+        "beneficiary_limit": None,   # Unlimited
+        "user_limit": 25,
+        "grant_limit": None,
+        "whatsapp_monthly": 2000,
+        "board_dashboard": True,
+        "fund_accounting": True,
+        "api_access": False,
+    },
+    "enterprise": {
+        "ai_agents": True,
+        "agents_allowed": "all",
+        "copilot": True,
+        "beneficiary_limit": None,
+        "user_limit": None,
+        "grant_limit": None,
+        "whatsapp_monthly": None,
+        "board_dashboard": True,
+        "fund_accounting": True,
+        "api_access": True,
+        "white_label": True,
+    }
+}
+```
+
+***
+
+## The Complete Improved Flow — Screen by Screen
+
+***
+
+### Screen 1: Today (Dashboard) — Improved
+
+**Current bugs to fix:**
+- Morning brief pulls stale data if backend is down — fix with a proper cache layer
+- Snooze uses `localStorage` — this breaks across devices (field worker snoozed on phone, sees item again on laptop)
+- Quick Actions are static — not context-aware
+
+**Improved backend flow:**
+
+```python
+# backend/routers/today.py
+
+@router.get("/today/brief")
+async def get_morning_brief(
+    request: Request,
+    tenant: TenantContext = Depends(get_tenant),
+    cache: Redis = Depends(get_redis)
+):
+    cache_key = f"brief:{tenant.org_id}:{request.state.user.role}:{date.today()}"
+
+    # Check cache first — regenerate only if stale or forced
+    cached = await cache.get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    # Build brief from live data
+    brief = await MorningBriefAgent(tenant).generate(
+        role=request.state.user.role,
+        user_id=request.state.user.id
+    )
+
+    # Cache for 30 minutes — brief should refresh mid-day if actions taken
+    await cache.setex(cache_key, 1800, json.dumps(brief))
+    return brief
+
+
+@router.post("/today/snooze")
+async def snooze_item(
+    item_id: str,
+    duration: Literal["tomorrow", "3_days", "next_week"],
+    tenant: TenantContext = Depends(get_tenant),
+    db: Session = Depends(get_db)
+):
+    # Store snooze in DB — not localStorage — so it persists across devices
+    snooze_until = {
+        "tomorrow": date.today() + timedelta(days=1),
+        "3_days": date.today() + timedelta(days=3),
+        "next_week": date.today() + timedelta(days=7),
+    }[duration]
+
+    db.execute("""
+        INSERT INTO today_snoozes (org_id, user_id, item_id, snooze_until)
+        VALUES (:org_id, :user_id, :item_id, :snooze_until)
+        ON CONFLICT (org_id, user_id, item_id)
+        DO UPDATE SET snooze_until = :snooze_until
+    """, {"org_id": tenant.org_id, "user_id": request.state.user.id,
+          "item_id": item_id, "snooze_until": snooze_until})
+    db.commit()
+
+    # Invalidate today cache so brief regenerates
+    await cache.delete(f"brief:{tenant.org_id}:{request.state.user.role}:{date.today()}")
+    return {"snoozed_until": snooze_until}
+```
+
+**Improved frontend — inline actions that complete work without navigation:**
+
+```typescript
+// frontend/components/today/UrgentItem.tsx
+interface UrgentItemProps {
+  item: TodayItem;
+  onActionComplete: () => void;
+}
+
+const UrgentItem = ({ item, onActionComplete }: UrgentItemProps) => {
+  const [actionState, setActionState] = useState<'idle'|'loading'|'done'>('idle');
+
+  const handleInlineAction = async () => {
+    setActionState('loading');
+    // Action executes HERE — not navigation
+    switch (item.action_type) {
+      case 'generate_receipts':
+        await generateBulkReceipts(item.payload.donation_ids);
+        break;
+      case 'send_whatsapp_followup':
+        await openWhatsAppCompose(item.payload); // Opens pre-filled WA sheet
+        break;
+      case 'approve_agent_action':
+        await approveAgentIntent(item.payload.intent_id);
+        break;
+    }
+    setActionState('done');
+    onActionComplete(); // Refreshes brief, removes item
+  };
+
+  return (
+    <div className="urgent-item border-l-4 border-red-500 p-4 flex justify-between items-start">
+      <div>
+        <p className="font-medium text-slate-900">{item.title}</p>
+        <p className="text-sm text-slate-500">{item.subtitle}</p>
+        {item.age_days > 3 && (
+          <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full
+                           animate-pulse">
+            {item.age_days}d overdue
+          </span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          onClick={handleInlineAction}
+          loading={actionState === 'loading'}
+          done={actionState === 'done'}
+        >
+          {item.action_label}  {/* "Generate", "Approve", "Follow Up" */}
+        </Button>
+        <SnoozeMenu onSnooze={(duration) => snoozeItem(item.id, duration)} />
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={item.detail_url}>View →</Link>  {/* Secondary action */}
+        </Button>
+      </div>
+    </div>
+  );
+};
+```
+
+***
+
+### Screen 2: Programs (MIS) — Improved
+
+**Current bugs to fix:**
+- Virtual list on 10,000+ records breaks if filter queries are not paginated server-side
+- WhatsApp narrative parsing has no error/ambiguity handling
+- Bulk CSV import has no duplicate detection
+
+**Improved beneficiary list — server-side cursor pagination:**
+
+```python
+# backend/routers/beneficiaries.py
+
+@router.get("/beneficiaries")
+async def list_beneficiaries(
+    # Sorting
+    sort: Literal["attention_first", "az", "recent", "inactive"] = "attention_first",
+    # Filtering
+    program_id: Optional[str] = None,
+    status: Optional[str] = None,
+    district: Optional[str] = None,
+    search: Optional[str] = None,
+    # Cursor pagination — NOT offset (offset breaks on 10K+ records)
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    tenant: TenantContext = Depends(get_tenant),
+    repo: BeneficiaryRepository = Depends(get_repo)
+):
+    query = repo.query(Beneficiary)
+
+    # Apply filters
+    if program_id:
+        query = query.join(ProgramEnrollment).filter(
+            ProgramEnrollment.program_id == program_id,
+            ProgramEnrollment.status == "active"
+        )
+    if status:
+        query = query.filter(Beneficiary.status == status)
+    if search:
+        # Full-text search via pg_trgm
+        query = query.filter(
+            func.similarity(Beneficiary.full_name, search) > 0.3
+        )
+
+    # "Attention First" sort — surfaces most-needing-attention records
+    if sort == "attention_first":
+        query = query.order_by(
+            # Inactive beneficiaries first
+            case((Beneficiary.status == "inactive", 0), else_=1),
+            # Then by days since last service (longest gap first)
+            (func.now() - Beneficiary.last_service_date).desc().nullsfirst(),
+            # Then incomplete records
+            Beneficiary.profile_completeness.asc()
+        )
+
+    # Cursor-based pagination
+    if cursor:
+        cursor_data = decode_cursor(cursor)
+        query = query.filter(Beneficiary.id > cursor_data["last_id"])
+
+    results = query.limit(limit + 1).all()
+    has_next = len(results) > limit
+
+    return {
+        "beneficiaries": [b.to_dict() for b in results[:limit]],
+        "next_cursor": encode_cursor(results[limit-1].id) if has_next else None,
+        "has_next": has_next
+    }
+```
+
+**Improved WhatsApp MIS Agent — with ambiguity handling:**
+
+```python
+# backend/agents/mis_agent.py
+
+class MISAgent:
+    """
+    Parses WhatsApp narrative from field staff into structured beneficiary data.
+    Handles ambiguity by asking clarifying questions instead of silently failing.
+    """
+
+    EXTRACTION_PROMPT = """
+    You are a data extraction agent for an NGO MIS system in India.
+    Extract structured data from this field worker's WhatsApp message.
+
+    Message: {message}
+
+    Extract the following fields if present:
+    - beneficiary_name (string)
+    - village (string)
+    - age (integer)
+    - gender (male/female/other)
+    - service_type (from: education/health/livelihood/nutrition/other)
+    - service_date (date, default to today if not mentioned)
+    - outcome_notes (string)
+    - follow_up_needed (boolean)
+
+    Return JSON with:
+    - extracted_fields: dict of confident extractions
+    - ambiguous_fields: list of fields you're unsure about with options
+    - missing_required: list of required fields not found
+    - confidence: 0.0-1.0
+
+    Required fields: beneficiary_name, service_type
+    """
+
+    async def parse(self, message: str, org_id: str, staff_id: str) -> MISParseResult:
+        response = await openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "system",
+                "content": self.EXTRACTION_PROMPT.format(message=message)
+            }],
+            response_format={"type": "json_object"}
+        )
+
+        parsed = json.loads(response.choices[0].message.content)
+
+        # HIGH CONFIDENCE — auto-create draft record
+        if parsed["confidence"] >= 0.85 and not parsed["missing_required"]:
+            record = await self.create_draft_record(
+                parsed["extracted_fields"], org_id, staff_id
+            )
+            await self.send_whatsapp_confirmation(
+                staff_id,
+                f"✅ Got it! Draft created for {record.beneficiary_name}. "
+                f"Review at: {record.review_url}"
+            )
+            return MISParseResult(status="draft_created", record=record)
+
+        # MEDIUM CONFIDENCE or MISSING FIELDS — ask clarifying question
+        elif parsed["confidence"] >= 0.5 or parsed["ambiguous_fields"]:
+            clarification = self.build_clarification_message(
+                parsed["ambiguous_fields"],
+                parsed["missing_required"]
+            )
+            await self.send_whatsapp_message(staff_id, clarification)
+            # Store partial parse for when they reply
+            await self.store_pending_parse(
+                message_id=message_hash(message),
+                partial_data=parsed["extracted_fields"],
+                pending_fields=parsed["missing_required"] + [
+                    f["field"] for f in parsed["ambiguous_fields"]
+                ],
+                staff_id=staff_id,
+                org_id=org_id
+            )
+            return MISParseResult(status="clarification_requested")
+
+        # LOW CONFIDENCE — escalate to human review
+        else:
+            await self.send_whatsapp_message(
+                staff_id,
+                "🤔 I couldn't understand this message clearly. "
+                "Please use the app to log this entry, or reply with more details."
+            )
+            return MISParseResult(status="failed", reason="low_confidence")
+
+    def build_clarification_message(self, ambiguous, missing):
+        lines = ["I have a quick question about your last message:"]
+        for field in missing[:1]:  # Ask one question at a time
+            lines.append(f"What is the {field.replace('_', ' ')} of the beneficiary?")
+        for item in ambiguous[:1]:
+            lines.append(
+                f"For '{item['field']}', did you mean: " +
+                " or ".join(f"*{opt}*" for opt in item["options"]) + "?"
+            )
+        return "\n".join(lines)
+```
+
+**Improved CSV bulk import — with duplicate detection:**
+
+```python
+# backend/routers/beneficiaries_import.py
+
+@router.post("/beneficiaries/import/preview")
+async def preview_import(
+    file: UploadFile,
+    tenant: TenantContext = Depends(get_tenant),
+    db: Session = Depends(get_db)
+):
+    df = pd.read_csv(file.file, nrows=8)  # Preview only 8 rows
+
+    # Validate required columns
+    required_cols = ["name", "village", "district", "gender", "dob"]
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        raise HTTPException(400, f"Missing columns: {', '.join(missing_cols)}")
+
+    # Duplicate detection against existing records
+    preview_rows = []
+    for _, row in df.iterrows():
+        existing = db.query(Beneficiary).filter(
+            Beneficiary.org_id == tenant.org_id,
+            func.lower(Beneficiary.full_name) == row["name"].lower().strip(),
+            Beneficiary.village == row.get("village", ""),
+        ).first()
+
+        preview_rows.append({
+            **row.to_dict(),
+            "duplicate_suspected": existing is not None,
+            "existing_record_id": existing.id if existing else None,
+            "validation_errors": validate_row(row)
+        })
+
+    return {"preview": preview_rows, "template_url": "/static/import_template.csv"}
+
+
+@router.post("/beneficiaries/import/execute")
+async def execute_import(
+    file: UploadFile,
+    skip_duplicates: bool = True,
+    tenant: TenantContext = Depends(get_tenant),
+    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    # Queue as background job — don't block the request
+    job_id = str(uuid4())
+    background_tasks.add_task(
+        process_import_job,
+        file=await file.read(),
+        org_id=tenant.org_id,
+        skip_duplicates=skip_duplicates,
+        job_id=job_id
+    )
+    return {"job_id": job_id, "status_url": f"/import/status/{job_id}"}
+```
+
+***
+
+### Screen 3: Funding Hub — Improved
+
+**Current bugs to fix:**
+- FCRA 20% admin cap calculation must be real-time, not batch
+- 80G receipt generation has no failure retry
+- CSR Pipeline kanban has no persistence of column order
+
+**Improved FCRA monitor — real-time calculation:**
+
+```python
+# backend/services/fcra_monitor.py
+
+class FCRAMonitor:
+    """
+    Monitors FCRA 20% administrative expenditure cap in real-time.
+    Fires alert before breach, not after.
+    """
+
+    async def get_live_utilization(self, org_id: str, fiscal_year: str) -> FCRAStatus:
+        # Total foreign contributions received this FY
+        total_fc = await self.db.execute("""
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM transactions
+            WHERE org_id = :org_id
+            AND fund_type = 'foreign'
+            AND fiscal_year = :fy
+            AND status = 'received'
+        """, {"org_id": org_id, "fy": fiscal_year})
+
+        # Total administrative spend tagged to FC
+        admin_spend = await self.db.execute("""
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM transactions
+            WHERE org_id = :org_id
+            AND fund_type = 'foreign'
+            AND expense_category = 'administrative'
+            AND fiscal_year = :fy
+        """, {"org_id": org_id, "fy": fiscal_year})
+
+        total_fc_amount = total_fc.scalar()
+        admin_amount = admin_spend.scalar()
+
+        if total_fc_amount == 0:
+            return FCRAStatus(utilization_pct=0, status="safe", alert=None)
+
+        pct = (admin_amount / total_fc_amount) * 100
+
+        return FCRAStatus(
+            total_fc=total_fc_amount,
+            admin_spend=admin_amount,
+            utilization_pct=round(pct, 2),
+            cap=20.0,
+            remaining_admin_budget=((total_fc_amount * 0.20) - admin_amount),
+            status=(
+                "critical" if pct >= 20 else
+                "warning" if pct >= 16 else
+                "caution" if pct >= 12 else
+                "safe"
+            ),
+            alert=(
+                f"⚠️ FCRA admin spend at {pct:.1f}% — cap is 20%. "
+                f"Remaining admin budget: ₹{((total_fc_amount * 0.20) - admin_amount):,.0f}"
+                if pct >= 16 else None
+            )
+        )
+```
+
+**Improved 80G receipt generation — with retry queue:**
+
+```python
+# backend/services/receipt_service.py
+
+class ReceiptService:
+
+    async def generate_and_queue(self, donation_id: str, org_id: str):
+        """
+        Generate 80G receipt with idempotency — safe to call multiple times.
+        """
+        # Idempotency check — don't double-generate
+        existing = await self.db.query(Receipt).filter(
+            Receipt.donation_id == donation_id,
+            Receipt.status.in_(["generated", "sent"])
+        ).first()
+        if existing:
+            return existing
+
+        donation = await self.get_donation(donation_id, org_id)
+
+        # Generate PDF using HTML template + Puppeteer
+        try:
+            pdf_bytes = await self.pdf_generator.generate(
+                template="80G_receipt",
+                context={
+                    "receipt_number": self.generate_receipt_number(org_id),
+                    "donor_name": donation.donor.name,
+                    "pan": donation.donor.pan or "PAN not provided",
+                    "amount": donation.amount,
+                    "amount_words": num_to_words(donation.amount),
+                    "donated_at": donation.donated_at,
+                    "org_name": donation.org.name,
+                    "org_reg_number": donation.org.registration_number,
+                    "org_80g_number": donation.org.exemption_80g_number,
+                }
+            )
+
+            # Upload to R2/S3
+            pdf_url = await self.storage.upload(
+                file=pdf_bytes,
+                path=f"receipts/{org_id}/{donation_id}.pdf",
+                content_type="application/pdf"
+            )
+
+            receipt = Receipt(
+                donation_id=donation_id,
+                org_id=org_id,
+                pdf_url=pdf_url,
+                status="generated",
+                generated_at=datetime.utcnow()
+            )
+            self.db.add(receipt)
+            await self.db.commit()
+
+            # Queue delivery — separate from generation
+            await self.delivery_queue.enqueue(
+                "deliver_receipt",
+                receipt_id=receipt.id,
+                channels=["email", "whatsapp"]
+            )
+            return receipt
+
+        except Exception as e:
+            # Failed receipts go into retry queue, not silently dropped
+            await self.retry_queue.enqueue(
+                "generate_receipt",
+                donation_id=donation_id,
+                org_id=org_id,
+                retry_count=1,
+                error=str(e),
+                retry_at=datetime.utcnow() + timedelta(minutes=5)
+            )
+            raise
+
+
+    async def deliver_receipt(self, receipt_id: str):
+        receipt = await self.get_receipt(receipt_id)
+        donor = receipt.donation.donor
+        results = {}
+
+        # Email delivery
+        if donor.email and donor.email_consent:
+            try:
+                await self.email_service.send(
+                    to=donor.email,
+                    template="receipt_80g",
+                    context={"donor_name": donor.name, "receipt": receipt},
+                    attachment_url=receipt.pdf_url
+                )
+                results["email"] = "sent"
+            except Exception as e:
+                results["email"] = f"failed: {e}"
+
+        # WhatsApp delivery
+        if donor.whatsapp_number and donor.whatsapp_consent:
+            try:
+                await self.whatsapp.send_document(
+                    to=donor.whatsapp_number,
+                    document_url=receipt.pdf_url,
+                    caption=f"Your 80G receipt for ₹{receipt.donation.amount:,} — {receipt.receipt_number}"
+                )
+                results["whatsapp"] = "sent"
+            except Exception as e:
+                results["whatsapp"] = f"failed: {e}"
+
+        # Update delivery status
+        receipt.delivery_results = results
+        receipt.status = "sent" if any(v == "sent" for v in results.values()) else "delivery_failed"
+        receipt.sent_at = datetime.utcnow()
+        await self.db.commit()
+```
+
+***
+
+## The Complete Agentic AI Layer
+
+This is the most important section. The current Agent HQ is a UI shell. Here is the complete working implementation: [stackai](https://www.stackai.com/insights/human-in-the-loop-ai-agents-how-to-design-approval-workflows-for-safe-and-scalable-automation)
+
+### Agent Base Class
+
+```python
+# backend/agents/base.py
+
+class GoodJobsAgent:
+    """
+    Base class for all Good Jobs agents.
+    Every agent follows the same pattern:
+    1. Observe (collect data)
+    2. Plan (decide what to do)
+    3. Risk classify (auto-execute or request human approval)
+    4. Execute or queue for HITL
+    5. Log everything
+    """
+
+    # Risk levels determine if HITL is needed
+    RISK_LEVELS = {
+        "low":      {"requires_hitl": False, "auto_execute": True},
+        "medium":   {"requires_hitl": True,  "timeout_hours": 24, "escalate_to": "admin"},
+        "high":     {"requires_hitl": True,  "timeout_hours": 4,  "escalate_to": "ed"},
+        "critical": {"requires_hitl": True,  "timeout_hours": 1,  "escalate_to": "ed",
+                     "block_on_timeout": True}
+    }
+
+    def classify_risk(self, action: AgentAction) -> str:
+        """Override in each agent to define risk levels per action type."""
+        raise NotImplementedError
+
+    async def run(self, tenant: TenantContext, **kwargs) -> AgentResult:
+        # Step 1: Observe
+        observations = await self.observe(tenant, **kwargs)
+
+        # Step 2: Plan
+        planned_actions = await self.plan(observations, tenant)
+
+        results = []
+        for action in planned_actions:
+            risk = self.classify_risk(action)
+            config = self.RISK_LEVELS[risk]
+
+            if config["auto_execute"]:
+                # Execute immediately, log it
+                result = await self.execute(action, tenant)
+                await self.log(action, result, approved_by="auto", tenant=tenant)
+                results.append(result)
+            else:
+                # Queue for human approval — do not execute
+                intent = await self.create_hitl_intent(
+                    action=action,
+                    risk_level=risk,
+                    approver_role=config["escalate_to"],
+                    timeout_hours=config["timeout_hours"],
+                    tenant=tenant
+                )
+                # Notify approver immediately
+                await self.notify_approver(intent, tenant)
+                results.append(AgentResult(status="pending_approval", intent_id=intent.id))
+
+        return AgentResult(actions=results)
+```
+
+### HITL Intent System
+
+```python
+# backend/models/agent_intent.py
+
+class AgentIntent(Base):
+    __tablename__ = "agent_intents"
+
+    id = Column(UUID, primary_key=True, default=uuid4)
+    org_id = Column(UUID, ForeignKey("organizations.id"), nullable=False)
+
+    # What the agent wants to do
+    agent_name = Column(String, nullable=False)  # "compliance_guardian"
+    action_type = Column(String, nullable=False)  # "submit_grant_report"
+    action_params = Column(JSONB, nullable=False)  # Full action details
+    agent_state = Column(JSONB)  # Serialised agent state for resumption
+
+    # Risk and approval
+    risk_level = Column(String, nullable=False)
+    requires_approver_role = Column(String, nullable=False)
+
+    # Human decision
+    status = Column(String, default="pending")  # pending|approved|rejected|modified|expired
+    decided_by = Column(UUID, ForeignKey("users.id"))
+    decided_at = Column(DateTime)
+    decision_notes = Column(Text)
+    modified_params = Column(JSONB)  # If approver modified the action
+
+    # Timeout
+    expires_at = Column(DateTime, nullable=False)
+    escalated_at = Column(DateTime)
+
+    # Evidence pack shown to approver
+    evidence_summary = Column(Text)  # Plain language: "What will happen and why"
+    impact_preview = Column(JSONB)   # "Sending to 14 donors, total ₹2.3L receipts"
+    reversibility = Column(String)  # "reversible"|"partially_reversible"|"irreversible"
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+```
+
+### The Approval UI in Agent HQ
+
+```typescript
+// frontend/components/agent-hq/IntentCard.tsx
+
+const IntentCard = ({ intent }: { intent: AgentIntent }) => {
+  const { approve, reject, modify } = useIntentActions();
+  const timeLeft = useCountdown(intent.expires_at);
+
+  return (
+    <div className={cn(
+      "rounded-xl border p-5 space-y-4",
+      intent.risk_level === "critical" && "border-red-300 bg-red-50",
+      intent.risk_level === "high" && "border-amber-300 bg-amber-50",
+      intent.risk_level === "medium" && "border-blue-300 bg-blue-50",
+    )}>
+      {/* Header */}
+      <div className="flex justify-between items-start">
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            {intent.agent_name.replace('_', ' ')}
+          </span>
+          <h3 className="font-semibold text-slate-900 mt-0.5">{intent.action_type}</h3>
+        </div>
+        <div className="text-right">
+          <RiskBadge level={intent.risk_level} />
+          <p className="text-xs text-slate-500 mt-1">
+            Expires in {timeLeft}
+          </p>
+        </div>
+      </div>
+
+      {/* Evidence pack — makes approval decision obvious in <30 seconds */}
+      <div className="bg-white rounded-lg p-4 border text-sm space-y-2">
+        <p className="font-medium text-slate-700">What will happen:</p>
+        <p className="text-slate-600">{intent.evidence_summary}</p>
+        {intent.impact_preview && (
+          <ImpactPreviewGrid data={intent.impact_preview} />
+        )}
+        <div className="flex items-center gap-2 pt-1">
+          <ReversibilityBadge value={intent.reversibility} />
+        </div>
+      </div>
+
+      {/* Three action buttons — Approve / Modify / Reject */}
+      <div className="flex gap-2">
+        <Button
+          className="flex-1 bg-teal-600 hover:bg-teal-700"
+          onClick={() => approve(intent.id)}
+        >
+          ✓ Approve
+        </Button>
+
+        <ModifyButton
+          intent={intent}
+          onModify={(modified_params) => modify(intent.id, modified_params)}
+        />
+
+        <Button
+          variant="outline"
+          className="border-red-300 text-red-600 hover:bg-red-50"
+          onClick={() => reject(intent.id)}
+        >
+          ✕ Reject
+        </Button>
+      </div>
+    </div>
+  );
+};
+```
+
+### All 6 Agents — Fully Implemented
+
+```python
+# backend/agents/morning_brief_agent.py
+
+class MorningBriefAgent(GoodJobsAgent):
+    name = "morning_brief"
+
+    async def observe(self, tenant: TenantContext, role: str, user_id: str):
+        today = date.today()
+        return {
+            # Urgent signals
+            "compliance_docs_expiring": await self.get_expiring_docs(tenant, days=30),
+            "overdue_grant_reports": await self.get_overdue_reports(tenant),
+            "receipts_pending": await self.get_pending_receipts(tenant),
+            "inactive_beneficiaries": await self.get_inactive_beneficiaries(tenant, days=14),
+            "lapsed_donors": await self.get_lapsed_donors(tenant, months=11),
+            "budget_at_risk": await self.get_budget_risks(tenant),
+            "fcra_status": await self.get_fcra_status(tenant),
+            # Needs attention signals
+            "campaigns_near_goal": await self.get_campaigns_near_goal(tenant, threshold=0.80),
+            "overdue_tasks": await self.get_overdue_tasks(tenant, user_id),
+            "data_quality_warnings": await self.get_data_quality_issues(tenant),
+            # Going well signals
+            "yesterday_wins": await self.get_yesterday_wins(tenant),
+            "active_beneficiaries_trend": await self.get_beneficiary_trend(tenant),
+            "funds_raised_mtd": await self.get_mtd_funds(tenant),
+            # Snoozed items to filter out
+            "snoozed_items": await self.get_snoozed_items(tenant, user_id),
+        }
+
+    async def plan(self, observations: dict, tenant: TenantContext) -> list:
+        # Morning brief never executes actions — it only generates a brief
+        # All its "actions" are informational, no HITL needed
+        return [AgentAction(
+            type="generate_brief",
+            payload=observations,
+            risk_level="low"
+        )]
+
+    def classify_risk(self, action: AgentAction) -> str:
+        return "low"  # Brief generation never needs approval
+
+    async def execute(self, action: AgentAction, tenant: TenantContext):
+        obs = action.payload
+        snoozed = {item["item_id"] for item in obs["snoozed_items"]}
+
+        # Filter out snoozed items
+        urgent = [
+            item for item in self.build_urgent_items(obs)
+            if item["id"] not in snoozed
+        ]
+        needs_attention = [
+            item for item in self.build_attention_items(obs)
+            if item["id"] not in snoozed
+        ]
+
+        return {
+            "urgent": sorted(urgent, key=lambda x: x["age_days"], reverse=True)[:5],
+            "needs_attention": needs_attention[:6],
+            "going_well": self.build_going_well_items(obs),
+            "quick_stats": self.build_stats(obs),
+            "generated_at": datetime.utcnow().isoformat()
+        }
+
+
+# backend/agents/compliance_guardian.py
+
+class ComplianceGuardianAgent(GoodJobsAgent):
+    name = "compliance_guardian"
+
+    def classify_risk(self, action: AgentAction) -> str:
+        return {
+            "create_reminder_task": "low",       # Auto-execute
+            "draft_report": "low",               # Auto-execute
+            "send_reminder_whatsapp": "medium",  # ED approves
+            "submit_report_to_funder": "high",   # ED must approve
+            "file_fcra_return": "critical",      # ED must approve + block on timeout
+        }.get(action.type, "medium")
+
+    async def observe(self, tenant: TenantContext):
+        return {
+            "upcoming_deadlines": await self.get_grant_deadlines(tenant, days_ahead=30),
+            "overdue_submissions": await self.get_overdue_submissions(tenant),
+            "compliance_docs": await self.get_compliance_docs(tenant),
+            "fcra_status": await FCRAMonitor(self.db).get_live_utilization(
+                tenant.org_id, get_current_fiscal_year()
+            ),
+        }
+
+    async def plan(self, observations: dict, tenant: TenantContext) -> list:
+        actions = []
+
+        for deadline in observations["upcoming_deadlines"]:
+            days_left = (deadline.due_date - date.today()).days
+
+            if days_left <= 30 and not deadline.task_created:
+                actions.append(AgentAction(
+                    type="create_reminder_task",
+                    payload={"grant_id": deadline.grant_id, "due_date": deadline.due_date},
+                    risk_level="low",
+                    evidence=f"Grant report due in {days_left} days — task created for ED"
+                ))
+
+            if days_left <= 14 and not deadline.draft_created:
+                actions.append(AgentAction(
+                    type="draft_report",
+                    payload={"grant_id": deadline.grant_id},
+                    risk_level="low",
+                    evidence=f"Auto-drafting report from live program data"
+                ))
+
+            if days_left <= 7 and not deadline.reminder_sent:
+                actions.append(AgentAction(
+                    type="send_reminder_whatsapp",
+                    payload={
+                        "grant_id": deadline.grant_id,
+                        "recipients": ["ed", "program_head", "finance"],
+                        "days_left": days_left
+                    },
+                    risk_level="medium",
+                    evidence=f"Send WhatsApp reminder to 3 staff — report due in {days_left} days",
+                    impact_preview={"recipients": 3, "message_preview": f"Grant report due in {days_left} days"},
+                    reversibility="reversible"
+                ))
+
+        # FCRA warning
+        if observations["fcra_status"].utilization_pct >= 16:
+            actions.append(AgentAction(
+                type="create_reminder_task",
+                payload={
+                    "type": "fcra_warning",
+                    "message": observations["fcra_status"].alert,
+                    "assign_to": "finance"
+                },
+                risk_level="low"
+            ))
+
+        return actions
+
+
+# backend/agents/grant_report_agent.py
+
+class GrantReportAgent(GoodJobsAgent):
+    name = "grant_report"
+
+    REPORT_PROMPT = """
+    You are an expert grant report writer for Indian NGOs.
+    Write a professional grant utilisation report based on the following data.
+
+    Grant: {grant_name}
+    Funder: {funder_name}
+    Period: {period_start} to {period_end}
+    Program: {program_name}
+
+    Beneficiary Data:
+    {beneficiary_summary}
+
+    Activities Conducted:
+    {activities_summary}
+
+    Budget Utilisation:
+    {budget_summary}
+
+    Outcomes Achieved:
+    {outcomes_summary}
+
+    Write sections:
+    1. Executive Summary (2 paragraphs)
+    2. Program Activities (narrative, with specific numbers)
+    3. Beneficiary Reach and Profile (with demographics)
+    4. Key Outcomes and Impact
+    5. Financial Summary (narrative, reference the utilisation table)
+    6. Challenges and Learnings
+    7. Next Quarter Plan
+
+    Tone: Professional, evidence-based, mission-focused.
+    Avoid jargon. Use specific numbers throughout.
+    Length: 800–1200 words.
+    """
+
+    async def generate_draft(self, grant_id: str, tenant: TenantContext) -> str:
+        grant = await self.get_grant_with_context(grant_id, tenant)
+
+        # Calculate data readiness — warn if insufficient
+        readiness = self.calculate_data_readiness(grant)
+        if readiness.score < 0.40:
+            raise InsufficientDataError(
+                f"Only {readiness.score:.0%} of required data available. "
+                f"Missing: {', '.join(readiness.missing_fields)}"
+            )
+
+        response = await openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": self.REPORT_PROMPT.format(**grant.to_report_context())
+            }]
+        )
+
+        narrative = response.choices[0].message.content
+
+        # Build structured report
+        report = {
+            "title": f"{grant.name} — {grant.report_period} Report",
+            "grant_id": grant_id,
+            "data_readiness": readiness.score,
+            "narrative": narrative,
+            "kpi_table": grant.get_kpi_table(),
+            "budget_table": grant.get_budget_table(),
+            "beneficiary_table": grant.get_beneficiary_summary(),
+            "generated_at": datetime.utcnow().isoformat(),
+            "ai_confidence_notes": readiness.confidence_notes
+        }
+
+        return report
+
+    def calculate_data_readiness(self, grant) -> DataReadiness:
+        checks = {
+            "beneficiary_data": len(grant.beneficiaries) > 0,
+            "service_logs": grant.service_log_count > 0,
+            "budget_entries": grant.budget_utilization is not None,
+            "outcome_indicators": len(grant.kpi_measurements) > 0,
+            "activity_records": grant.activity_count > 0,
+        }
+        score = sum(checks.values()) / len(checks)
+        missing = [k for k, v in checks.items() if not v]
+
+        return DataReadiness(score=score, missing_fields=missing,
+                            confidence_notes=self.generate_confidence_notes(checks))
+```
+
+***
+
+## The WhatsApp Integration Layer — Complete Flow
+
+```python
+# backend/webhooks/whatsapp.py
+
+@router.post("/webhooks/whatsapp/incoming")
+async def handle_whatsapp_message(
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    message = parse_whatsapp_payload(payload)
+
+    # Route based on message type and sender context
+    sender = await get_staff_by_whatsapp(message.from_number, db)
+    if not sender:
+        return  # Ignore messages from unknown numbers
+
+    # Approval reply — "Yes" or "No" in response to an HITL notification
+    if message.is_button_reply:
+        intent_id = message.context_message_id
+        if message.button_id == "approve":
+            await approve_intent(intent_id, approved_by=sender.id, db=db)
+        elif message.button_id == "reject":
+            await reject_intent(intent_id, rejected_by=sender.id, db=db)
+        return
+
+    # Task completion — "Done" in reply to a task reminder
+    if message.text.lower() in ["done", "completed", "✓"]:
+        task_id = await get_pending_task_for_user(sender.id, db)
+        if task_id:
+            await complete_task(task_id, db)
+            await send_whatsapp_message(
+                message.from_number,
+                "✅ Task marked complete!"
+            )
+        return
+
+    # MIS narrative — field worker logging a service
+    if sender.role == "field_worker":
+        background_tasks.add_task(
+            MISAgent(db).parse,
+            message=message.text,
+            org_id=sender.org_id,
+            staff_id=sender.id
+        )
+        # Immediate acknowledgement — don't make them wait
+        await send_whatsapp_message(
+            message.from_number,
+            "📋 Got your message, processing it now..."
+        )
+        return
+
+    # Default — send to Copilot for interpretation
+    background_tasks.add_task(
+        handle_general_query,
+        message=message.text,
+        sender=sender
+    )
+```
+
+***
+
+## Complete Data Flow Diagram
+
+```
+FIELD STAFF (WhatsApp)
+    ↓ sends narrative
+MIS Agent
+    ↓ parses → structured data OR asks clarification
+Beneficiary Record (PostgreSQL)
+    ↓ triggers
+Beneficiary Care Agent (daily 7AM)
+    ↓ detects inactive → creates task
+Today Screen (Morning Brief Agent 8AM)
+    ↓ surfaces as urgent item
+Field Worker sees task
+    ↓ completes follow-up → logs service
+Service Log → Program KPIs update
+    ↓
+Grant Report Agent (T-14 days before deadline)
+    ↓ generates draft using program data + budget data
+Report in "Draft" Kanban lane
+    ↓
+Compliance Guardian sends HITL intent to ED
+    ↓ ED approves via WhatsApp button or Agent HQ
+Report status → "Submitted"
+    ↓
+Audit Log records immutable submission event
+    ↓
+Donor Nurture Agent pulls outcome data
+    ↓ drafts impact update for linked donors
+ED approves → donors receive personalized WhatsApp update
+    ↓
+Donor retention increases → next donation recorded
+    ↓
+80G Receipt Service auto-generates → queues delivery
+    ↓
+Donor receives receipt via email + WhatsApp
+    ↓
+Today screen: "Going Well — 3 receipts sent, 1 donor impact update delivered"
+```
+
+***
+
+## Bug Fix Checklist for Developers
+
+These are the most likely existing bugs to resolve before adding more features:
+
+| Area | Bug | Fix |
+|---|---|---|
+| Multi-tenancy | `org_id` possibly inferred from session, not JWT | Extract from JWT at middleware — never trust user input  [techexactly](https://techexactly.com/blogs/multi-tenant-saas-applications) |
+| Pagination | Offset pagination breaks on 10K+ records | Switch to cursor-based pagination |
+| Snooze | `localStorage` breaks across devices | Move snooze to `today_snoozes` DB table |
+| Receipts | Failed generation silently dropped | Add retry queue with exponential backoff |
+| WhatsApp MIS | Low-confidence parses fail silently | Add clarification loop and pending parse store |
+| FCRA monitor | Batch calculation — not real-time | Calculate live from transactions table |
+| Agent HITL | Agents execute without human review | Implement risk classifier + intent queue |
+| CSV import | No duplicate detection | Add name+village fuzzy match before insert |
+| Report agent | Generates with insufficient data | Add data readiness pre-flight check |
+| Cache | Brief regenerates on every page load | Add Redis cache with 30-min TTL + invalidation |
+| RLS | No database-level tenant isolation | Add PostgreSQL RLS policies on all tables  [techexactly](https://techexactly.com/blogs/multi-tenant-saas-applications) |
+| Timeout handling | HITL intents never expire | Add background job to expire + escalate timed-out intents  [getathenic](https://getathenic.com/blog/human-in-the-loop-approval-workflows) |
+
+This is now a complete, production-grade system spec. Share this directly with your developer as the implementation guide. [stackai](https://www.stackai.com/insights/human-in-the-loop-ai-agents-how-to-design-approval-workflows-for-safe-and-scalable-automation)

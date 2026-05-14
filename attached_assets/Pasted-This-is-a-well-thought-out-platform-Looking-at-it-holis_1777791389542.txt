@@ -1,0 +1,119 @@
+This is a well-thought-out platform. Looking at it holistically, the core modules are strong, but there are several missing links, broken feedback loops, and workflow gaps that would prevent it from feeling like a complete operating system for an NGO. Here is a systematic audit:
+
+Missing Connections
+Programs ↔ Finance
+
+Right now Programs and Finance are separate silos. A critical missing link is budget allocation per program. When a field officer submits a Conversational MIS report, the system should automatically check whether program spending is on track against its budget. Nonprofits consistently struggle with fund-to-program traceability, which often causes compliance failures.
+
+Add: Budget line per program, actual vs. planned spend view
+
+Add: Alert when a program is underspending a restricted grant (tranche risk)
+
+Add: Finance → Program → Grant traceability chain
+
+Beneficiary ↔ Outcomes
+
+Beneficiaries are enrolled and tracked, but there is no outcome recording loop. Impact measurement best practice requires collecting pre/post data through logic-based forms tied to program milestones. Without this, the Theory of Change builder is decorative rather than operational.
+
+Add: Outcome assessment forms tied to each beneficiary's program enrollment
+
+Add: Pre/post data points per milestone
+
+Add: Aggregate outcome view feeding directly into Insights and AI Reports
+
+Donor ↔ Program ↔ Impact
+
+Donors currently exist in a CRM pipeline, but there is no closed feedback loop connecting their contribution to specific programs and outcomes. Donor propensity scoring without linking impact data to giving history weakens the model significantly.
+
+Add: Contribution → Program → Beneficiary outcomes trail per donor
+
+Add: Personalized impact snapshot per donor (feeds Donation Page and follow-up comms)
+
+Add: Grant milestone status visible from donor/grant detail view
+
+Missing Workflows
+Grant Lifecycle Workflow
+
+Grant Detail exists as a view, but there is no workflow engine for the full grant lifecycle: application → award → milestone → tranche release → utilization report → renewal. This is the most common cause of grant loss in nonprofits.
+
+Add: Grant stages with status transitions
+
+Add: Tranche release gated by utilization report submission
+
+Add: Auto-reminders for reporting deadlines tied to compliance calendar
+
+Add: Grant → Program → Finance → Report chain with audit trail
+
+Field Visit → MIS → Report Loop
+
+Conversational MIS accepts narrative input and extracts data, but there is no structured review and publish step. Field data should flow into a supervisor review queue before being counted in dashboards.
+
+Add: MIS submission → supervisor review → approve/edit → dashboard update
+
+Add: Geotagged visit log (optional)
+
+Add: Recurring data collection templates per program (weekly/monthly)
+
+Volunteer → Program → Task Linkage
+
+Volunteers are managed as a roster with shift scheduling, but they are not connected to programs or tasks. A volunteer shift has no meaning unless it maps to a program activity and a task assignment.
+
+Add: Volunteer shift → Program activity mapping
+
+Add: Task assignment from Volunteer profile
+
+Add: Volunteer hours → Impact reporting (volunteer hours are a reportable asset for many grants)
+
+Compliance → Program → Funder
+
+Compliance documents (80G/12A/FCRA) exist in isolation. They should be linked to active grants and programs so compliance expiry automatically flags at-risk programs and funders.
+
+Add: Compliance document → Grants that depend on it
+
+Add: Expiry → auto-flag affected grants and programs
+
+Add: DPDP consent status surfaced in Beneficiary profiles
+
+Missing Modules
+Beneficiary Portal / WhatsApp Feedback Loop
+
+WhatsApp setup exists in onboarding, but there is no beneficiary-facing communication layer. Beneficiaries should be able to confirm attendance, submit feedback, or respond to check-in messages via WhatsApp, which feeds back into MIS and outcome data.
+
+Add: Outbound WhatsApp messages (check-in, attendance, survey)
+
+Add: Response parsing → beneficiary profile update
+
+Add: Consent-gated (DPDP aligned)
+
+Impact Score / Social Return on Investment (SROI)
+
+Insights has KPIs and propensity charts, but there is no aggregate social impact score that funders and CSR partners actually want to see.
+
+Add: Program-level output-to-outcome ratio
+
+Add: Simple SROI estimate per program
+
+Add: Impact badge for Donation Page and CSR reports
+
+Notification → Action → Resolution Loop
+
+The NotificationCenter exists but notifications appear to be read-only. Every notification should have a one-click resolution path that routes to the correct action.
+
+Add: Notification type → action routing (e.g., compliance expiry → open doc, HITL intent → open review queue, grant deadline → open grant detail)
+
+Add: Notification snooze and dismiss with reason
+
+Add: Unresolved notification count in Trial health score
+
+UX Gaps
+Empty States Are Not Contextual Enough
+
+FirstRunEmptyState is good for new orgs, but mid-use empty states (e.g., no active grants, no volunteers scheduled this week) should be contextual, not generic. Each empty state should suggest the next best action specific to that module.
+
+Role-Based Dashboards
+
+The Today / Dashboard is currently one view. A Field Officer's morning brief is completely different from an Executive Director's. Role-based dashboard layouts would reduce cognitive load and surface the right tasks to the right people.
+
+Agent HQ ↔ All Modules
+
+The HITL queue in Agent HQ shows AI suggestions, but there is no agent trigger point from within other modules. A user reviewing a grant should be able to say "draft my utilization report" right there. Agent triggers should be contextual, not only centralized.

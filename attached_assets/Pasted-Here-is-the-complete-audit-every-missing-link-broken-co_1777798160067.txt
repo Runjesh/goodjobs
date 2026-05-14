@@ -1,0 +1,647 @@
+Here is the complete audit — every missing link, broken connection, and workflow gap, with exact fixes.
+
+***
+
+## The Audit: What's Missing
+
+After mapping every page, component, and workflow against what an NGO actually needs daily, there are **9 structural gaps** and **23 specific missing connections**. [linkedin](https://www.linkedin.com/posts/marlingwilliams_nonprofitoperations-intentionaltechnology-activity-7432175951918055425-W-Qw)
+
+***
+
+## Gap 1 — No Single Record Shows Its Full Relationship Web
+
+This is the biggest missing link in the entire product. [lavendereucalyptus](https://lavendereucalyptus.com/challenges-in-workflow-design-for-nonprofit-organizations/)
+
+**Current state:** A beneficiary record exists in Programs. A grant exists in Funding. A donor exists in CRM. They are all separate pages with no visible connection to each other.
+
+**What's missing:** Every key record needs a **Relationship Panel** — a live sidebar showing everything connected to it.
+
+### Beneficiary record — missing connections:
+```
+Currently shows: demographics, service logs, enrollment
+Missing:
+  → Which program(s) enrolled in (with active status)
+  → Which grants fund those programs (with utilization %)
+  → Which volunteer served them (from shift records)
+  → Which events they attended (from event attendance)
+  → Which tasks are open against this record
+  → Which staff member owns this case
+  → DPDP consent status (visible, not buried in Compliance)
+  → Household members (if linked)
+```
+
+### Grant record — missing connections:
+```
+Currently shows: milestones, tranches, reporting deadlines
+Missing:
+  → Which programs this grant funds (live beneficiary count)
+  → Current KPI progress vs deliverable targets
+  → Which donors contributed to this fund (if co-funded)
+  → Open tasks against this grant
+  → Budget utilization today vs projected end-state
+  → Which staff member is the grant owner
+  → Report history: submitted on time / late / pending
+```
+
+### Donor record — missing connections:
+```
+Currently shows: stage, touchpoints, giving history
+Missing:
+  → Impact trail: which programs their gifts funded
+  → Beneficiary count reached by their donations
+  → Which campaigns they contributed to
+  → Receipt status per donation (not just globally)
+  → Next recommended action (from Donor Nurture Agent)
+  → DPDP consent: email consent / WhatsApp consent / data usage
+  → Propensity score explanation (not just the number)
+```
+
+### Fix — add a RelationshipPanel component used across all three:
+```typescript
+// components/shared/RelationshipPanel.tsx
+interface RelationshipPanelProps {
+  entityType: 'beneficiary' | 'grant' | 'donor' | 'program' | 'volunteer'
+  entityId: string
+}
+
+// Renders contextually — only shows relationships that exist
+// Collapsed by default on mobile, visible on desktop right sidebar
+// Each item is a clickable link to the related record
+// Updates in real-time when related data changes
+```
+
+***
+
+## Gap 2 — Programs and Funding Are Completely Disconnected
+
+This is the **core NGO operational loop** and it does not exist yet. [philanthropy](https://www.philanthropy.com/sponsored/grant-reporting-challenges-and-best-practices-for-not-for-profit-organizations/)
+
+**What's missing:**
+
+```
+Program record has no awareness of:
+  → Which grants fund it
+  → How much of the grant budget is remaining
+  → Which grant deliverables map to which program activities
+  → Whether the program is on track to meet grant commitments
+  → When the next grant report is due for this program
+
+Grant record has no awareness of:
+  → Live beneficiary count from linked program
+  → Service log count (activities evidence)
+  → KPI progress from M&E
+  → Whether the program is generating enough data to support the next report
+```
+
+**Fix — Program ↔ Grant link must be bi-directional and live:**
+
+```typescript
+// The Program card in Programs page should show:
+interface ProgramCard {
+  // existing
+  name: string
+  beneficiary_count: number
+  // MISSING — add these
+  linked_grants: {
+    grant_id: string
+    grant_name: string
+    funder_name: string
+    utilization_pct: number      // live from finance module
+    next_report_due: Date        // from compliance calendar
+    report_readiness_pct: number // from Grant Report Agent
+    status: 'healthy' | 'at_risk' | 'overdue'
+  }[]
+  total_funding: number
+  funding_gap: number            // budget needed vs secured
+}
+
+// The Grant detail page should show:
+interface GrantDetail {
+  // existing
+  milestones: Milestone[]
+  tranches: Tranche[]
+  // MISSING — add these
+  linked_programs: {
+    program_id: string
+    program_name: string
+    beneficiaries_active: number
+    service_logs_this_period: number
+    kpi_progress: KPIProgress[]
+    data_readiness_score: number
+  }[]
+}
+```
+
+***
+
+## Gap 3 — Tasks Have No Home and No Completion Loop
+
+**Current state:** Tasks page exists as a standalone to-do list. [lavendereucalyptus](https://lavendereucalyptus.com/challenges-in-workflow-design-for-nonprofit-organizations/)
+
+**What's missing:** Tasks are not connected to what generated them, who they affect, or what completing them unlocks.
+
+```
+Missing connections:
+  → Tasks generated by agents have no link back to the agent intent
+  → Completing a task does not update the related record
+  → Tasks assigned to field workers don't appear on their Today screen
+  → No task generated automatically when:
+      - Beneficiary goes inactive (follow-up task)
+      - Grant report deadline approaches (review task)
+      - Donor lapse risk detected (outreach task)
+      - Compliance doc expires (renewal task)
+      - Data quality drops below 70% (entry task)
+      - Volunteer no-shows (follow-up task)
+  → No recurring tasks (e.g. "monthly M&E data entry — every 28th")
+  → No task completion confirmation to WhatsApp
+```
+
+**Fix — Task must be a first-class cross-module object:**
+
+```typescript
+interface Task {
+  id: string
+  org_id: string
+  title: string
+  description: string
+  assigned_to: UserId
+  due_date: Date
+  priority: 'urgent' | 'high' | 'normal' | 'low'
+  status: 'pending' | 'in_progress' | 'done' | 'snoozed'
+
+  // MISSING — source connection
+  source_type: 'agent' | 'manual' | 'system' | 'recurring'
+  source_agent?: AgentName        // which agent created it
+  source_intent_id?: string       // linked HITL intent
+
+  // MISSING — entity connection
+  related_entity_type?: 'beneficiary' | 'grant' | 'donor' | 'event' | 'compliance_doc'
+  related_entity_id?: string      // clicking opens the related record
+
+  // MISSING — completion effect
+  on_complete_action?: {
+    type: 'update_beneficiary_status' | 'advance_report_stage' |
+          'mark_grant_deadline_met' | 'log_donor_touchpoint'
+    params: Record<string, unknown>
+  }
+
+  // MISSING — recurrence
+  recurrence?: {
+    pattern: 'daily' | 'weekly' | 'monthly'
+    day_of_month?: number
+    ends_at?: Date
+  }
+}
+```
+
+***
+
+## Gap 4 — Volunteers Are Not Connected to Programs or Beneficiaries
+
+**Current state:** Volunteers have a roster and shift scheduling with conflict detection. [lavendereucalyptus](https://lavendereucalyptus.com/challenges-in-workflow-design-for-nonprofit-organizations/)
+
+**What's missing:**
+
+```
+Volunteer ↔ Program:
+  → Volunteers are not assigned to specific programs
+  → A program head cannot see which volunteers cover their program
+  → Volunteer hours are not counted toward grant deliverables
+    (many grants require "X volunteer hours" as a deliverable)
+
+Volunteer ↔ Beneficiary:
+  → No record of which volunteer served which beneficiary
+  → Beneficiary profile does not show their assigned volunteer
+  → If a volunteer leaves, no handoff record exists
+
+Volunteer ↔ Event:
+  → This partially exists (shift scheduling)
+  → Missing: post-event, volunteer's service is not logged as a
+    program activity — it just sits in the volunteer module
+
+Volunteer ↔ Compliance:
+  → Volunteer agreements (NDAs, consent forms) are not in the
+    Compliance vault — they are completely untracked
+  → DPDP consent for volunteers processing beneficiary data
+    is not captured anywhere
+```
+
+**Fix — four connections to add:**
+
+1. `Volunteer` gets `program_ids[]` field — assigned programs
+2. `Shift` gets `beneficiary_ids[]` — who was served in this shift
+3. Post-shift: auto-create service log entries per beneficiary served
+4. Volunteer documents go into Compliance vault with their own category
+
+***
+
+## Gap 5 — The Conversational MIS Has No Feedback Loop to the Submitter
+
+**Current state:** Field worker sends WhatsApp narrative → MIS Agent parses → draft created.
+
+**What's missing:**
+
+```
+→ Field worker never sees the parsed result in structured form
+  (they get a confirmation but not "here's what I extracted")
+→ If parsing was wrong (wrong beneficiary name / wrong service type),
+  there is no correction flow
+→ Field worker cannot query the system conversationally:
+  "What is Meena's last service date?"
+  "How many visits have I logged this month?"
+  "Who are my pending follow-ups for today?"
+→ MIS submissions from field workers don't appear in a
+  "pending review" queue for the Program Manager to verify
+→ High-volume days (after camps) have no batch submission flow —
+  field worker must send one message per beneficiary
+```
+
+**Fix — add three missing pieces:**
+
+```typescript
+// 1. Structured confirmation back to field worker
+// After parsing, reply with:
+"✅ Logged for Meena Kumari
+ Service: Health Counselling
+ Date: Today (3 May 2026)
+ Outcome: Recovered, returning next week
+ 
+ ❌ Wrong? Reply 'Correct [field]: [value]'
+ e.g. 'Correct service: Education'"
+
+// 2. Correction handler in WhatsApp webhook
+if (message.text.startsWith('Correct ')) {
+  const [field, value] = parseCorrection(message.text)
+  await updateLastParsedRecord(sender.id, field, value)
+  await reply(`✅ Updated ${field} to "${value}"`)
+}
+
+// 3. Query handler
+const QUERY_PATTERNS = [
+  { pattern: /last service.*(meena|raju|[\w]+)/i, handler: 'getLastService' },
+  { pattern: /my visits this month/i, handler: 'getMyMonthlyVisits' },
+  { pattern: /pending follow.?ups/i, handler: 'getPendingFollowups' },
+  { pattern: /who.*inactive/i, handler: 'getInactiveBeneficiaries' },
+]
+```
+
+***
+
+## Gap 6 — Compliance Module Is a Document Vault, Not a Compliance Engine
+
+**Current state:** Tracks 80G/12A/FCRA/CSR docs with expiry dates and reminders. [lavendereucalyptus](https://lavendereucalyptus.com/challenges-in-workflow-design-for-nonprofit-organizations/)
+
+**What's missing:**
+
+```
+Missing compliance workflows:
+
+1. FCRA Annual Return filing workflow
+   → FCRA return is due every year by 31 December
+   → System has no structured flow to compile the data,
+     generate the return summary, or track filing status
+   → FC-4 / FC-6 form data is not auto-populated from transactions
+
+2. 12A / 80G renewal workflow
+   → Registrations expire and must be renewed with IT Dept
+   → No renewal application checklist
+   → No link between 80G number in donor receipts and the
+     actual 80G registration status in Compliance
+
+3. CSR compliance reporting
+   → Companies funding via CSR need Form CSR-2 annually
+   → Good Jobs has a CSR page but no CSR-2 data compilation
+   → No CSR utilization certificate generation
+
+4. Board governance tracking
+   → DIN tracking exists but board meeting minutes are not tracked
+   → Quorum records not maintained
+   → Board resolution register not tracked
+     (required for grant disbursements and bank operations)
+
+5. Audit trail for compliance actions
+   → When a compliance doc is uploaded / renewed / noted as expired —
+     no immutable audit log records who did what and when
+   → Required for statutory audit defence
+
+6. State-level compliance
+   → Many NGOs are registered under state-specific Societies Acts
+   → Annual returns to Registrar of Societies are not tracked
+   → Different states have different renewal cycles — not modelled
+```
+
+***
+
+## Gap 7 — Finance Module Is Isolated from Everything Else
+
+**Current state:** Basic accounting, transactions. [nonprofitpro](https://www.nonprofitpro.com/article/new-research-reveals-nonprofits-financial-software-challenges-and-strategies/)
+
+**What's missing — the four critical connections:**
+
+```
+Finance ↔ Grants (MISSING):
+  → Budget heads in grant are not linked to expense categories in Finance
+  → Finance officer enters an expense but cannot tag it to a grant budget head
+  → Grant utilization % is therefore either manual or estimated
+  → No fund-level P&L (restricted vs unrestricted fund accounting)
+
+Finance ↔ Programs (MISSING):
+  → Program activities have costs (staff time, materials, transport)
+  → These costs are not tracked in Finance against program budgets
+  → Program head cannot see program-level expenditure
+
+Finance ↔ Donors (PARTIAL):
+  → Transactions exist but are not double-entry bookkeeping
+  → Income and expense are tracked separately with no reconciliation
+  → Bank reconciliation is completely absent
+
+Finance ↔ Reports (MISSING):
+  → Utilisation Certificate (UC) for a grant requires:
+    - Opening balance
+    - Receipts during period
+    - Expenditure during period (head-wise)
+    - Closing balance
+  → This data exists in Finance but UC generation pulls
+    from a separate flow with no live financial data connection
+  → Tally XML sync exists as scaffold but the mapping between
+    Good Jobs expense categories and Tally ledger heads
+    is not defined
+```
+
+**Fix — the minimum required financial data model:**
+
+```sql
+-- Missing table: grant_budget_head_expenses
+CREATE TABLE grant_budget_head_expenses (
+  id UUID PRIMARY KEY,
+  org_id UUID NOT NULL,
+  grant_id UUID REFERENCES grants(id),
+  budget_head_id UUID REFERENCES grant_budget_heads(id),
+  transaction_id UUID REFERENCES transactions(id),
+  amount DECIMAL(12,2) NOT NULL,
+  expense_date DATE NOT NULL,
+  description TEXT,
+  entered_by UUID REFERENCES users(id),
+  approved_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- This single table connects Finance ↔ Grants
+-- Every expense in Finance gets tagged to a grant + budget head
+-- Grant utilization % is now computed live, not manually
+```
+
+***
+
+## Gap 8 — Insights / M&E Has No Connection to Grant Deliverables
+
+**Current state:** KPI dashboards, propensity scoring, charts, staff data quality. [lavendereucalyptus](https://lavendereucalyptus.com/challenges-in-workflow-design-for-nonprofit-organizations/)
+
+**What's missing:**
+
+```
+M&E KPIs are standalone metrics — they are not connected to:
+
+  → Grant deliverables (which KPI proves which deliverable?)
+  → Theory of Change nodes (which outcome does this KPI measure?)
+  → Report sections (which KPI goes in which part of the funder report?)
+  → Donor communications (which KPI becomes the impact headline?)
+
+This means:
+  → Program Head tracks KPIs in Insights
+  → Grant Report Agent pulls data for a report
+  → But the agent doesn't know which KPI to use for which deliverable
+  → Finance pulls utilization data for the UC
+  → But there's no link between financial data and outcome data
+    in the same report
+
+The Insights page also missing:
+  → Cohort analysis: beneficiaries enrolled in Month 1 vs Month 6
+    — are early enrollments more retained?
+  → Drop-out funnel: enrolled → active → inactive → exited
+    (where exactly are we losing people?)
+  → Geographic heatmap: district/village level beneficiary density
+  → Funder-specific view: "Show me only the KPIs relevant to
+    Tata Trusts Q2 grant"
+```
+
+**Fix — KPI to Grant Deliverable mapping table:**
+
+```sql
+CREATE TABLE kpi_deliverable_mappings (
+  id UUID PRIMARY KEY,
+  org_id UUID NOT NULL,
+  kpi_id UUID REFERENCES kpis(id),
+  grant_deliverable_id UUID REFERENCES grant_deliverables(id),
+  toc_node_id UUID REFERENCES toc_nodes(id),  -- Theory of Change
+  report_section VARCHAR(100),  -- "beneficiary_reach" | "outcomes" | "activities"
+  is_headline_metric BOOLEAN DEFAULT false,   -- featured in donor comms?
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+***
+
+## Gap 9 — The Signup Wizard Doesn't Set Up the Right Data for Day 1
+
+**Current state:** 5-step wizard: org profile, first program, CSV import, invite team, WhatsApp.
+
+**What's missing from the wizard:**
+
+```
+Step 1 — Org Profile:
+  Missing: subscription tier selection (or trial confirmation)
+  Missing: cause area tagging (used to suggest grant opportunities later)
+  Missing: FCRA status (yes/no) — gates FCRA module visibility
+  Missing: 80G number — if not entered here, receipts will be wrong from day 1
+
+Step 2 — First Program:
+  Missing: Link to a Theory of Change template
+  Missing: Add at least 1 KPI (system needs this for M&E to be useful)
+  Missing: Set a target beneficiary count (needed for grant applications)
+  Missing: Geographic area (village/district/state) — needed for geo reports
+
+Step 3 — Import Beneficiaries:
+  Missing: DPDP consent capture explanation
+  Missing: Consent column in CSV template
+  Missing: What happens to records without consent (they still import
+    but are flagged "consent pending")
+
+Step 4 — Invite Team:
+  Missing: Role explanation tooltips (what does a "Program Manager" see?)
+  Missing: WhatsApp number per team member (for agent notifications)
+
+Step 5 — WhatsApp Setup:
+  Missing: Test message to confirm connection works
+  Missing: Explain conversational MIS (most valuable feature for field staff)
+  Missing: Option to skip and connect later (with a persistent reminder)
+
+After wizard — completely missing:
+  → Add first grant (critical for Funding to be useful)
+  → Add first donor (critical for CRM to be useful)
+  → Set first compliance doc expiry (critical for Compliance)
+
+The GetStartedChecklist should cover these post-wizard:
+  □ Add your first grant (2 min)
+  □ Add your first donor (1 min)
+  □ Upload your 80G registration document
+  □ Set one grant report deadline
+  □ Log your first service visit
+  → Each item checked = one less blank page the user sees
+```
+
+***
+
+## Gap 10 — 14 Specific Missing Page-Level Connections
+
+These are the individual broken links between existing pages: [linkedin](https://www.linkedin.com/posts/marlingwilliams_nonprofitoperations-intentionaltechnology-activity-7432175951918055425-W-Qw)
+
+| From | To | What's Missing |
+|---|---|---|
+| Today screen | Tasks | Urgent items don't link to the specific Task — they link to a module |
+| Today screen | Agent HQ | HITL queue items on Today don't open the full intent card in Agent HQ |
+| Programs (beneficiary) | Compliance | DPDP consent status not visible on beneficiary record |
+| Programs (beneficiary) | Finance | Cost-per-beneficiary is never shown |
+| Programs (program) | Grants | No "linked grants" panel on program record |
+| Funding (grant) | Programs | No "linked programs + live KPIs" panel on grant record |
+| Funding (donor) | Programs | Donor impact trail (which program their money reached) is absent |
+| Funding (campaigns) | Donors | Campaign page doesn't show which donors contributed |
+| Reports | Insights | "Draft Report" doesn't pull from the Insights KPI store — it generates from scratch |
+| Reports | Finance | Utilisation Certificate doesn't pull live financial data |
+| Compliance | Funding | 80G registration status doesn't validate receipts being generated |
+| Agent HQ | Tasks | Approved agent intents don't auto-create follow-up tasks |
+| Volunteers | Programs | Volunteer hours don't count toward grant deliverables |
+| CRM | Donors | CRM contacts who make a donation are not automatically promoted to Donor — two separate records exist |
+
+***
+
+## The 5 Flows That Don't Exist Yet But Must
+
+Beyond missing connections, these complete workflows are absent: [philanthropy](https://www.philanthropy.com/sponsored/grant-reporting-challenges-and-best-practices-for-not-for-profit-organizations/)
+
+### Missing Flow A — Missed Grant Target Handling
+```
+KPI drops below grant target threshold
+    ↓ (currently: nothing happens)
+Should be:
+  → Compliance Guardian detects: "Reading assessment target 80%,
+    current 61%, 45 days left"
+  → Creates task: "Review and update grant target — consider
+    communicating with funder"
+  → Drafts funder communication:
+    "We are writing to update you on our progress toward the
+     reading assessment target..."
+  → HITL: high-risk → ED approves before sending
+  → Communication logged on grant record as touchpoint
+```
+
+### Missing Flow B — Staff Offboarding / Case Handoff
+```
+A field worker leaves the org
+    ↓ (currently: their account is deleted, beneficiaries are orphaned)
+Should be:
+  → Deactivate user (not delete)
+  → Show all beneficiaries assigned to this staff member
+  → Bulk reassign to another field worker (with notification)
+  → All open tasks reassigned
+  → Audit log records handoff
+  → New field worker receives WhatsApp:
+    "You've been assigned 12 new beneficiaries from [name]'s case load"
+```
+
+### Missing Flow C — Grant Renewal / Re-application
+```
+Grant ends → (currently: status → Closed, nothing more)
+Should be:
+  → Grant closure triggers renewal assessment:
+    - Renewal likelihood score (based on report submission history,
+      relationship health, funder's grant cycle)
+    - "Apply for renewal?" prompt with deadline
+  → If yes → new grant in Pipeline stage with:
+    - Previous grant data as template
+    - Lessons learned from closed grant auto-included
+    - Previous beneficiary outcomes as evidence
+  → CSR Research Agent checks if funder has new priorities
+```
+
+### Missing Flow D — Public Donation Page → Full Donor Journey
+```
+Someone donates on public Donation Page
+    ↓ (currently: donation recorded, receipt generated — flow ends)
+Should be:
+  → Donor record auto-created
+  → Welcome WhatsApp/email sent immediately:
+    "Thank you [Name]! Your ₹[amount] is going to [program].
+     Here's your receipt: [link]"
+  → Donor enters Nurture Agent's 90-day impact trail flow
+  → At 30 days: impact update sent
+  → At 11 months: renewal appeal sent
+  → Donor appears in CRM with source: "Donation Page"
+  → Campaign contribution tracked
+  → UTM parameters from donation page URL stored for
+    campaign attribution
+```
+
+### Missing Flow E — Program Outcome Miss → Board Alert
+```
+End of quarter: program KPIs reviewed
+    ↓ (currently: Insights shows the number, nothing more)
+Should be:
+  → Board Briefing Agent runs quarterly
+  → Compares KPIs to targets
+  → For each KPI > 15% below target:
+    "Beneficiary retention: target 85%, actual 67% — 18% gap"
+  → Includes in Board Brief with:
+    - Root cause analysis (based on service log patterns)
+    - Recommended action
+    - Staff responsible
+  → Board member sees this in Board Dashboard with amber flag
+  → ED receives HITL: "Board brief includes 2 underperformance flags.
+    Review before sending to board?"
+```
+
+***
+
+## Priority Order for Fixes
+
+| Priority | Fix | Why |
+|---|---|---|
+| 🔴 P0 | Program ↔ Grant live link | Core NGO loop — without this, the three workspaces are just three apps |
+| 🔴 P0 | Task completion → record update | Tasks are useless if completing them doesn't change anything |
+| 🔴 P0 | Finance expense → grant budget head tag | Utilization certificates are wrong without this |
+| 🟠 P1 | RelationshipPanel on all key records | Every record becomes a dead end without it |
+| 🟠 P1 | MIS correction loop in WhatsApp | Bad parsed data is worse than no data |
+| 🟠 P1 | KPI → Grant Deliverable mapping | Report Agent cannot work correctly without it |
+| 🟠 P1 | Volunteer → Program + Beneficiary link | Volunteer data is currently orphaned |
+| 🟡 P2 | Missing Flow D (Donation Page → full journey) | Biggest conversion opportunity going to waste |
+| 🟡 P2 | Wizard missing fields (80G, FCRA, KPIs) | Day 1 data determines Month 1 usefulness |
+| 🟡 P2 | Compliance → Finance → Reports connection | UC generation is broken without it |
+| 🟢 P3 | Missing Flows A, B, C, E | High-value but not blocking core daily use |
+| 🟢 P3 | CRM contact → Donor auto-promotion | Clean data quality improvement |
+| 🟢 P3 | Cohort analysis in Insights | Valuable but not blocking |
+
+***
+
+## The One Change That Fixes the Most at Once
+
+Add `entity_links` as a polymorphic join table to the database — and use it everywhere:
+
+```sql
+CREATE TABLE entity_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID NOT NULL,
+  -- Source entity
+  from_type VARCHAR(50) NOT NULL,  -- 'beneficiary'|'grant'|'donor'|'task'|'volunteer'
+  from_id UUID NOT NULL,
+  -- Target entity
+  to_type VARCHAR(50) NOT NULL,
+  to_id UUID NOT NULL,
+  -- Relationship metadata
+  relationship VARCHAR(100) NOT NULL,  -- 'funded_by'|'serves'|'assigned_to'|'part_of'
+  metadata JSONB,                       -- any extra context
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(org_id, from_type, from_id, to_type, to_id, relationship)
+);
+```
+
+This single table lets any record link to any other record with a named relationship — and the RelationshipPanel simply queries this table to show everything connected. It future-proofs every connection described above without changing individual module schemas. [linkedin](https://www.linkedin.com/posts/marlingwilliams_nonprofitoperations-intentionaltechnology-activity-7432175951918055425-W-Qw)
