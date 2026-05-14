@@ -8,6 +8,21 @@ const EV_HYDRATED = 'goodjobs:lifecycle-hydrated';
 const LS_LAPSE_ACK = 'gj.donor_lapse_risk_ack.v1';
 const LS_MILESTONES = 'gj.donor_milestones.v1';
 
+/** Active tenant id — Layout calls `setLifecycleScope` so milestone keys don't collide across orgs. */
+let lifecycleNgoId: string | null = null;
+
+export function setLifecycleScope(ngoId: string | null) {
+  lifecycleNgoId = ngoId && ngoId.trim() ? ngoId.trim() : null;
+}
+
+function milestonesStorageKey(): string {
+  return lifecycleNgoId ? `${LS_MILESTONES}::${lifecycleNgoId}` : LS_MILESTONES;
+}
+
+function lapseAckStorageKey(): string {
+  return lifecycleNgoId ? `${LS_LAPSE_ACK}::${lifecycleNgoId}` : LS_LAPSE_ACK;
+}
+
 export type MilestoneId = 'thankyou' | 'impact' | 'fullimpact' | 'renewal';
 
 export type MilestoneState = 'done' | 'due' | 'overdue' | 'upcoming' | 'skipped';
@@ -39,7 +54,7 @@ function emitHydrated() {
 
 function readAckSet(): Set<string> {
   try {
-    const raw = localStorage.getItem(LS_LAPSE_ACK);
+    const raw = localStorage.getItem(lapseAckStorageKey());
     const arr = raw ? (JSON.parse(raw) as unknown) : [];
     return new Set(Array.isArray(arr) ? arr.map(String) : []);
   } catch {
@@ -49,7 +64,7 @@ function readAckSet(): Set<string> {
 
 function writeAckSet(ids: Set<string>) {
   try {
-    localStorage.setItem(LS_LAPSE_ACK, JSON.stringify([...ids]));
+    localStorage.setItem(lapseAckStorageKey(), JSON.stringify([...ids]));
   } catch {
     /* ignore */
   }
@@ -59,7 +74,7 @@ type MilestoneStore = Record<string, Partial<Record<MilestoneId, { doneAt?: stri
 
 function readMilestones(): MilestoneStore {
   try {
-    const raw = localStorage.getItem(LS_MILESTONES);
+    const raw = localStorage.getItem(milestonesStorageKey());
     const o = raw ? (JSON.parse(raw) as MilestoneStore) : {};
     return o && typeof o === 'object' ? o : {};
   } catch {
@@ -69,7 +84,7 @@ function readMilestones(): MilestoneStore {
 
 function writeMilestones(store: MilestoneStore) {
   try {
-    localStorage.setItem(LS_MILESTONES, JSON.stringify(store));
+    localStorage.setItem(milestonesStorageKey(), JSON.stringify(store));
   } catch {
     /* ignore */
   }
@@ -150,7 +165,7 @@ export function nextDueMilestone(donor: Donor, now = new Date()): { state: 'due'
   return null;
 }
 
-export function markMilestoneDone(donorId: string | number, milestoneId: MilestoneId) {
+export function markMilestoneDone(donorId: string | number, milestoneId: MilestoneId, _now?: Date) {
   const id = String(donorId);
   const all = readMilestones();
   const row = { ...(all[id] || {}) };
@@ -284,3 +299,55 @@ export const STAGE_FILTER_OPTIONS: { id: LifecycleStage | 'all'; label: string }
   { id: 'lapse_risk', label: 'Lapse risk' },
   { id: 'lapsed', label: 'Lapsed' },
 ];
+
+const MILESTONE_IDS = new Set<string>(['thankyou', 'impact', 'fullimpact', 'renewal']);
+
+/**
+ * Pull per-donor nurture milestones from `GET /crm/donors/lifecycle` and merge
+ * into the scoped localStorage cache so `computeTouchpoints` reflects server
+ * state on first paint after login.
+ */
+export async function hydrateDonorLifecycles(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const { apiFetch } = await import('../api/client');
+    const res = await apiFetch('/crm/donors/lifecycle');
+    if (!res.ok) return;
+    const data = (await res.json()) as { states?: Record<string, unknown> };
+    const states = data?.states;
+    if (!states || typeof states !== 'object') return;
+
+    const all = readMilestones();
+    for (const [donorId, raw] of Object.entries(states)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const server = raw as Record<string, unknown>;
+      const row: NonNullable<MilestoneStore[string]> = { ...(all[donorId] || {}) };
+
+      const ms = server.milestones;
+      if (ms && typeof ms === 'object') {
+        for (const [mid, val] of Object.entries(ms as Record<string, unknown>)) {
+          if (!MILESTONE_IDS.has(mid)) continue;
+          const mId = mid as MilestoneId;
+          if (typeof val === 'string' && val) {
+            row[mId] = { ...(row[mId] || {}), doneAt: val };
+          }
+        }
+      }
+      const sk = server.skipped;
+      if (sk && typeof sk === 'object') {
+        for (const [mid, val] of Object.entries(sk as Record<string, unknown>)) {
+          if (!MILESTONE_IDS.has(mid)) continue;
+          if (val) {
+            const mId = mid as MilestoneId;
+            row[mId] = { ...(row[mId] || {}), skipped: true };
+          }
+        }
+      }
+      all[donorId] = row;
+    }
+    writeMilestones(all);
+    emitHydrated();
+  } catch {
+    /* non-fatal */
+  }
+}

@@ -465,7 +465,7 @@ const Reports: React.FC = () => {
   const handleDownload = (report: MockReport) => {
     const md = buildMarkdown(
       report,
-      ngoDetails.name,
+      ngoDetails.name ?? '',
       { reg_no: ngoDetails.reg_no, pan: ngoDetails.pan, state: ngoDetails.state },
       beneficiaries,
       beneficiaryOutcomes,

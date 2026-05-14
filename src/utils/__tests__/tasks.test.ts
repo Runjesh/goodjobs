@@ -115,12 +115,10 @@ describe('dispatchOnComplete', () => {
       new Date('2026-05-01T00:00:00Z'),
     );
     expect(res.ok).toBe(true);
-    // Lifecycle util writes to a scoped localStorage key. Verify a milestone is recorded.
-    const raw = Object.entries(localStorage)
-      .find(([k]) => k.includes('donor.D-99'));
+    const raw = localStorage.getItem('gj.donor_milestones.v1');
     expect(raw).toBeTruthy();
-    const parsed = JSON.parse(raw![1] as string);
-    expect(parsed.milestones.thankyou).toBeDefined();
+    const parsed = JSON.parse(raw!) as Record<string, Record<string, { doneAt?: string }>>;
+    expect(parsed['D-99']?.thankyou?.doneAt).toBeDefined();
   });
 
   it('compliance_review flips doc to Valid and stamps lastReviewedAt', () => {

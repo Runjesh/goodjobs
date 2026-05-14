@@ -7,6 +7,7 @@ import {
   type Milestone,
   type MilestoneId,
 } from '../../utils/donorLifecycle';
+import type { Donor } from '../../store/useStore';
 import './TouchpointTimeline.css';
 
 interface Props {
@@ -52,7 +53,7 @@ const TouchpointTimeline: React.FC<Props> = ({ donor, onApprove }) => {
   // Tracks milestones currently being sent so we can disable the button and
   // prevent double-submits.
   const [pending, setPending] = useState<Set<MilestoneId>>(new Set());
-  const milestones = computeTouchpoints(donor);
+  const milestones = computeTouchpoints(donor as Donor);
 
   const handleApprove = useCallback(async (m: Milestone) => {
     if (pending.has(m.id)) return;

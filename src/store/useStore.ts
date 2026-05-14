@@ -1,4 +1,101 @@
 import { create } from 'zustand';
+import type { Task } from '../utils/tasks';
+import { buildRecurringNextInstance } from '../utils/tasks';
+import { applyTaskCompletion } from '../utils/taskDispatcher';
+import type { BeneficiaryOutcome } from '../utils/outcomes';
+import type { ProgramBudget } from '../utils/programFinance';
+import type { GrantTranche } from '../utils/grantLifecycle';
+import type { ProgramGrantLink } from '../utils/programGrantLink';
+import type { ComplianceGrantLink } from '../utils/complianceGrant';
+import type { GrantBudgetHead, JournalExpense } from '../utils/grantBudgetHeads';
+import type { VolunteerAssignment } from '../utils/volunteerProgram';
+
+const TASKS_LS = 'goodjobs.tasks.v1';
+
+function loadTasksFromLs(): Task[] {
+  try {
+    const raw = localStorage.getItem(TASKS_LS);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr) ? (arr as Task[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistTasks(tasks: Task[]) {
+  try {
+    localStorage.setItem(TASKS_LS, JSON.stringify(tasks));
+  } catch {
+    /* ignore */
+  }
+}
+
+export type { Task };
+export type { BeneficiaryOutcome };
+export type { ProgramBudget };
+export type { GrantTranche };
+export type { ProgramGrantLink };
+export type { ComplianceGrantLink };
+export type { GrantBudgetHead };
+export type { VolunteerAssignment };
+export type JournalEntry = JournalExpense;
+
+export interface MisReviewIntent {
+  id: string;
+  narrative: string;
+  extracted: {
+    beneficiary?: string;
+    location?: string;
+    metric?: string;
+    value?: string;
+    program?: string;
+  };
+  reporterId: string;
+  reportDate: string;
+  createdAt: string;
+  status: 'pending' | 'approved' | 'edited' | 'rejected' | 'dismissed';
+  decidedAt?: string;
+}
+
+export interface OutreachEntry {
+  id: string;
+  donorId: string;
+  timestamp: number;
+  date: string;
+  channel: 'email' | 'whatsapp' | string;
+  template: string;
+  status: 'sent' | 'delivered' | 'read' | 'failed' | string;
+  outreachId?: string;
+}
+
+export interface EffortEntry {
+  id: string;
+  staffName: string;
+  date: string;
+  hours: number;
+  type: string;
+  programme: string;
+  createdAt: string;
+}
+
+export interface PendingTeamMember {
+  email: string;
+  role: string;
+  invitedAt: string;
+}
+
+export interface NgoDetails {
+  name?: string;
+  pan?: string;
+  reg_no?: string;
+  fcra_reg?: string;
+  eighty_g_no?: string;
+  state?: string;
+  whatsapp?: string;
+  /** Primary cause / thematic area for proposals and AI prompts. */
+  causeArea?: string;
+}
 
 export interface Donor {
   id: string;
@@ -41,6 +138,8 @@ export interface Transaction {
   programmeId?: string;
   date: string;
   timestamp: number;
+  /** Linked CSR / finance grant id when tagged. */
+  grantId?: string;
 }
 
 export interface CSRCard {
@@ -60,6 +159,10 @@ export interface CSRCard {
   last_activity_at?: string;
   updated_at?: string;
   created_at?: string;
+  /** Grant report due date (ISO yyyy-mm-dd). */
+  report_due_date?: string;
+  /** ISO timestamp — when the card entered the current pipeline column. */
+  stage_entered_at?: string;
 }
 
 export interface Beneficiary {
@@ -97,6 +200,10 @@ export interface ComplianceDocument {
   uploadedAt: string;
   /** Authority, registration ref, review notes — JSON from API. */
   details?: Record<string, unknown>;
+  /** Owner user id or email for workflow queues. */
+  assigned_to?: string;
+  /** e.g. 80G / CSR-1 registration number shown on receipts. */
+  registration_number?: string;
 }
 
 interface AppState {
@@ -107,6 +214,22 @@ interface AppState {
   beneficiaries: Beneficiary[];
   volunteers: Volunteer[];
   complianceDocs: ComplianceDocument[];
+
+  tasks: Task[];
+  ngoDetails: NgoDetails;
+  journalEntries: JournalEntry[];
+  misReviewIntents: MisReviewIntent[];
+  beneficiaryOutcomes: BeneficiaryOutcome[];
+  customPrograms: string[];
+  programBudgets: ProgramBudget[];
+  grantTranches: GrantTranche[];
+  grantBudgetHeads: GrantBudgetHead[];
+  programGrantLinks: ProgramGrantLink[];
+  complianceGrantLinks: ComplianceGrantLink[];
+  pendingTeamMembers: PendingTeamMember[];
+  outreachLog: OutreachEntry[];
+  programEffort: EffortEntry[];
+  volunteerAssignments: VolunteerAssignment[];
 
   setDonors: (donors: Donor[]) => void;
   setComplianceDocs: (docs: ComplianceDocument[]) => void;
@@ -137,7 +260,48 @@ interface AppState {
   addVolunteer: (v: Omit<Volunteer, 'id' | 'hours'>) => void;
   updateVolunteer: (id: string, data: Partial<Volunteer>) => void;
   deleteVolunteer: (id: string) => void;
-  addComplianceDoc: (doc: Omit<ComplianceDocument, 'id' | 'uploadedAt'>) => void;
+  addComplianceDoc: (doc: Omit<ComplianceDocument, 'uploadedAt'> & { id?: string }) => void;
+
+  addTask: (task: Task) => void;
+  upsertTaskByIntent: (task: Task) => void;
+  completeTask: (taskId: string, at?: Date) => Task | false;
+  snoozeTask: (taskId: string, untilIso: string) => void;
+  dismissTask: (taskId: string) => void;
+
+  setNgoDetails: (patch: Partial<NgoDetails>) => void;
+  upsertJournalEntry: (entry: JournalEntry) => void;
+  setJournalEntryGrantTag: (entryId: string, tag: { grantId: string; budgetHeadId: string } | null) => void;
+
+  addMisReviewIntent: (intent: MisReviewIntent) => void;
+  decideMisReviewIntent: (
+    id: string,
+    status: MisReviewIntent['status'],
+    extractedPatch?: MisReviewIntent['extracted'],
+  ) => void;
+
+  upsertBeneficiaryOutcome: (o: BeneficiaryOutcome) => void;
+  addCustomProgram: (name: string) => void;
+  upsertProgramBudget: (b: ProgramBudget) => void;
+
+  upsertGrantBudgetHead: (h: GrantBudgetHead) => void;
+  removeGrantBudgetHead: (id: string) => void;
+  upsertGrantTranche: (t: GrantTranche) => void;
+  releaseGrantTranche: (id: string) => void;
+
+  addProgramGrantLink: (link: ProgramGrantLink) => void;
+  removeProgramGrantLink: (id: string) => void;
+  addComplianceGrantLink: (link: ComplianceGrantLink) => void;
+
+  addPendingTeamMember: (m: PendingTeamMember) => void;
+  updatePendingTeamMember: (email: string, role: string) => void;
+  removePendingTeamMember: (email: string) => void;
+
+  addEffortEntry: (e: EffortEntry) => void;
+  upsertVolunteerAssignment: (a: VolunteerAssignment) => void;
+  removeVolunteerAssignment: (id: string) => void;
+
+  addOutreachEntry: (e: OutreachEntry) => void;
+  updateOutreachEntry: (id: string, patch: Partial<OutreachEntry>) => void;
 }
 
 const initialDonors: Donor[] = [
@@ -184,8 +348,7 @@ const initialVolunteers: Volunteer[] = [
   { id: 'V-104', name: 'Neha Gupta', skills: ['Social Media', 'Photography'], hours: 32, verified: true },
 ];
 
-export const useStore = create<AppState>((set) => ({
-  // Start empty; hydrate from backend on app load.
+export const useStore = create<AppState>((set, get) => ({
   donors: [],
   campaigns: [],
   transactions: [],
@@ -193,6 +356,22 @@ export const useStore = create<AppState>((set) => ({
   beneficiaries: [],
   volunteers: [],
   complianceDocs: [],
+
+  tasks: typeof localStorage !== 'undefined' ? loadTasksFromLs() : [],
+  ngoDetails: {},
+  journalEntries: [],
+  misReviewIntents: [],
+  beneficiaryOutcomes: [],
+  customPrograms: [],
+  programBudgets: [],
+  grantTranches: [],
+  grantBudgetHeads: [],
+  programGrantLinks: [],
+  complianceGrantLinks: [],
+  pendingTeamMembers: [],
+  outreachLog: [],
+  programEffort: [],
+  volunteerAssignments: [],
 
   setDonors: (donors) => set(() => ({ donors })),
   setComplianceDocs: (complianceDocs) => set(() => ({ complianceDocs })),
@@ -311,7 +490,220 @@ export const useStore = create<AppState>((set) => ({
     volunteers: state.volunteers.filter(v => v.id !== id)
   })),
 
-  addComplianceDoc: (doc) => set((state) => ({
-    complianceDocs: [{ ...doc, id: `doc-${Date.now()}`, uploadedAt: new Date().toISOString().split('T')[0] }, ...state.complianceDocs]
+  addComplianceDoc: (doc) => set((state) => {
+    const id = doc.id ?? `doc-${Date.now()}`;
+    const uploadedAt =
+      'uploadedAt' in doc && typeof (doc as ComplianceDocument).uploadedAt === 'string'
+        ? (doc as ComplianceDocument).uploadedAt
+        : new Date().toISOString().split('T')[0];
+    const row: ComplianceDocument = { ...(doc as ComplianceDocument), id, uploadedAt };
+    return { complianceDocs: [row, ...state.complianceDocs.filter(d => d.id !== id)] };
+  }),
+
+  addTask: (task) => set((state) => {
+    const tasks = [task, ...state.tasks.filter(t => t.id !== task.id)];
+    persistTasks(tasks);
+    return { tasks };
+  }),
+
+  upsertTaskByIntent: (incoming) => set((state) => {
+    const key = incoming.sourceIntentId;
+    let tasks: Task[];
+    if (!key) {
+      tasks = [incoming, ...state.tasks.filter(t => t.id !== incoming.id)];
+    } else {
+      const idx = state.tasks.findIndex(t => t.sourceIntentId === key);
+      if (idx === -1) {
+        tasks = [incoming, ...state.tasks];
+      } else {
+        const prior = state.tasks[idx];
+        const merged: Task = {
+          ...prior,
+          title: incoming.title,
+          description: incoming.description,
+          relatedEntityType: prior.relatedEntityType ?? incoming.relatedEntityType,
+          relatedEntityId: prior.relatedEntityId ?? incoming.relatedEntityId,
+          onCompleteAction: prior.onCompleteAction ?? incoming.onCompleteAction,
+          priority: incoming.priority,
+          meta: { ...(prior.meta ?? {}), ...(incoming.meta ?? {}) },
+          updatedAt: incoming.updatedAt,
+        };
+        const next = state.tasks.slice();
+        next[idx] = merged;
+        tasks = next;
+      }
+    }
+    persistTasks(tasks);
+    return { tasks };
+  }),
+
+  completeTask: (taskId, at = new Date()) => {
+    const state = get();
+    const task = state.tasks.find(t => t.id === taskId);
+    if (!task) return false;
+    const res = applyTaskCompletion(task, {
+      complianceDocs: state.complianceDocs,
+      setComplianceDocs: (docs) => set({ complianceDocs: docs as ComplianceDocument[] }),
+      csrCards: state.csrCards,
+      updateCSRCard: (id, data) => get().updateCSRCard(id, data as Partial<CSRCard>),
+      beneficiaries: state.beneficiaries,
+      updateBeneficiary: (id, data) => get().updateBeneficiary(id, data as Partial<Beneficiary>),
+    }, at);
+    if (!res.ok) return false;
+
+    let completedSnapshot: Task | false = false;
+    set((s) => {
+      const t = s.tasks.find(x => x.id === taskId);
+      if (!t) return {};
+      const nowIso = at.toISOString();
+      const done: Task = { ...t, status: 'done', completedAt: nowIso, updatedAt: nowIso };
+      completedSnapshot = done;
+      let nextTasks = s.tasks.map(x => (x.id === taskId ? done : x));
+      const recur = buildRecurringNextInstance(done, at);
+      if (recur) nextTasks = [recur, ...nextTasks];
+      persistTasks(nextTasks);
+      return { tasks: nextTasks };
+    });
+    return completedSnapshot;
+  },
+
+  snoozeTask: (taskId, untilIso) => set((state) => {
+    const tasks = state.tasks.map(t =>
+      t.id === taskId
+        ? { ...t, status: 'snoozed' as const, snoozeUntil: untilIso, updatedAt: new Date().toISOString() }
+        : t,
+    );
+    persistTasks(tasks);
+    return { tasks };
+  }),
+
+  dismissTask: (taskId) => set((state) => {
+    const tasks = state.tasks.map(t =>
+      t.id === taskId
+        ? { ...t, status: 'dismissed' as const, updatedAt: new Date().toISOString() }
+        : t,
+    );
+    persistTasks(tasks);
+    return { tasks };
+  }),
+
+  setNgoDetails: (patch) => set((state) => ({
+    ngoDetails: { ...state.ngoDetails, ...patch },
+  })),
+
+  upsertJournalEntry: (entry) => set((state) => ({
+    journalEntries: [entry, ...state.journalEntries.filter(j => j.id !== entry.id)],
+  })),
+
+  setJournalEntryGrantTag: (entryId, tag) => set((state) => ({
+    journalEntries: state.journalEntries.map(j => {
+      if (j.id !== entryId) return j;
+      if (tag == null) {
+        const { grantTag: _g, ...rest } = j;
+        return { ...rest };
+      }
+      return { ...j, grantTag: tag, grantId: tag.grantId };
+    }),
+  })),
+
+  addMisReviewIntent: (intent) => set((state) => ({
+    misReviewIntents: [intent, ...state.misReviewIntents.filter(i => i.id !== intent.id)],
+  })),
+
+  decideMisReviewIntent: (id, status, extractedPatch) => set((state) => ({
+    misReviewIntents: state.misReviewIntents.map(i => {
+      if (i.id !== id) return i;
+      const decidedAt = status === 'pending' ? i.decidedAt : new Date().toISOString();
+      const extracted = extractedPatch
+        ? { ...i.extracted, ...extractedPatch }
+        : i.extracted;
+      return { ...i, status, decidedAt, extracted };
+    }),
+  })),
+
+  upsertBeneficiaryOutcome: (o) => set((state) => ({
+    beneficiaryOutcomes: [o, ...state.beneficiaryOutcomes.filter(x => x.id !== o.id)],
+  })),
+
+  addCustomProgram: (name) => set((state) => {
+    const t = name.trim();
+    if (!t || state.customPrograms.includes(t)) return state;
+    return { customPrograms: [...state.customPrograms, t] };
+  }),
+
+  upsertProgramBudget: (b) => set((state) => ({
+    programBudgets: [b, ...state.programBudgets.filter(x => x.programId !== b.programId)],
+  })),
+
+  upsertGrantBudgetHead: (h) => set((state) => ({
+    grantBudgetHeads: [h, ...state.grantBudgetHeads.filter(x => x.id !== h.id)],
+  })),
+
+  removeGrantBudgetHead: (id) => set((state) => ({
+    grantBudgetHeads: state.grantBudgetHeads.filter(h => h.id !== id),
+  })),
+
+  upsertGrantTranche: (t) => set((state) => ({
+    grantTranches: [t, ...state.grantTranches.filter(x => x.id !== t.id)],
+  })),
+
+  releaseGrantTranche: (id) => set((state) => {
+    const now = new Date().toISOString();
+    return {
+      grantTranches: state.grantTranches.map(tr =>
+        tr.id === id
+          ? { ...tr, status: 'released' as const, releasedAt: now }
+          : tr,
+      ),
+    };
+  }),
+
+  addProgramGrantLink: (link) => set((state) => ({
+    programGrantLinks: [link, ...state.programGrantLinks.filter(l => l.id !== link.id)],
+  })),
+
+  removeProgramGrantLink: (id) => set((state) => ({
+    programGrantLinks: state.programGrantLinks.filter(l => l.id !== id),
+  })),
+
+  addComplianceGrantLink: (link) => set((state) => ({
+    complianceGrantLinks: [link, ...state.complianceGrantLinks.filter(l => l.id !== link.id)],
+  })),
+
+  addPendingTeamMember: (m) => set((state) => {
+    const email = m.email.trim().toLowerCase();
+    if (!email) return state;
+    if (state.pendingTeamMembers.some(x => x.email.toLowerCase() === email)) return state;
+    return { pendingTeamMembers: [...state.pendingTeamMembers, { ...m, email: m.email.trim() }] };
+  }),
+
+  updatePendingTeamMember: (email, role) => set((state) => ({
+    pendingTeamMembers: state.pendingTeamMembers.map(m =>
+      m.email === email ? { ...m, role } : m,
+    ),
+  })),
+
+  removePendingTeamMember: (email) => set((state) => ({
+    pendingTeamMembers: state.pendingTeamMembers.filter(m => m.email !== email),
+  })),
+
+  addEffortEntry: (e) => set((state) => ({
+    programEffort: [e, ...state.programEffort],
+  })),
+
+  upsertVolunteerAssignment: (a) => set((state) => ({
+    volunteerAssignments: [a, ...state.volunteerAssignments.filter(x => x.id !== a.id)],
+  })),
+
+  removeVolunteerAssignment: (id) => set((state) => ({
+    volunteerAssignments: state.volunteerAssignments.filter(a => a.id !== id),
+  })),
+
+  addOutreachEntry: (e) => set((state) => ({
+    outreachLog: [e, ...state.outreachLog],
+  })),
+
+  updateOutreachEntry: (id, patch) => set((state) => ({
+    outreachLog: state.outreachLog.map(o => (o.id === id ? { ...o, ...patch } : o)),
   })),
 }));

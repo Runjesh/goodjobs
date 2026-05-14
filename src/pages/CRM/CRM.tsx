@@ -21,7 +21,6 @@ import {
   computeStage,
   computeDonorLifecycleStage,
   computeTouchpoints,
-  nextDueMilestone,
   subscribeLifecycleHydrated,
   urgencyScore,
   markMilestoneDone,
@@ -260,7 +259,8 @@ const CRM: React.FC = () => {
     const candidates = donors
       .map(d => {
         const stage = donorStages.get(String(d.id)) ?? 'unknown';
-        const next  = nextDueMilestone(d);
+        const next =
+          computeTouchpoints(d).find(m => m.state === 'due' || m.state === 'overdue') ?? null;
         return { donor: d, stage, next, score: urgencyScore(d) };
       })
       .filter(x => {
@@ -361,7 +361,10 @@ const CRM: React.FC = () => {
   const lastUsedChannel = useMemo((): 'whatsapp' | 'email' => {
     if (!activeDonor) return 'whatsapp';
     const donorLog = outreachLog.filter(e => e.donorId === String(activeDonor.id));
-    if (donorLog.length > 0) return donorLog[0].channel;
+    if (donorLog.length > 0) {
+      const ch = donorLog[0].channel;
+      if (ch === 'whatsapp' || ch === 'email') return ch;
+    }
     const meta = (activeDonor.meta || {}) as Record<string, unknown>;
     const ch = meta.preferred_channel;
     return (ch === 'whatsapp' || ch === 'email') ? ch : 'whatsapp';
