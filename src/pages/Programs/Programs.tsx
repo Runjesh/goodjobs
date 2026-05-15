@@ -29,13 +29,14 @@ import { createMisReviewOnServer, syncMisReviewsFromServer } from '../../utils/m
 import { applyMisApproval } from '../../utils/applyMisApproval';
 import { toastEnrollSuccess } from '../../utils/workflowSuccess';
 import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
-import EnrollCompletionDrawer from '../../components/Programs/EnrollCompletionDrawer';
 import {
   applyPostEnrollWorkflow,
   mergeTimelineIntoDetails,
   type EnrollCompletionSnapshot,
   type EnrollSourceContext,
 } from '../../utils/enrollCompletion';
+import { emitAppRefresh } from '../../utils/events';
+import type { EnrollSuccessActions } from '../../components/Programs/EnrollSuccessCompletionView';
 import '../../components/Programs/EnrollCompletionDrawer.css';
 
 const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize,phone,email,gender,dob,referral_source,referral_detail,vulnerability,id_doc_type,id_doc_ref,notes\nSita Devi,Health,"Pune, MH",false,4,+9198***01,,female,1992-03-01,shg,Block 4 AWC,"woman_headed,pwd",aadhaar_masked,****8212,\nRavi K,Education,Delhi,true,3,,,male,,camp,,,election_id,ABC1234567,\n';
@@ -228,6 +229,7 @@ const Programs: React.FC = () => {
   const [benCsvRows, setBenCsvRows] = useState<Record<string, string>[]>([]);
   const [benImporting, setBenImporting] = useState(false);
   const benFileRef = useRef<HTMLInputElement>(null);
+  const lastEnrollFormRef = useRef<EnrollFormData | null>(null);
 
   const [benSort, setBenSort] = useState<'attention' | 'alpha'>('attention');
   const [activeProgFilter, setActiveProgFilter] = useState<string | null>(null);
@@ -432,6 +434,7 @@ const Programs: React.FC = () => {
   ) => {
     const source = enrollSourceRef.current;
     enrollSourceRef.current = undefined;
+    lastEnrollFormRef.current = f;
     const snap = applyPostEnrollWorkflow({
       form: f,
       beneficiaryId,
@@ -440,10 +443,54 @@ const Programs: React.FC = () => {
       upsertTask: useStore.getState().upsertTaskByIntent,
       updateBeneficiary: useStore.getState().updateBeneficiary,
     });
-    setShowModal(false);
     setEnrollCompletion(snap);
     toastEnrollSuccess(f.name.trim(), beneficiaryId);
+    emitAppRefresh();
   };
+
+  const enrollSuccessActions: EnrollSuccessActions | undefined = enrollCompletion
+    ? {
+        onClose: () => {
+          setEnrollCompletion(null);
+          lastEnrollFormRef.current = null;
+          enrollSourceRef.current = undefined;
+          setShowModal(false);
+        },
+        onLogVisit: () => {
+          setEffortForm(prev => ({
+            ...prev,
+            programme: enrollCompletion.program,
+            staffName: prev.staffName || '',
+          }));
+          setEnrollCompletion(null);
+          lastEnrollFormRef.current = null;
+          setShowModal(false);
+          setShowLogEffort(true);
+        },
+        onUploadDocuments: () => {
+          const ben = useStore.getState().beneficiaries.find(b => b.id === enrollCompletion.beneficiaryId);
+          if (ben) {
+            setEditBenExtra(unpackBenDetails(ben.details));
+            setEditBen(ben);
+            setEditMissingFields(new Set(['doc_aadhaar', 'doc_photo', 'docs_skipped']));
+            setShowEditBen(true);
+          }
+          setEnrollCompletion(null);
+          lastEnrollFormRef.current = null;
+          setShowModal(false);
+        },
+        onRecordOutcome: () => {
+          setOutcomeFor({
+            id: enrollCompletion.beneficiaryId,
+            name: enrollCompletion.beneficiaryName,
+            program: enrollCompletion.program,
+          });
+          setEnrollCompletion(null);
+          lastEnrollFormRef.current = null;
+          setShowModal(false);
+        },
+      }
+    : undefined;
 
   const handleSectionedEnroll = async (f: EnrollFormData) => {
     if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
@@ -1443,49 +1490,25 @@ const Programs: React.FC = () => {
         />
       )}
 
-      {activeTab === 'mis' && showModal && (
+      {showModal && (
         <EnrollBeneficiaryModal
           programs={programs}
           existingBeneficiaries={beneficiaries.length > 0 ? beneficiaries : initialBeneficiaries}
           initialProgram={programs[0]}
-          onClose={() => { enrollSourceRef.current = undefined; setShowModal(false); }}
-          onSubmit={handleSectionedEnroll}
-        />
-      )}
-
-      {enrollCompletion && (
-        <EnrollCompletionDrawer
-          snapshot={enrollCompletion}
-          onActions={{
-            onClose: () => setEnrollCompletion(null),
-            onLogVisit: () => {
-              setEffortForm(prev => ({
-                ...prev,
-                programme: enrollCompletion.program,
-                staffName: prev.staffName || '',
-              }));
-              setEnrollCompletion(null);
-              setShowLogEffort(true);
-            },
-            onUploadDocuments: () => {
-              const ben = useStore.getState().beneficiaries.find(b => b.id === enrollCompletion.beneficiaryId);
-              if (ben) {
-                setEditBenExtra(unpackBenDetails(ben.details));
-                setEditBen(ben);
-                setEditMissingFields(new Set(['doc_aadhaar', 'doc_photo', 'docs_skipped']));
-                setShowEditBen(true);
-              }
-              setEnrollCompletion(null);
-            },
-            onRecordOutcome: () => {
-              setOutcomeFor({
-                id: enrollCompletion.beneficiaryId,
-                name: enrollCompletion.beneficiaryName,
-                program: enrollCompletion.program,
-              });
-              setEnrollCompletion(null);
-            },
+          completion={enrollCompletion}
+          completionActions={enrollSuccessActions}
+          showUploadDocuments={
+            enrollCompletion
+              ? !!(lastEnrollFormRef.current?.docsSkipped
+                || (!lastEnrollFormRef.current?.docAadhaar && !lastEnrollFormRef.current?.docPhoto))
+              : true
+          }
+          onClose={() => {
+            if (enrollCompletion) return;
+            enrollSourceRef.current = undefined;
+            setShowModal(false);
           }}
+          onSubmit={handleSectionedEnroll}
         />
       )}
       {/* eslint-disable-next-line no-constant-binary-expression -- legacy enroll modal retained but disabled */}

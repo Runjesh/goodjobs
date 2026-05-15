@@ -7,6 +7,7 @@ import type { ProgramGrantLink } from './programGrantLink';
 import type { ComplianceGrantLink } from './complianceGrant';
 import type { Task } from './tasks';
 import { programIdFromName } from './programFinance';
+import { emitAppRefresh } from './events';
 
 export type CsrPipelineCol = 'prospecting' | 'pitch' | 'diligence' | 'mou' | 'live' | 'closed';
 
@@ -346,6 +347,10 @@ export function applyGrantStageTransition(args: {
     }
     default:
       break;
+  }
+
+  if (tasksCreated > 0 || liveBundleApplied) {
+    emitAppRefresh();
   }
 
   return { transition: key, tasksCreated, liveBundleApplied, reportStubId };

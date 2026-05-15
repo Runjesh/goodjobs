@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { FormField, FormGrid } from '../../components/ui/FormField';
+import EnrollSuccessCompletionView, { type EnrollSuccessActions } from '../../components/Programs/EnrollSuccessCompletionView';
+import type { EnrollCompletionSnapshot } from '../../utils/enrollCompletion';
 import type { Beneficiary } from '../../store/useStore';
 
 const VULNERABILITY_OPTIONS = [
@@ -285,10 +287,15 @@ interface Props {
   initialProgram?: string;
   onClose: () => void;
   onSubmit: (form: EnrollFormData) => void;
+  /** When set, modal shows the post-enroll success view instead of the form. */
+  completion?: EnrollCompletionSnapshot | null;
+  completionActions?: EnrollSuccessActions;
+  showUploadDocuments?: boolean;
 }
 
 const EnrollBeneficiaryModal: React.FC<Props> = ({
   programs, existingBeneficiaries, initialProgram, onClose, onSubmit,
+  completion, completionActions, showUploadDocuments = true,
 }) => {
   const [form, setForm] = useState<EnrollFormData>({
     ...EMPTY_FORM,
@@ -487,6 +494,14 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
         aria-labelledby="enroll-title"
       >
         <div className="enroll-modal__inner">
+          {completion && completionActions ? (
+            <EnrollSuccessCompletionView
+              snapshot={completion}
+              showUploadDocuments={showUploadDocuments}
+              onActions={completionActions}
+            />
+          ) : (
+          <>
           {Header}
 
           <div className="enroll-sections" ref={panelScrollRef}>
@@ -803,7 +818,6 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
             </>
           ))}
           </div>
-        </div>
 
         <div className="enroll-footer">
           {!canSave && (
@@ -821,9 +835,12 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
             Save &amp; enroll
           </button>
         </div>
+          </>
+          )}
+        </div>
       </div>
 
-      {showDupModal && (
+      {!completion && showDupModal && (
         <DuplicateMatchModal
           form={form}
           matches={duplicates}

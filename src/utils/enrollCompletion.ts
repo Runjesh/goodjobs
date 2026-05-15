@@ -91,6 +91,7 @@ export function buildPostEnrollTasks(
   form: EnrollFormData,
 ): Task[] {
   const now = new Date().toISOString();
+  const due3Days = new Date(Date.now() + 3 * 86_400_000).toISOString();
   const dueWeek = new Date(Date.now() + 7 * 86_400_000).toISOString();
   const tasks: Task[] = [];
   const bid = snap.beneficiaryId;
@@ -108,7 +109,7 @@ export function buildPostEnrollTasks(
       sourceIntentId: `enroll-docs:${bid}`,
       relatedEntityType: 'beneficiary',
       relatedEntityId: bid,
-      dueAt: dueWeek,
+      dueAt: due3Days,
       recurrence: 'none',
       createdAt: now,
       updatedAt: now,

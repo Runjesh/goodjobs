@@ -1,4 +1,5 @@
 import { STORE_CHANGED_EVENT } from '../components/System/StoreChangedBridge';
+import { emitAppRefresh } from './events';
 
 /** Fire immediately after optimistic local store updates (before background sync). */
 export function notifyStoreChanged(): void {
@@ -7,4 +8,5 @@ export function notifyStoreChanged(): void {
   } catch {
     /* ignore */
   }
+  emitAppRefresh();
 }

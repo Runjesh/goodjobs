@@ -24,6 +24,7 @@ import {
   RENEWAL_STATE_LABELS,
 } from '../../utils/complianceRenewal';
 import { toastComplianceUploadSuccess } from '../../utils/workflowSuccess';
+import { emitAppRefresh } from '../../utils/events';
 import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
 import '../../components/Compliance/ComplianceRenewalWorkspace.css';
 
@@ -338,6 +339,7 @@ const Compliance: React.FC = () => {
       setShowDocModal(false);
       await refreshVault();
       await refreshRegistrationDocs();
+      emitAppRefresh();
     } catch {
       toast.error('Upload failed. Check backend/S3 settings.');
     } finally {

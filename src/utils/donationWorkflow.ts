@@ -6,6 +6,7 @@ import {
   type DonationCompletionSnapshot,
   type DonationWorkflowInput,
 } from './donationCompletion';
+import { emitAppRefresh } from './events';
 import { toastDonationSuccess } from './workflowSuccess';
 
 export async function finishDonationWorkflow(
@@ -24,6 +25,7 @@ export async function finishDonationWorkflow(
   });
 
   toastDonationSuccess(snap);
+  emitAppRefresh();
 
   if (input.source === 'fundraising') {
     try {

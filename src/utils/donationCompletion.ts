@@ -201,6 +201,18 @@ export async function createFinanceTransaction(args: {
   return null;
 }
 
+/** Warm the server-side 80G PDF when PAN is on file (background after donation POST). */
+export async function prefetchDonor80gReceipt(donorId: string, txId: string): Promise<boolean> {
+  try {
+    const res = await apiFetch(
+      `/crm/donors/${encodeURIComponent(donorId)}/80g/${encodeURIComponent(txId)}.pdf`,
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function issueReceiptNumber(donorId: string, ngoName: string): Promise<string | undefined> {
   if (isMockEnabled()) return nextReceiptNumber(ngoName);
   try {
@@ -451,6 +463,16 @@ export async function onDonationSaved(
 
   for (const t of buildPostDonationTasks(snap)) {
     deps.upsertTask(t);
+  }
+
+  if (panOnFile && is80GEligible && transactionId) {
+    const warmed = await prefetchDonor80gReceipt(donor.id, transactionId);
+    if (warmed) {
+      snap.receiptGenerated = true;
+      if (!snap.receiptNumber) {
+        snap.receiptNumber = await issueReceiptNumber(donor.id, deps.ngoName);
+      }
+    }
   }
 
   try {

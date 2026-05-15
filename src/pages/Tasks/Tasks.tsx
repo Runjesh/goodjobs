@@ -9,6 +9,7 @@ import { useStore } from '../../store/useStore';
 import { isVisibleToday, type Task, type TaskRelatedEntityType, type TaskRecurrence } from '../../utils/tasks';
 import { inboxItemToTask, type InboxItemLike } from '../../utils/inboxToTask';
 import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
+import { APP_REFRESH_EVENT } from '../../utils/events';
 
 /**
  * Tasks page — a view onto the cross-module Tasks slice. Inbox flags fetched
@@ -102,6 +103,12 @@ const Tasks: React.FC = () => {
   }, [upsertTaskByIntent]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    const onRefresh = () => { void refresh(); };
+    window.addEventListener(APP_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(APP_REFRESH_EVENT, onRefresh);
+  }, [refresh]);
 
   // ── Derived list ─────────────────────────────────────────────────────
   const visibleTasks = useMemo(() => {

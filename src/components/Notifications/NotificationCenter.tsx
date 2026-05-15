@@ -12,6 +12,7 @@ import {
   formatRenewalNotificationMessage,
   daysUntilExpiry,
 } from '../../utils/complianceRenewal';
+import { APP_REFRESH_EVENT } from '../../utils/events';
 
 interface Notification {
   id: string;
@@ -45,19 +46,27 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
   const complianceDocs = useStore(s => s.complianceDocs);
   const tasks = useStore(s => s.tasks);
 
+  const loadNotifications = async () => {
+    try {
+      const res = await apiFetch('/notifications');
+      if (!res.ok) throw new Error('load');
+      const data = await res.json();
+      setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
+    } catch {
+      setNotifications([]);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
-    const run = async () => {
-      try {
-        const res = await apiFetch('/notifications');
-        if (!res.ok) throw new Error('load');
-        const data = await res.json();
-        setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
-      } catch {
-        setNotifications([]);
-      }
-    };
-    run();
+    void loadNotifications();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onRefresh = () => { void loadNotifications(); };
+    window.addEventListener(APP_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(APP_REFRESH_EVENT, onRefresh);
   }, [isOpen]);
 
   if (!isOpen) return null;

@@ -34,6 +34,7 @@ import DoThisNowLauncher from '../../components/Dashboard/DoThisNowLauncher';
 import TrialDay7Card from '../../components/Onboarding/TrialDay7Card';
 import FirstRunEmptyState from '../../components/Onboarding/FirstRunEmptyState';
 import { STORE_CHANGED_EVENT } from '../../components/System/StoreChangedBridge';
+import { APP_REFRESH_EVENT } from '../../utils/events';
 import { withPriorityActions } from '../../utils/priorityActions';
 import './Dashboard.css';
 
@@ -1163,9 +1164,11 @@ const Dashboard: React.FC = () => {
     const refresh = () => setLastRefresh(new Date());
     window.addEventListener('goodjobs:brief-invalidate', refresh);
     window.addEventListener(STORE_CHANGED_EVENT, refresh);
+    window.addEventListener(APP_REFRESH_EVENT, refresh);
     return () => {
       window.removeEventListener('goodjobs:brief-invalidate', refresh);
       window.removeEventListener(STORE_CHANGED_EVENT, refresh);
+      window.removeEventListener(APP_REFRESH_EVENT, refresh);
     };
   }, []);
 
