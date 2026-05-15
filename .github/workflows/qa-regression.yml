@@ -1,0 +1,97 @@
+name: QA — Smoke & Regression
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+  schedule:
+  - cron: '0 2 * * *'
+
+concurrency:
+  group: qa-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Smoke (unit + API + core E2E)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Vitest unit tests
+        run: npm run test
+
+      - name: Pytest API tests
+        run: cd backend && PYTHONPATH=. pytest tests -q
+        env:
+          JWT_SECRET: ci-test-secret
+          ENVIRONMENT: test
+
+      - name: Playwright smoke E2E
+        run: npm run test:e2e:smoke
+        env:
+          CI: '1'
+          JWT_SECRET: ci-test-secret
+          ENVIRONMENT: test
+
+  regression-full:
+    name: Full regression (test:all)
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Full test suite
+        run: npm run test:all
+        env:
+          CI: '1'
+          JWT_SECRET: ci-test-secret
+          ENVIRONMENT: test

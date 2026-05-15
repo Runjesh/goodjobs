@@ -275,7 +275,7 @@ const Reports: React.FC = () => {
   const effectiveStatus = (r: MockReport): MockReport['status'] => reportStatuses[r.id] ?? r.status;
 
   // Step 5: Stage-change notifications
-  const { upsertTaskByIntent } = useStore(s => ({ upsertTaskByIntent: s.upsertTaskByIntent }));
+  const upsertTaskByIntent = useStore(s => s.upsertTaskByIntent);
 
   const advanceStatus = (id: string, current: MockReport['status']) => {
     const next: Record<string, MockReport['status']> = {
@@ -339,23 +339,13 @@ const Reports: React.FC = () => {
 
   const navigate = useNavigate();
   const { user, can } = useAuth();
-  const {
-    donors,
-    transactions,
-    beneficiaries,
-    beneficiaryOutcomes,
-    journalEntries,
-    ngoDetails,
-    csrCards,
-  } = useStore(s => ({
-    donors:              s.donors,
-    transactions:        s.transactions,
-    beneficiaries:       s.beneficiaries,
-    beneficiaryOutcomes: s.beneficiaryOutcomes,
-    journalEntries:      s.journalEntries,
-    ngoDetails:          s.ngoDetails,
-    csrCards:            s.csrCards,
-  }));
+  const donors = useStore(s => s.donors);
+  const transactions = useStore(s => s.transactions);
+  const beneficiaries = useStore(s => s.beneficiaries);
+  const beneficiaryOutcomes = useStore(s => s.beneficiaryOutcomes);
+  const journalEntries = useStore(s => s.journalEntries);
+  const ngoDetails = useStore(s => s.ngoDetails);
+  const csrCards = useStore(s => s.csrCards);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);

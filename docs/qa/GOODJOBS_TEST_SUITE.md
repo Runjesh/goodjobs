@@ -69,6 +69,62 @@ Use this for **every** case so dead ends are easy to bisect.
 | **Edge / failure condition** | What must not happen; negative paths |
 | **Priority** | Critical / High / Medium / Low |
 | **Automation candidate** | Yes / No (and suggested layer: unit / API / E2E) |
+| **Lane** | **Smoke** (PR/deploy gate) · **Functional** (pre-release workflow) · **Exploratory** (RC / bug bash) |
+
+### Lane definitions
+
+| Lane | When to run | Exit rule |
+|------|-------------|-----------|
+| **Smoke** | Every PR / deploy | Login, dashboard, core routes — no blocker |
+| **Functional** | Daily or before release | Critical user journeys pass |
+| **Exploratory** | Release candidate | No critical usability / security / compliance gaps |
+
+### Test case → lane registry
+
+| Test ID | Lane(s) | Automated in repo |
+|---------|---------|-------------------|
+| TC-AUTH-001 | Smoke, Functional | `e2e/auth-login.spec.ts` |
+| TC-AUTH-002 | Smoke, Functional | `e2e/rbac-ui.spec.ts` |
+| TC-AUTH-003 | Functional | Manual |
+| TC-AUTH-004 | Functional, Exploratory | Manual |
+| TC-INBOX-001 | Functional | Partial (`tasks.test.ts`) |
+| TC-INBOX-002 | Functional | Manual |
+| TC-INBOX-003 | Functional, Exploratory | Manual |
+| TC-INBOX-004 | Smoke, Functional | `e2e/tasks-deeplink.spec.ts` |
+| TC-INBOX-005 | Functional | Manual |
+| TC-FUND-001 | Smoke, Functional | `e2e/donation-lifecycle.spec.ts` |
+| TC-FUND-002 | Functional | Manual |
+| TC-FUND-003 | Functional | Manual |
+| TC-CRM-001 | Functional | Manual |
+| TC-CRM-002 | Functional | Manual |
+| TC-FIN-001 | Functional | Manual |
+| TC-FIN-002 | Functional | Manual |
+| TC-COMP-001 | Functional | Manual |
+| TC-COMP-002 | Functional | Manual |
+| TC-DPDP-001 | Exploratory | `test_dpdp_security.py` (consent) |
+| TC-DPDP-002 | Functional | `test_dpdp_security.py` (erasure) |
+| TC-MIS-001 | Smoke, Functional | pytest + `e2e/offline-enroll.spec.ts` |
+| TC-MIS-002 | Functional | `test_field_parse.py` |
+| TC-MIS-003 | Exploratory | Manual |
+| TC-VOL-001 | Exploratory | Manual |
+| TC-VOL-002 | Functional | Manual |
+| TC-CSR-001 | Exploratory | Manual |
+| TC-CSR-002 | Functional | Manual |
+| TC-RBAC-CSR-API | Functional | Manual |
+| TC-AGENT-001 | Smoke, Functional | `e2e/agent-intent.spec.ts`, `e2e/command-bar-agent.spec.ts` |
+| TC-AGENT-002 | Functional | Manual |
+| TC-AGENT-003 | Exploratory | Manual |
+| TC-PWA-001 | Exploratory | Manual |
+| TC-PWA-002 | Exploratory | `e2e/offline-enroll.spec.ts` (partial) |
+| TC-PWA-003 | Functional, Exploratory | `e2e/offline-enroll.spec.ts` |
+| TC-PWA-004 | Exploratory | Manual |
+| TC-PWA-005 | Exploratory | Manual |
+| TC-A11Y-001 | Exploratory | Manual |
+| TC-A11Y-002 | Exploratory | Planned |
+
+**P1 additions (not yet TC-* IDs):** compliance renewal E2E (`e2e/compliance-renewal.spec.ts`), report readiness CTA (`e2e/report-readiness.spec.ts`), tenant isolation (`test_tenant_isolation.py`), FCRA boundaries (`test_fcra_boundaries.py`), black-box RC (`e2e/blackbox-rc.spec.ts`, `docs/qa/BLACKBOX_RC_DAY.md`).
+
+**CI:** PR → Smoke (`.github/workflows/qa-regression.yml`); `main` nightly → `npm run test:all`.
 
 ---
 

@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test e2e/auth-login.spec.ts e2e/rbac-ui.spec.ts e2e/grant-closure-gate.spec.ts e2e/fcra-guardrail.spec.ts e2e/donation-lifecycle.spec.ts e2e/agent-intent.spec.ts e2e/offline-enroll.spec.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:all": "npm run test && npm run test:api && npm run test:e2e",
     "setup:api-venv": "cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",

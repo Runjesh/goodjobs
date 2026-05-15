@@ -50,5 +50,22 @@ npx playwright test e2e/agent-intent.spec.ts
 ## Run all backend security/DPDP tests
 
 ```bash
-cd backend && pytest tests/test_dpdp_security.py tests/test_field_parse.py -q
+cd backend && pytest tests/test_dpdp_security.py tests/test_field_parse.py tests/test_tenant_isolation.py tests/test_fcra_boundaries.py -q
 ```
+
+## P1 E2E (compliance, reports, command bar)
+
+```bash
+npx playwright test e2e/compliance-renewal.spec.ts e2e/report-readiness.spec.ts e2e/command-bar-agent.spec.ts
+```
+
+## Black-box RC day
+
+See [BLACKBOX_RC_DAY.md](./BLACKBOX_RC_DAY.md) and `e2e/blackbox-rc.spec.ts`.
+
+## CI lanes
+
+| Trigger | Workflow | Command |
+|---------|----------|---------|
+| Pull request | `qa-regression.yml` → smoke | `npm run test` + `pytest` + `npm run test:e2e:smoke` |
+| `main` nightly (02:00 UTC) | `qa-regression.yml` → regression-full | `npm run test:all` |
