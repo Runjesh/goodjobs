@@ -17,7 +17,8 @@
     "test:all": "npm run test && npm run test:api && npm run test:e2e",
     "setup:api-venv": "cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
     "start:api": "cd backend && PYTHONPATH=. .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload",
-    "test:api": "cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests -q"
+    "test:api": "cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests -q",
+    "test:api:p1": "cd backend && PYTHONPATH=. .venv/bin/python -m pytest tests/test_dpdp_security.py tests/test_field_parse.py tests/test_tenant_isolation.py tests/test_fcra_boundaries.py -q"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",

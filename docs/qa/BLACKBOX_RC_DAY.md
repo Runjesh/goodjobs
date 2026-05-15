@@ -23,7 +23,7 @@ npm run test:e2e    # includes e2e/blackbox-rc.spec.ts
 | A2 | ₹10,00,000 | ₹2,00,000 | ₹10,000 | **Reject** 400 `fcra_admin_cap_exceeded` |
 | A3 | ₹0 (no income rows) | ₹0 | ₹1,00,000 | **Reject** (fallback cap base) |
 
-**How:** Finance → journal entry, fund FCRA, category Administrative, mark admin overhead. Confirm automated: `pytest tests/test_fcra_boundaries.py -q`.
+**How:** Finance → journal entry, fund FCRA, category Administrative, mark admin overhead. Confirm automated: `npm run test:api -- tests/test_fcra_boundaries.py`.
 
 ## Session B — Grant closure (state transition)
 
