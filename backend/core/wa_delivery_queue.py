@@ -3,7 +3,6 @@ WhatsApp outbound delivery queue with retries (MVP: Postgres + in-memory fallbac
 """
 from __future__ import annotations
 
-import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone

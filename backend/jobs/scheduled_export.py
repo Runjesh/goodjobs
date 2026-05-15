@@ -27,7 +27,7 @@ from email.encoders import encode_base64
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List
 
 from core.db import db_conn
 from core.export_builder import build_ngo_export_zip

@@ -5,14 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-import csv
 import hashlib
-import io
 import json
 import os
 import re
 import uuid
-import zipfile
 
 from agents.donor_nurture_agent import donor_nurture_app
 from agents.finance_compliance_agent import finance_agent
@@ -41,7 +38,7 @@ from urllib.parse import quote
 from core.db import db_conn
 from core.tenant_db import apply_ngo_session
 from core.platform_audit import log_audit
-from core.wa_delivery_queue import enqueue_wa_delivery, process_wa_delivery_queue
+from core.wa_delivery_queue import enqueue_wa_delivery
 from core.wa_intake import process_whatsapp_payload, ensure_org_code_for_ngo
 from core.wa_queue_worker import register_wa_queue_scheduler
 from core.wa_client import send_whatsapp_text as wa_send_message
@@ -3292,10 +3289,14 @@ def get_settings(current_user: TokenUser = Depends(get_current_user)):
 def _ngo_meta_patch(body: "UpdateNgoRequest") -> Dict[str, Any]:
     """Build the JSON patch that goes into ngos.meta for wizard extras."""
     patch: Dict[str, Any] = {}
-    if body.section_80g is not None:    patch["section_80g"] = body.section_80g
-    if body.cause_area is not None:     patch["cause_area"] = body.cause_area
-    if body.logo_data_url is not None:  patch["logo_data_url"] = body.logo_data_url
-    if body.fcra_status is not None:    patch["fcra_status"] = body.fcra_status
+    if body.section_80g is not None:
+        patch["section_80g"] = body.section_80g
+    if body.cause_area is not None:
+        patch["cause_area"] = body.cause_area
+    if body.logo_data_url is not None:
+        patch["logo_data_url"] = body.logo_data_url
+    if body.fcra_status is not None:
+        patch["fcra_status"] = body.fcra_status
     if (body.whatsapp_phone is not None
             or body.whatsapp_verified is not None
             or body.whatsapp_connected_at is not None):
