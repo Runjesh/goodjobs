@@ -5,6 +5,7 @@ import { useStore } from '../../store/useStore';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
+import { readApiError } from '../../utils/apiPersist';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import './Fundraising.css';
 
@@ -95,7 +96,7 @@ const Fundraising: React.FC = () => {
           },
         }),
       });
-      if (!res.ok) throw new Error('create');
+      if (!res.ok) throw new Error(await readApiError(res));
       // refresh canonical campaigns list
       const r = await apiFetch('/fundraising/campaigns');
       if (r.ok) {
@@ -106,8 +107,8 @@ const Fundraising: React.FC = () => {
       setShowModal(false);
       setNewCampaign({ title: '', goal: 100000, cause: 'Education', story: '', partner_org: '', public_url: '' });
       return;
-    } catch {
-      toast.error('Failed to create campaign (backend not reachable).');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create campaign.');
     }
   };
 

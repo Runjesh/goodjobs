@@ -43,11 +43,27 @@ vi.mock('../pages/Onboarding/wizardPersist', () => ({
 }));
 
 // ─── Layout's network hydration: short-circuit so no real fetches fly. ───
-vi.mock('../api/client', () => ({
-  apiFetch: vi.fn().mockResolvedValue({
-    ok: false, status: 0, json: async () => ({}),
-  }),
-}));
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>();
+  return {
+    ...actual,
+    expectsRealBackend: () => false,
+    apiFetch: vi.fn(async (path: string) => {
+      if (String(path).includes('/auth/register')) {
+        return new Response(JSON.stringify({
+          access_token: 'test-jwt',
+          user_id: 'user_test_flow',
+          ngo_id: 'ngo_test_flow',
+          email: 'anita@testfoundation.org',
+          name: 'Anita Rao',
+          role: 'ed',
+          ngo_name: 'Test Foundation',
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({}), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    }),
+  };
+});
 vi.mock('../utils/donorLifecycle', async () => {
   const actual = await vi.importActual<typeof import('../utils/donorLifecycle')>('../utils/donorLifecycle');
   return {

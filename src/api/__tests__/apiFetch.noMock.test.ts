@@ -39,6 +39,14 @@ describe('apiFetch noMockFallback', () => {
     expect([200, 503]).toContain(res.status);
   });
 
+  it('returns 503 on POST when expectsRealBackend is set even without explicit noMockFallback', async () => {
+    vi.stubEnv('VITE_USE_SAME_ORIGIN_API', 'true');
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const res = await apiFetch('/settings/ngo', { method: 'POST', body: '{}' });
+    expect(res.status).toBe(503);
+    vi.unstubAllEnvs();
+  });
+
   it('returns a real 503 (no mock fallback) when noMockFallback:true and fetch rejects', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
     const res = await apiFetch('/crm/outreach', {

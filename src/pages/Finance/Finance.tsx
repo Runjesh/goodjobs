@@ -8,6 +8,7 @@ import PermissionGate from '../../components/Auth/PermissionGate';
 import './Finance.css';
 import { apiFetch } from '../../api/client';
 import { isMockEnabled } from '../../api/mockBackend';
+import { allowLocalPersistFallback, readApiError } from '../../utils/apiPersist';
 import { programIdFromName } from '../../utils/programFinance';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
@@ -587,6 +588,7 @@ const Finance: React.FC = () => {
         : undefined;
 
     let payload: unknown = null;
+    let backendSaved = false;
     try {
       const res = await apiFetch('/finance/journal-entry', {
         method: 'POST',
@@ -610,9 +612,22 @@ const Finance: React.FC = () => {
         }),
       });
       if (res.ok) {
+        backendSaved = true;
         try { payload = await res.json(); } catch { /* empty body */ }
+      } else if (!allowLocalPersistFallback()) {
+        toast.error(await readApiError(res));
+        return;
       }
-    } catch { /* offline/no backend */ }
+    } catch {
+      if (!allowLocalPersistFallback()) {
+        toast.error('Could not reach the server. Journal entry was not saved.');
+        return;
+      }
+    }
+
+    if (!backendSaved && !allowLocalPersistFallback()) {
+      return;
+    }
 
     // Resolve receipt number: prefer server-returned DB sequence; fall back to
     // clientReceiptNo (only set in mock mode). Warn in production if missing.

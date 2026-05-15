@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, ChevronDown, CheckCircle2, AlertCircle, Search,
   Upload, FileText, Camera, ShieldCheck, Globe,
   User, Home, ClipboardCheck, Folder, Users
 } from 'lucide-react';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
+import { FormField, FormGrid } from '../../components/ui/FormField';
 import type { Beneficiary } from '../../store/useStore';
 
 const VULNERABILITY_OPTIONS = [
@@ -297,6 +298,16 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
   const [householdQuery, setHouseholdQuery] = useState('');
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
   const [showDupModal, setShowDupModal] = useState(false);
+  const sectionsScrollRef = useRef<HTMLDivElement>(null);
+  const sectionRefs = useRef<Partial<Record<'A' | 'B' | 'C' | 'D' | 'E', HTMLDivElement | null>>>({});
+
+  useEffect(() => {
+    const el = sectionRefs.current[openSection];
+    if (!el || !sectionsScrollRef.current) return;
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }, [openSection]);
 
   const setF = <K extends keyof EnrollFormData>(k: K, v: EnrollFormData[K]) =>
     setForm(prev => ({ ...prev, [k]: v }));
@@ -404,7 +415,7 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
 
   const Header = (
     <div className="enroll-header">
-      <button type="button" onClick={onClose} className="action-btn" aria-label="Close" style={{ position: 'absolute', right: '1rem', top: '1rem', zIndex: 1 }}>
+      <button type="button" onClick={onClose} className="action-btn enroll-close-btn" aria-label="Close">
         <X size={20} />
       </button>
       <div style={{ paddingRight: '2.5rem' }}>
@@ -446,7 +457,11 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
     const isOpen = openSection === s.key;
     const Icon = s.icon;
     return (
-      <div className={`enroll-section ${isOpen ? 'open' : ''}`} key={s.key}>
+      <div
+        ref={el => { sectionRefs.current[s.key] = el; }}
+        className={`enroll-section ${isOpen ? 'open' : ''}`}
+        key={s.key}
+      >
         <button
           type="button"
           className="enroll-section-head"
@@ -471,63 +486,84 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
   return (
     <ModalOverlay onBackdropClick={onClose}>
       <div
-        className="modal-card enroll-modal"
+        className="modal-card modal-card--wide modal-card--shell enroll-modal"
         onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="enroll-title"
       >
-        {Header}
+        <div className="enroll-modal__inner">
+          {Header}
 
-        <div className="enroll-sections">
+          <div className="enroll-sections" ref={sectionsScrollRef}>
           {/* SECTION A — BASIC INFO */}
           {renderSection(sections[0], (
-            <>
-              <div className="input-group" style={{ marginBottom: '0.75rem' }}>
-                <label className="input-label">Full name <span className="req">*</span></label>
-                <input required type="text" className="input-field" placeholder="e.g. Meena Devi" value={form.name} onChange={e => setF('name', e.target.value)} />
-              </div>
-              <div className="grid-2">
-                <div className="input-group">
-                  <label className="input-label">Date of birth</label>
-                  <input type="date" className="input-field" value={form.dob} onChange={e => setF('dob', e.target.value)} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Gender</label>
-                  <select className="input-field" value={form.gender} onChange={e => setF('gender', e.target.value)}>
+            <div className="form-stack">
+              <FormField id="enroll-name" label="Full name" required>
+                <input
+                  required
+                  type="text"
+                  id="enroll-name"
+                  className="input-field"
+                  placeholder="e.g. Meena Devi"
+                  value={form.name}
+                  onChange={e => setF('name', e.target.value)}
+                />
+              </FormField>
+              <FormGrid>
+                <FormField id="enroll-dob" label="Date of birth" hint="Used for age reporting and duplicate checks.">
+                  <input type="date" id="enroll-dob" className="input-field" value={form.dob} onChange={e => setF('dob', e.target.value)} />
+                </FormField>
+                <FormField id="enroll-gender" label="Gender">
+                  <select id="enroll-gender" className="input-field" value={form.gender} onChange={e => setF('gender', e.target.value)}>
                     <option value="">—</option>
                     <option value="female">Female</option>
                     <option value="male">Male</option>
                     <option value="other">Other</option>
                     <option value="prefer_not">Prefer not to say</option>
                   </select>
-                </div>
-              </div>
-              <div className="grid-2">
-                <div className="input-group">
-                  <label className="input-label">Phone</label>
-                  <input type="tel" className="input-field" placeholder="+91 …" value={form.phone} onChange={e => setF('phone', e.target.value)} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Email</label>
-                  <input type="email" className="input-field" placeholder="optional" value={form.email} onChange={e => setF('email', e.target.value)} />
-                </div>
-              </div>
-              <div className="grid-2">
-                <div className="input-group">
-                  <label className="input-label">Village / area</label>
-                  <input type="text" className="input-field" placeholder="e.g. Piparia" value={form.village} onChange={e => setF('village', e.target.value)} />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Pin code</label>
-                  <input type="text" className="input-field" inputMode="numeric" maxLength={6} placeholder="e.g. 422001" value={form.pinCode} onChange={e => setF('pinCode', e.target.value)} />
-                </div>
-              </div>
-              <div className="input-group" style={{ marginBottom: 0 }}>
-                <label className="input-label">District &amp; state <span className="req">*</span></label>
-                <input required type="text" className="input-field" placeholder="e.g. Nashik, MH" value={form.location} onChange={e => setF('location', e.target.value)} />
-              </div>
-            </>
+                </FormField>
+              </FormGrid>
+              <FormGrid>
+                <FormField id="enroll-phone" label="Phone">
+                  <input type="tel" id="enroll-phone" className="input-field" placeholder="+91 …" value={form.phone} onChange={e => setF('phone', e.target.value)} />
+                </FormField>
+                <FormField id="enroll-email" label="Email">
+                  <input type="email" id="enroll-email" className="input-field" placeholder="Optional" value={form.email} onChange={e => setF('email', e.target.value)} />
+                </FormField>
+              </FormGrid>
+              <fieldset className="form-fieldset enroll-location-panel">
+                <legend>Location</legend>
+                <FormGrid>
+                  <FormField id="enroll-village" label="Village / area" hint="Hamlet, ward, or block name.">
+                    <input type="text" id="enroll-village" className="input-field" placeholder="e.g. Piparia" value={form.village} onChange={e => setF('village', e.target.value)} />
+                  </FormField>
+                  <FormField id="enroll-pin" label="PIN code">
+                    <input
+                      type="text"
+                      id="enroll-pin"
+                      className="input-field"
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder="e.g. 422001"
+                      value={form.pinCode}
+                      onChange={e => setF('pinCode', e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    />
+                  </FormField>
+                </FormGrid>
+                <FormField id="enroll-district" label="District & state" required hint="e.g. Nashik, Maharashtra">
+                  <input
+                    required
+                    type="text"
+                    id="enroll-district"
+                    className="input-field"
+                    placeholder="e.g. Nashik, MH"
+                    value={form.location}
+                    onChange={e => setF('location', e.target.value)}
+                  />
+                </FormField>
+              </fieldset>
+            </div>
           ))}
 
           {/* SECTION B — PROGRAM */}
@@ -772,6 +808,7 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
               </label>
             </>
           ))}
+          </div>
         </div>
 
         <div className="enroll-footer">

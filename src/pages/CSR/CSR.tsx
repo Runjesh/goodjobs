@@ -13,6 +13,7 @@ import AtRiskGrantsBanner from '../../components/Compliance/AtRiskGrantsBanner';
 import toast from 'react-hot-toast';
 import './CSR.css';
 import { apiFetch } from '../../api/client';
+import { allowLocalPersistFallback, readApiError } from '../../utils/apiPersist';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import GrantFundingSummary from '../../components/CSR/GrantFundingSummary';
 
@@ -329,8 +330,8 @@ const CSR: React.FC = () => {
         setShowModal(false);
         return;
       }
-    } catch {
-      toast.error('Failed to add proposal.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add proposal.');
       return;
     }
     toast.error('Failed to add proposal.');
@@ -715,14 +716,24 @@ const CSR: React.FC = () => {
                                   const data = await res.json();
                                   if (data?.card?.id) useStore.getState().addCSRCardWithId(data.card);
                                   else useStore.getState().addCSRCard({ company: c.company_name, amount: Math.round((c.csr_obligation_cr || 10) * 10000000), project: c.focus_areas?.[0] ?? 'To be defined', tags, agent: 'AD', col: 'prospecting', date: 'Just added', details: { sector: c.sector ?? '' } });
-                                } else {
-                                  useStore.getState().addCSRCard({ company: c.company_name, amount: Math.round((c.csr_obligation_cr || 10) * 10000000), project: c.focus_areas?.[0] ?? 'To be defined', tags, agent: 'AD', col: 'prospecting', date: 'Just added', details: { sector: c.sector ?? '' } });
+                                  setDbAddedIds(prev => new Set([...prev, prospecKey]));
+                                  toast.success(`${c.company_name} added to Prospecting stage!`);
+                                  return;
+                                }
+                                if (!allowLocalPersistFallback()) {
+                                  toast.error(await readApiError(res));
+                                  return;
                                 }
                               } catch {
-                                useStore.getState().addCSRCard({ company: c.company_name, amount: Math.round((c.csr_obligation_cr || 10) * 10000000), project: c.focus_areas?.[0] ?? 'To be defined', tags, agent: 'AD', col: 'prospecting', date: 'Just added', details: { sector: c.sector ?? '' } });
+                                if (!allowLocalPersistFallback()) {
+                                  toast.error('Could not add prospect to pipeline.');
+                                  return;
+                                }
                               }
+                              if (!allowLocalPersistFallback()) return;
+                              useStore.getState().addCSRCard({ company: c.company_name, amount: Math.round((c.csr_obligation_cr || 10) * 10000000), project: c.focus_areas?.[0] ?? 'To be defined', tags, agent: 'AD', col: 'prospecting', date: 'Just added', details: { sector: c.sector ?? '' } });
                               setDbAddedIds(prev => new Set([...prev, prospecKey]));
-                              toast.success(`${c.company_name} added to Prospecting stage!`);
+                              toast.success(`${c.company_name} added locally — sync when backend is back.`);
                             }}
                           >
                             {alreadyAdded ? 'Added ✓' : 'Add to Pipeline'}

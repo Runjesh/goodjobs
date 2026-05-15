@@ -6,6 +6,7 @@ import { useAuth, ROLE_META } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 import './Settings.css';
 import { apiFetch, type ApiFetchInit } from '../../api/client';
+import { readApiError } from '../../utils/apiPersist';
 import PlansSection from '../../components/Billing/PlansSection';
 import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import { useTier, useUpgradeListener } from '../../hooks/useTier';
@@ -469,7 +470,7 @@ const Settings: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: ngoName, reg_no: regNo || null, fcra_reg: fcraReg || null, pan: panNo || null, state: ngoState || null }),
       });
-      if (!res.ok) throw new Error('ngo');
+      if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json().catch(() => ({}));
       login({ ...user, ngoName: data?.ngo?.name || ngoName, name });
       // Single source of truth: write to Zustand so Finance, Compliance, and
@@ -486,8 +487,8 @@ const Settings: React.FC = () => {
         eighty_g_no: eightyGNo || undefined,
       });
       toast.success('NGO details saved.');
-    } catch {
-      toast.error('Failed to save NGO details.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save NGO details.');
     }
   };
 

@@ -11,7 +11,8 @@
 // ED knows to retry from Settings; we don't strand them mid-onboarding.
 
 import toast from 'react-hot-toast';
-import { apiFetch } from '../../api/client';
+import { apiFetch, expectsRealBackend } from '../../api/client';
+import { readApiError } from '../../utils/apiPersist';
 import type { WizardData } from '../../utils/wizard';
 
 async function postJson(path: string, body: unknown): Promise<boolean> {
@@ -20,8 +21,17 @@ async function postJson(path: string, body: unknown): Promise<boolean> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      noMockFallback: expectsRealBackend(),
     });
-    return res.ok;
+    if (res.ok) return true;
+    const data = await res.json().catch(() => null) as Record<string, unknown> | null;
+    if (data && (data.ok === true || data.status === 'created' || typeof data.imported === 'number')) {
+      return true;
+    }
+    if (expectsRealBackend()) {
+      toast.error(await readApiError(res));
+    }
+    return false;
   } catch {
     return false;
   }
@@ -42,7 +52,7 @@ export async function persistOrgProfile(
   if (op.logoDataUrl) payload.logo_data_url = op.logoDataUrl;
   if (Object.keys(payload).length === 0) return;
   const ok = await postJson('/settings/ngo', payload);
-  if (!ok) toast.error('Org profile saved locally — sync from Settings when backend is back.');
+  if (!ok && !expectsRealBackend()) toast.error('Org profile saved locally — sync from Settings when backend is back.');
 }
 
 /** Create the wizard's first program server-side.
@@ -71,7 +81,7 @@ export async function persistFirstProgram(
     program_name: title,
     cause_area: fp.causeArea,
   });
-  if (!okCampaign || !okProgram) {
+  if ((!okCampaign || !okProgram) && !expectsRealBackend()) {
     toast.error('Program saved locally — it will sync once the backend is reachable.');
   }
 }
@@ -90,7 +100,7 @@ export async function persistInvites(
   );
   if (!cleaned.length) return;
   const ok = await postJson('/onboarding/invites', { invites: cleaned });
-  if (!ok) toast.error('Invites saved locally — re-send from Settings → Team later.');
+  if (!ok && !expectsRealBackend()) toast.error('Invites saved locally — re-send from Settings → Team later.');
 }
 
 /** Bulk-upsert manually entered beneficiaries onto the org. */
@@ -109,7 +119,7 @@ export async function persistBeneficiaries(
     }));
   if (!valid.length) return;
   const ok = await postJson('/programs/beneficiaries/bulk', { beneficiaries: valid });
-  if (!ok) toast.error('Beneficiaries saved locally — sync from Programs when backend is back.');
+  if (!ok && !expectsRealBackend()) toast.error('Beneficiaries saved locally — sync from Programs when backend is back.');
 }
 
 /** Save the verified WhatsApp number onto the ngo.
@@ -125,5 +135,5 @@ export async function persistWhatsApp(
     whatsapp_verified: !!cw.verified,
     whatsapp_connected_at: new Date().toISOString(),
   });
-  if (!ok) toast.error('WhatsApp number saved locally — sync from Settings when backend is back.');
+  if (!ok && !expectsRealBackend()) toast.error('WhatsApp number saved locally — sync from Settings when backend is back.');
 }

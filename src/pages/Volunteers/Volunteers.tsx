@@ -6,6 +6,7 @@ import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import toast from 'react-hot-toast';
 import './Volunteers.css';
 import { apiFetch } from '../../api/client';
+import { readApiError } from '../../utils/apiPersist';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { findShiftConflict } from '../../utils/shiftConflict';
 import VolunteerProgramAssignments from '../../components/Volunteers/VolunteerProgramAssignments';
@@ -168,7 +169,7 @@ const Volunteers: React.FC = () => {
           profile: packVolProfile(volExtra),
         }),
       });
-      if (!res.ok) throw new Error('create');
+      if (!res.ok) throw new Error(await readApiError(res));
       // refresh roster from backend so IDs match canonical records
       const r = await apiFetch('/volunteers/roster');
       if (r.ok) {
@@ -179,8 +180,8 @@ const Volunteers: React.FC = () => {
       setForm({ name: '', skills: '', verified: false });
       setVolExtra({ ...VOL_PROFILE_EMPTY });
       setShowModal(false);
-    } catch {
-      toast.error('Failed to add volunteer (backend not reachable).');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add volunteer.');
     }
   };
 

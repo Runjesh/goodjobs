@@ -34,6 +34,7 @@ describe('signup → 5-step wizard → trial pill (full flow)', () => {
     fireEvent.change(screen.getByLabelText(/NGO name/i),         { target: { value: 'Test Foundation' } });
     fireEvent.change(screen.getByLabelText(/Your name/i),         { target: { value: 'Anita Rao' } });
     fireEvent.change(screen.getByLabelText(/Work email/i),        { target: { value: 'anita@testfoundation.org' } });
+    fireEvent.change(screen.getByLabelText(/^Password/i),         { target: { value: 'TestPass123!' } });
     fireEvent.change(screen.getByLabelText(/Primary cause area/i),{ target: { value: 'Education' } });
     fireEvent.change(screen.getByLabelText(/Team size/i),         { target: { value: '6–15 people' } });
 

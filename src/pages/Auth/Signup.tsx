@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth, ROLE_META } from '../../context/AuthContext';
+import { apiFetch, expectsRealBackend } from '../../api/client';
 import { makeFreshTrial } from '../../utils/trial';
 import { clearWizardState } from '../../utils/wizard';
 import './Auth.css';
@@ -25,13 +26,14 @@ interface SignupForm {
   ngoName: string;
   fullName: string;
   email: string;
+  password: string;
   phone: string;
   causeArea: string;
   teamSize: string;
 }
 
 const EMPTY_FORM: SignupForm = {
-  ngoName: '', fullName: '', email: '', phone: '',
+  ngoName: '', fullName: '', email: '', password: '', phone: '',
   causeArea: '', teamSize: '',
 };
 
@@ -73,6 +75,7 @@ const Signup: React.FC = () => {
       ngoName: 'Asha Foundation',
       fullName: 'Anjali Mehta',
       email: 'anjali@ashafoundation.org',
+      password: 'DemoPass123!',
       phone: '+91 98200 12345',
       causeArea: 'Education',
       teamSize: '6–15 people',
@@ -84,6 +87,7 @@ const Signup: React.FC = () => {
     form.ngoName.trim() &&
     form.fullName.trim() &&
     /\S+@\S+\.\S+/.test(form.email) &&
+    form.password.length >= 8 &&
     form.causeArea &&
     form.teamSize;
 
@@ -101,25 +105,21 @@ const Signup: React.FC = () => {
     }, 700);
   };
 
-  const handleVerify = () => {
+  const handleVerify = async () => {
     setVerifyBusy(true);
-    setTimeout(() => {
-      // Build a brand new tenant + ED user and log them in with needsWizard=true.
-      const slug = form.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
-      const ngoSlug = form.ngoName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      const userId = `user_${slug}_${Date.now().toString(36)}`;
-      const ngoId = `ngo_${ngoSlug}_${Date.now().toString(36)}`;
-      // Reset any stale wizard state (defensive — should never exist for a brand-new id).
-      clearWizardState(userId);
+    const email = form.email.trim().toLowerCase();
+    const ngoSlug = form.ngoName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 48) || 'org';
 
+    const finishSignup = (userId: string, ngoId: string, token: string, ngoName: string) => {
+      clearWizardState(userId);
       login({
         id: userId,
-        email: form.email,
-        name: form.fullName,
+        email,
+        name: form.fullName.trim(),
         role: 'ed',
         ngoId,
-        ngoName: form.ngoName,
-        token: `signup-jwt-${Date.now()}`,
+        ngoName,
+        token,
         avatar: ROLE_META.ed.icon,
         needsWizard: true,
         trial: makeFreshTrial(),
@@ -129,11 +129,62 @@ const Signup: React.FC = () => {
           phone: form.phone,
         },
       });
-      setVerifyBusy(false);
+      if (form.causeArea) {
+        void apiFetch('/settings/ngo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cause_area: form.causeArea }),
+        });
+      }
       setStage('verified');
-      // Brief celebratory beat, then into the wizard.
-      setTimeout(() => navigate('/onboarding'), 800);
-    }, 600);
+    };
+
+    try {
+      const res = await apiFetch('/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        noMockFallback: expectsRealBackend(),
+        body: JSON.stringify({
+          ngo_name: form.ngoName.trim(),
+          ngo_slug: ngoSlug,
+          email,
+          password: form.password,
+          full_name: form.fullName.trim(),
+          role: 'ed',
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as {
+          access_token?: string;
+          user_id?: string;
+          ngo_id?: string;
+          ngo_name?: string;
+          name?: string;
+          role?: string;
+        };
+        if (data.access_token && data.user_id && data.ngo_id) {
+          finishSignup(
+            data.user_id,
+            data.ngo_id,
+            data.access_token,
+            data.ngo_name ?? form.ngoName.trim(),
+          );
+          setVerifyBusy(false);
+          setTimeout(() => navigate('/onboarding', { replace: true }), 800);
+          return;
+        }
+      }
+      const errBody = await res.json().catch(() => ({})) as { detail?: string };
+      toast.error(
+        typeof errBody.detail === 'string'
+          ? errBody.detail
+          : 'Could not create your account. Try a different email or sign in.',
+      );
+    } catch {
+      toast.error('Could not reach the server. Check your connection and try again.');
+    }
+
+    setVerifyBusy(false);
   };
 
   return (
@@ -224,6 +275,21 @@ const Signup: React.FC = () => {
                       onChange={(e) => setForm({ ...form, phone: e.target.value })}
                       placeholder="+91 ..." autoComplete="tel" />
                   </div>
+                </div>
+
+                <div className="input-group">
+                  <label className="input-label" htmlFor="su-password">Password *</label>
+                  <input
+                    id="su-password"
+                    type="password"
+                    className="input-field"
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    placeholder="At least 8 characters"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                  />
                 </div>
 
                 <div className="signup-row">

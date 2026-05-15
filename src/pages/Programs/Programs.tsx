@@ -13,6 +13,7 @@ import TheoryOfChangeBuilder from '../../components/Programs/TheoryOfChangeBuild
 import '../../components/FormBuilder/FormBuilder.css';
 import './Programs.css';
 import { apiFetch } from '../../api/client';
+import { allowLocalPersistFallback, readApiError } from '../../utils/apiPersist';
 import { flushOfflineBeneficiaryCreates, enqueueOfflineBeneficiaryCreate } from '../../lib/offlineFieldQueue';
 import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
@@ -385,20 +386,42 @@ const Programs: React.FC = () => {
       });
       if (!res.ok) throw new Error('create');
       let beneficiaryId: string | undefined;
+      let created: { id?: string; name?: string; program?: string; location?: string; aadhaar?: boolean; familySize?: number; details?: Record<string, unknown> } | undefined;
       try {
         const data = await res.json();
-        beneficiaryId = data?.beneficiary?.id != null ? String(data.beneficiary.id) : undefined;
+        created = data?.beneficiary;
+        beneficiaryId = created?.id != null ? String(created.id) : undefined;
       } catch {
         beneficiaryId = undefined;
       }
+      if (!created?.id) throw new Error('create');
+      const serverBen = {
+        id: String(created.id),
+        name: created.name ?? payload.name,
+        program: created.program ?? payload.program,
+        location: created.location ?? payload.location,
+        aadhaar: !!created.aadhaar,
+        familySize: Number(created.familySize) || payload.familySize,
+        details: (created.details as Record<string, unknown> | undefined) ?? payload.details,
+      };
+      const prev = useStore.getState().beneficiaries;
+      useStore.getState().setBeneficiaries([serverBen, ...prev.filter((b) => b.id !== serverBen.id)]);
       await refreshBeneficiaries();
+      const after = useStore.getState().beneficiaries;
+      if (!after.some((b) => b.id === serverBen.id)) {
+        useStore.getState().setBeneficiaries([serverBen, ...after]);
+      }
       void logEnrollmentConsentToRegistry(f, beneficiaryId);
       toast.success(`${payload.name} enrolled in ${payload.program}!`);
     } catch {
       if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
-      addBeneficiary(payload);
-      void logEnrollmentConsentToRegistry(f, undefined);
-      toast.success(`${payload.name} enrolled (saved locally — sync when backend is back).`);
+      if (allowLocalPersistFallback()) {
+        addBeneficiary(payload);
+        void logEnrollmentConsentToRegistry(f, undefined);
+        toast.success(`${payload.name} enrolled (saved locally — sync when backend is back).`);
+      } else {
+        toast.error('Could not enroll beneficiary. Check your connection and try again.');
+      }
     }
     setShowModal(false);
   };
@@ -447,22 +470,41 @@ const Programs: React.FC = () => {
           details: packBenDetails(benExtra),
         }),
       });
-      if (!res.ok) throw new Error('create');
+      if (!res.ok) throw new Error(await readApiError(res));
+      const data = await res.json().catch(() => ({}));
+      const created = data?.beneficiary;
+      if (created?.id) {
+        const serverBen = {
+          id: String(created.id),
+          name: created.name ?? flatPayload.name,
+          program: created.program ?? flatPayload.program,
+          location: created.location ?? flatPayload.location,
+          aadhaar: !!created.aadhaar,
+          familySize: Number(created.familySize) || flatPayload.familySize,
+          details: (created.details as Record<string, unknown> | undefined) ?? flatPayload.details,
+        };
+        const prev = useStore.getState().beneficiaries;
+        useStore.getState().setBeneficiaries([serverBen, ...prev.filter((b) => b.id !== serverBen.id)]);
+      }
       await refreshBeneficiaries();
       toast.success(`${form.name} enrolled in ${form.program}!`);
       setForm({ name: '', program: programs[0] || '', location: '', aadhaar: false, familySize: 1 });
       setBenExtra({ ...BEN_EXTRA_EMPTY });
       setShowModal(false);
-    } catch {
+    } catch (err) {
       if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
-      addBeneficiary({
-        name: form.name,
-        program: form.program,
-        location: form.location,
-        aadhaar: form.aadhaar,
-        familySize: Number(form.familySize),
-      });
-      toast.success(`${form.name} enrolled (saved locally — sync when backend is back).`);
+      if (allowLocalPersistFallback()) {
+        addBeneficiary({
+          name: form.name,
+          program: form.program,
+          location: form.location,
+          aadhaar: form.aadhaar,
+          familySize: Number(form.familySize),
+        });
+        toast.success(`${form.name} enrolled (saved locally — sync when backend is back).`);
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Could not enroll beneficiary.');
+      }
       setForm({ name: '', program: programs[0] || '', location: '', aadhaar: false, familySize: 1 });
       setBenExtra({ ...BEN_EXTRA_EMPTY });
       setShowModal(false);
@@ -489,7 +531,7 @@ const Programs: React.FC = () => {
         toast.success(`Beneficiary updated!`);
         setShowEditBen(false);
       } else {
-        toast.error('Failed to update beneficiary.');
+        toast.error(await readApiError(res));
       }
     } catch {
       toast.error('Network error updating beneficiary.');
@@ -579,15 +621,15 @@ const Programs: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ beneficiaries: beneficiariesPayload }),
       });
-      if (!res.ok) throw new Error('bulk');
+      if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       const n = typeof data.imported === 'number' ? data.imported : beneficiariesPayload.length;
       await refreshBeneficiaries();
       toast.success(`Imported ${n} beneficiaries.`);
       setBenCsvRows([]);
       setShowBenImport(false);
-    } catch {
-      toast.error('Bulk import failed (backend not reachable).');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Bulk import failed.');
     } finally {
       setBenImporting(false);
     }

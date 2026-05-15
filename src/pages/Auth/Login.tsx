@@ -4,7 +4,8 @@ import { ShieldCheck, Eye, EyeOff, Cpu, Sparkles, ArrowRight } from 'lucide-reac
 import toast from 'react-hot-toast';
 import { useAuth, ROLE_META, type UserRole } from '../../context/AuthContext';
 import { makeFreshTrial, loadOrgBilling } from '../../utils/trial';
-import { apiFetch } from '../../api/client';
+import { apiFetch, expectsRealBackend } from '../../api/client';
+import { readApiError } from '../../utils/apiPersist';
 import './Auth.css';
 
 // ── Social proof lines ────────────────────────────────────────────────────────
@@ -119,8 +120,18 @@ const Login: React.FC = () => {
         setTimeout(() => navigate('/'), 300);
         return;
       }
-    } catch { /* fall back to demo */ }
-    finally { setLoading(false); }
+      if (expectsRealBackend()) {
+        toast.error(await readApiError(res));
+        return;
+      }
+    } catch {
+      if (expectsRealBackend()) {
+        toast.error('Could not reach the server. Check your connection.');
+        return;
+      }
+    } finally { setLoading(false); }
+
+    if (expectsRealBackend()) return;
 
     const match = demoAccounts.find(a => a.email === form.email && a.password === form.password);
     if (match) {

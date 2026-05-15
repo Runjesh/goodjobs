@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import DPDPModule from './DPDPModule';
 import './Compliance.css';
 import { apiFetch } from '../../api/client';
+import { readApiError } from '../../utils/apiPersist';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useFocusFromUrl } from '../../hooks/useFocusFromUrl';
 import {
@@ -210,13 +211,13 @@ const Compliance: React.FC = () => {
           tenure: boardForm.tenure || undefined,
         }),
       });
-      if (!res.ok) throw new Error('create failed');
+      if (!res.ok) throw new Error(await readApiError(res));
       toast.success('Board member added.');
       setShowBoardModal(false);
       setBoardForm({ name: '', role: 'Trustee', din: '', tenure: '' });
       await refreshBoard();
-    } catch {
-      toast.error('Failed to add board member.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add board member.');
     }
   };
 

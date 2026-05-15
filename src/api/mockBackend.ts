@@ -18,6 +18,8 @@
  *   localStorage.setItem('goodjobs_mock_backend', 'off');
  */
 
+import { expectsRealBackend, hasExplicitApiBaseUrl } from './env';
+
 const MOCK_TOGGLE_KEY = 'goodjobs_mock_backend'; // 'on' | 'off'
 const MOCK_FLAG_LS = 'goodjobs.mock.lastUsed';
 
@@ -48,21 +50,19 @@ export function isMockEnabled(): boolean {
 
   let isDev = false;
   let buildFlag = false;
-  let configuredBase = '';
   try {
     isDev = !!import.meta.env.DEV;
     buildFlag = String(import.meta.env.VITE_ENABLE_MOCK_BACKEND ?? '').toLowerCase() === 'true';
-    configuredBase = String(import.meta.env.VITE_API_BASE_URL ?? '').trim();
   } catch { /* ignore */ }
+
+  // Railway monolith / split deploy: never silently mock writes in production.
+  if (expectsRealBackend()) return false;
 
   if (isDev) return true;
   if (buildFlag) return true;
 
-  // Static-only deploy detection: if the operator did NOT configure a
-  // separate API base URL, then the static origin is the only "backend"
-  // the app could reach, which means there is effectively no backend.
-  // In that case, fall through to the mock so the demo stays usable.
-  if (!configuredBase && typeof window !== 'undefined') {
+  // Static-only host (no API URL, not same-origin monolith): demo fallback.
+  if (!hasExplicitApiBaseUrl() && typeof window !== 'undefined') {
     return true;
   }
 
@@ -176,6 +176,26 @@ const HANDLERS: Handler[] = [
     handle: () => jsonResponse({ access_token: rid('tok'), token_type: 'bearer' }),
   },
   {
+    test: (p, m) => isAuthMockAllowed() && m === 'POST' && p === '/auth/register',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const userId = rid('user');
+      const ngoId = rid('ngo');
+      return jsonResponse({
+        access_token: rid('tok'),
+        token_type: 'bearer',
+        user_id: userId,
+        ngo_id: ngoId,
+        email: body.email ?? '',
+        name: body.full_name ?? '',
+        role: body.role ?? 'ed',
+        ngo_name: body.ngo_name ?? '',
+        expires_in_hours: 24,
+        source: 'mock',
+      });
+    },
+  },
+  {
     test: (p, m) => isAuthMockAllowed() && m === 'GET' && p === '/auth/me',
     handle: () => jsonResponse({}),
   },
@@ -239,10 +259,120 @@ const HANDLERS: Handler[] = [
           if (body.reg_no !== undefined) user.reg_no = body.reg_no;
           if (body.fcra_reg !== undefined) user.fcra_reg = body.fcra_reg;
           if (body.pan !== undefined) user.pan = body.pan;
+          const meta = (user.ngo_meta && typeof user.ngo_meta === 'object') ? user.ngo_meta : {};
+          for (const k of ['section_80g', 'cause_area', 'logo_data_url', 'fcra_status', 'whatsapp_phone', 'whatsapp_verified', 'whatsapp_connected_at'] as const) {
+            if (body[k] !== undefined) meta[k] = body[k];
+          }
+          if (body.program_name && String(body.program_name).trim()) {
+            const progs: string[] = Array.isArray(meta.programs) ? [...meta.programs] : [];
+            const pname = String(body.program_name).trim();
+            if (!progs.some((p: string) => String(p).toLowerCase() === pname.toLowerCase())) progs.push(pname);
+            meta.programs = progs;
+          }
+          if (body.whatsapp_phone) {
+            meta.whatsapp = {
+              ...(meta.whatsapp && typeof meta.whatsapp === 'object' ? meta.whatsapp : {}),
+              phone: body.whatsapp_phone,
+              verified: !!body.whatsapp_verified,
+              connected_at: body.whatsapp_connected_at ?? new Date().toISOString(),
+            };
+          }
+          user.ngo_meta = meta;
           localStorage.setItem('sevasuite_auth', JSON.stringify(user));
+          localStorage.setItem(`goodjobs.mock.ngo_meta.${user.ngoId ?? 'default'}`, JSON.stringify(meta));
         }
       } catch { /* ignore */ }
-      return jsonResponse({ ok: true, ngo: { name: body.name ?? '', reg_no: body.reg_no, fcra_reg: body.fcra_reg, pan: body.pan } });
+      return jsonResponse({ ok: true, ngo: { name: body.name ?? '', reg_no: body.reg_no, fcra_reg: body.fcra_reg, pan: body.pan, meta: body }, source: 'mock' });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/fundraising/campaigns',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const camp = {
+        id: rid('c'),
+        title: body.title ?? 'Campaign',
+        raised: 0,
+        goal: Number(body.goal) || 0,
+        donorsCount: 0,
+        status: body.status ?? 'draft',
+        image: body.image ?? '',
+        cause: body.cause ?? '',
+        details: body.details ?? {},
+      };
+      try {
+        const key = 'goodjobs.mock.campaigns';
+        const arr = JSON.parse(localStorage.getItem(key) || '[]');
+        arr.unshift(camp);
+        localStorage.setItem(key, JSON.stringify(arr));
+      } catch { /* ignore */ }
+      return jsonResponse({ status: 'created', campaign: camp, source: 'mock' });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/programs/beneficiaries',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const ben = {
+        id: rid('ben'),
+        name: body.name ?? 'Beneficiary',
+        program: body.program ?? 'General',
+        location: body.location ?? '—',
+        aadhaar: !!body.aadhaar,
+        familySize: Number(body.familySize) || 1,
+        details: body.details ?? {},
+      };
+      try {
+        const key = 'goodjobs.mock.beneficiaries';
+        const arr = JSON.parse(localStorage.getItem(key) || '[]');
+        arr.unshift(ben);
+        localStorage.setItem(key, JSON.stringify(arr));
+      } catch { /* ignore */ }
+      return jsonResponse({ status: 'created', beneficiary: ben, source: 'mock' });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/programs/beneficiaries/bulk',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const rows = Array.isArray(body.beneficiaries) ? body.beneficiaries : [];
+      let n = 0;
+      try {
+        const key = 'goodjobs.mock.beneficiaries';
+        const arr = JSON.parse(localStorage.getItem(key) || '[]');
+        for (const b of rows.slice(0, 500)) {
+          if (!(b?.name || '').trim()) continue;
+          arr.unshift({
+            id: rid('ben'),
+            name: b.name,
+            program: b.program ?? 'General',
+            location: b.location ?? '—',
+            aadhaar: !!b.aadhaar,
+            familySize: Number(b.familySize) || 1,
+            details: b.details ?? {},
+          });
+          n += 1;
+        }
+        localStorage.setItem(key, JSON.stringify(arr));
+      } catch { /* ignore */ }
+      return jsonResponse({ imported: n, source: 'mock' });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/onboarding/invites',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const invites = Array.isArray(body.invites) ? body.invites : [];
+      try {
+        const key = 'goodjobs.mock.invites';
+        const arr = JSON.parse(localStorage.getItem(key) || '[]');
+        for (const i of invites) {
+          if (!i?.email) continue;
+          arr.push({ email: i.email, role: i.role, status: 'pending', invitedAt: new Date().toISOString() });
+        }
+        localStorage.setItem(key, JSON.stringify(arr));
+      } catch { /* ignore */ }
+      return jsonResponse({ ok: true, queued: invites.length, source: 'mock' });
     },
   },
   {
@@ -557,7 +687,13 @@ const HANDLERS: Handler[] = [
   },
   {
     test: (p, m) => m === 'GET' && /^\/fundraising\/campaigns(\?|$)/.test(p),
-    handle: () => jsonResponse({ campaigns: [], source: 'mock' }),
+    handle: () => {
+      try {
+        const arr = JSON.parse(localStorage.getItem('goodjobs.mock.campaigns') || '[]');
+        if (Array.isArray(arr) && arr.length) return jsonResponse({ campaigns: arr, source: 'mock' });
+      } catch { /* ignore */ }
+      return jsonResponse({ campaigns: [], source: 'mock' });
+    },
   },
   {
     test: (p, m) => m === 'GET' && /^\/csr\/cards(\?|$)/.test(p),
@@ -569,7 +705,13 @@ const HANDLERS: Handler[] = [
   },
   {
     test: (p, m) => m === 'GET' && /^\/programs\/beneficiaries(\?|$)/.test(p),
-    handle: () => jsonResponse({ beneficiaries: [], source: 'mock' }),
+    handle: () => {
+      try {
+        const arr = JSON.parse(localStorage.getItem('goodjobs.mock.beneficiaries') || '[]');
+        if (Array.isArray(arr) && arr.length) return jsonResponse({ beneficiaries: arr, source: 'mock' });
+      } catch { /* ignore */ }
+      return jsonResponse({ beneficiaries: [], source: 'mock' });
+    },
   },
   {
     test: (p, m) => m === 'GET' && /^\/compliance\/documents(\?|$)/.test(p),

@@ -10,6 +10,7 @@ import {
 import { useStore } from '../../store/useStore';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
+import { readApiError } from '../../utils/apiPersist';
 import { deriveNextAction } from '../../utils/donorNextAction';
 import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
@@ -478,7 +479,7 @@ const CRM: React.FC = () => {
         }
         toast.success(`${newContact.name} added to CRM!`);
       } else {
-        toast.error('Failed to add donor (backend rejected).');
+        toast.error(await readApiError(res));
         return;
       }
     } catch {
