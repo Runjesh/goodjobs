@@ -117,25 +117,49 @@ const Settings: React.FC = () => {
     }
   };
 
-  const sendInvite = () => {
-    const email = inviteEmail.trim();
+  const sendInvite = async () => {
+    const email = inviteEmail.trim().toLowerCase();
     if (!email || !email.includes('@')) {
       toast.error('Enter a valid email address.');
       return;
     }
-    // Block at the cap. canAddTeamMember treats null cap as unlimited.
     if (!canAddTeamMember(tier, usage.team)) {
       setTeamUpgradeOpen(true);
       return;
     }
     if (!user) return;
-    const next = [
-      ...(user.pendingInvites ?? []),
-      { email, role: inviteRole, invitedAt: new Date().toISOString() },
-    ];
-    updateUser({ pendingInvites: next });
-    setInviteEmail('');
-    toast.success(`Invite sent to ${email}.`);
+    try {
+      const res = await apiFetch('/team/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invites: [{ email, role: inviteRole }] }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const queued = Array.isArray(data.invites) ? data.invites : [{ email, role: inviteRole, invitedAt: new Date().toISOString() }];
+      const existing = user.pendingInvites ?? [];
+      const merged = [...existing];
+      for (const inv of queued) {
+        if (!merged.some(p => p.email === inv.email)) {
+          merged.push({
+            email: inv.email,
+            role: inv.role || inviteRole,
+            invitedAt: inv.invitedAt || new Date().toISOString(),
+          });
+        }
+      }
+      updateUser({ pendingInvites: merged });
+      setInviteEmail('');
+      toast.success(`Invite queued for ${email}.`);
+    } catch {
+      const next = [
+        ...(user.pendingInvites ?? []),
+        { email, role: inviteRole, invitedAt: new Date().toISOString() },
+      ];
+      updateUser({ pendingInvites: next });
+      setInviteEmail('');
+      toast.success(`Invite saved locally for ${email} (sync when online).`);
+    }
   };
 
   const revokeInvite = (email: string) => {

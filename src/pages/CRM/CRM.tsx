@@ -160,22 +160,44 @@ const CRM: React.FC = () => {
       setAiLoading(true);
       try {
         const headers = { 'Content-Type': 'application/json' };
-        
-        // Fetch Summary
+        const donor = donors.find(d => String(d.id) === String(activeDonorId));
+        const donorLog = outreachLog
+          .filter(e => e.donorId === String(activeDonorId))
+          .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+          .slice(0, 8);
+        const messages: { sender: string; text: string }[] = donorLog.map(e => ({
+          sender: e.channel === 'whatsapp' ? 'Donor' : 'GoodJobs',
+          text: `${e.template || 'Outreach'} (${e.status})`,
+        }));
+        if (donor?.meta && typeof donor.meta.notes === 'string' && donor.meta.notes.trim()) {
+          messages.push({ sender: 'Donor', text: String(donor.meta.notes).slice(0, 500) });
+        }
+        const lastTx = transactions
+          .filter(t => String(t.donorId) === String(activeDonorId))
+          .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))[0];
+        if (lastTx) {
+          messages.push({
+            sender: 'Donor',
+            text: `Recent gift ₹${Number(lastTx.amount).toLocaleString('en-IN')} for ${lastTx.campaignTitle || 'campaign'}.`,
+          });
+        }
+        if (messages.length === 0 && donor) {
+          messages.push(
+            { sender: 'Donor', text: `${donor.name} — ${donor.lifecycleStage || 'supporter'} with ₹${(donor.totalGiven ?? 0).toLocaleString('en-IN')} total given.` },
+            { sender: 'GoodJobs', text: 'No logged messages yet — use outreach below to start the thread.' },
+          );
+        }
+        const sentimentSource = messages.map(m => m.text).join(' ').slice(0, 800) || donor?.name || '';
+
         const sumRes = await apiFetch('/gen-ai/summarize', {
           method: 'POST',
           headers,
-          body: JSON.stringify([
-            { sender: 'Donor', text: 'I really like the work you are doing for girls education.' },
-            { sender: 'GoodJobs', text: 'Thank you Anjali! Your support makes it possible.' },
-            { sender: 'Donor', text: 'When is the next site visit? I would like to join.' }
-          ])
+          body: JSON.stringify(messages.slice(0, 12)),
         });
-        
-        // Fetch Sentiment
-        const sentRes = await apiFetch(`/gen-ai/sentiment?text=${encodeURIComponent("I am very happy with the progress reports.")}`, {
+
+        const sentRes = await apiFetch(`/gen-ai/sentiment?text=${encodeURIComponent(sentimentSource)}`, {
           method: 'POST',
-          headers
+          headers,
         });
 
         if (sumRes.ok) {
@@ -195,7 +217,7 @@ const CRM: React.FC = () => {
 
     fetchPropensity();
     fetchAiInsights();
-  }, [activeDonorId, viewMode]);
+  }, [activeDonorId, viewMode, donors, outreachLog, transactions]);
 
   // Side-channel: also keep a per-donor map so row-level Suggested-next-action
   // pills can use the real propensity band rather than heuristics.

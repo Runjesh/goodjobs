@@ -2,6 +2,7 @@ import type { Donor, Campaign, Transaction } from '../store/useStore';
 import type { BeneficiaryOutcome } from './outcomes';
 import { aggregateByProgram } from './outcomes';
 import { programIdFromName } from './programFinance';
+import { programIdsFromLabels, programLabelsForCampaign } from './campaignProgramLinks';
 
 /**
  * Walks the chain donor → transactions → campaigns → programmes → outcomes
@@ -67,17 +68,8 @@ export function buildDonorImpactTrail(
   byCampaign.forEach((txs, campaignId) => {
     const campaign = campaigns.find(c => String(c.id) === campaignId);
     if (!campaign) return;
-    const labelSet = new Set<string>();
-    if (campaign.cause) {
-      campaign.cause.split(',').map((s) => s.trim()).filter(Boolean).forEach((l) => labelSet.add(l));
-    }
-    for (const t of txs) {
-      const pid = t.programmeId != null && String(t.programmeId).trim() !== '' ? String(t.programmeId) : '';
-      if (!pid) continue;
-      const matchCampaign = campaigns.find((c) => String(c.id) === pid);
-      labelSet.add(matchCampaign?.title ?? humanizeProgrammeId(pid));
-    }
-    const labels = [...labelSet];
+    const labels = programLabelsForCampaign(campaign, txs, campaigns);
+    const labelSet = new Set(labels);
     labels.forEach((l) => programLabelsTouched.add(l));
     campaignContribs.push({
       campaign,
@@ -89,9 +81,7 @@ export function buildDonorImpactTrail(
 
   // Aggregate outcomes filtered to the programmes this donor's money touched.
   const aggregateAll = aggregateByProgram(outcomes);
-  const touchedIds = new Set(
-    [...programLabelsTouched].map((label) => programIdFromName(label)).filter(Boolean),
-  );
+  const touchedIds = programIdsFromLabels(programLabelsTouched);
   const programmes = aggregateAll
     .filter(a => touchedIds.has(a.programId))
     .map(a => ({

@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import hashlib
 import json
@@ -14,6 +14,8 @@ import uuid
 from agents.donor_nurture_agent import donor_nurture_app
 from agents.finance_compliance_agent import finance_agent
 from agents.board_briefing_agent import board_briefing_agent
+from agents.morning_brief_agent import morning_brief_agent
+from core.morning_brief import MORNING_BRIEF_MEM_BY_NGO, run_morning_brief_delivery
 from agents.grant_report_agent import grant_report_agent
 from agents.campaign_intelligence_agent import campaign_agent
 from agents.csr_prospect_agent import csr_agent
@@ -32,6 +34,7 @@ from core.analytics import (
     predict_revenue,
     detect_anomalies,
     calculate_propensity_score,
+    donor_rfm_from_transactions,
     suggest_campaign_goal,
     classify_fcra_transaction,
     match_donor_from_bank_line,
@@ -3515,6 +3518,16 @@ def create_invites(body: NgoInviteRequest, current_user: TokenUser = Depends(get
         return {"queued": len(queued), "invites": queued, "source": "db"}
 
 
+class TeamInviteRequest(BaseModel):
+    invites: List[NgoInviteEntry] = Field(default_factory=list)
+
+
+@app.post("/team/invite", tags=["Settings"])
+def post_team_invite(body: TeamInviteRequest, current_user: TokenUser = Depends(require_role("ed", "admin"))):
+    """Alias for onboarding invites — used by Settings → Team."""
+    return create_invites(NgoInviteRequest(invites=body.invites), current_user)
+
+
 class RemoveTeamMemberRequest(BaseModel):
     email: str
 
@@ -3680,9 +3693,16 @@ def _start_export_scheduler() -> None:
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    scheduler.add_job(
+        _morning_brief_job_all_ngos,
+        trigger=CronTrigger(hour=8, minute=0, timezone="Asia/Kolkata"),
+        id="morning_brief_agent",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     register_wa_queue_scheduler(scheduler)
     scheduler.start()
-    print("✅ Export scheduler started — daily check at 06:00 IST.")
+    print("✅ Schedulers started — exports 06:00 IST, morning brief 08:00 IST.")
 
 
 @app.on_event("startup")
@@ -3961,6 +3981,24 @@ def _run_board_brief(payload: dict):
     except Exception as e:
         print(f"Board Briefing Agent Error: {e}")
 
+
+def _run_morning_brief(payload: dict):
+    try:
+        result = morning_brief_agent.invoke(payload)
+        print(f"Morning Brief Agent → {result.get('status')}")
+    except Exception as e:
+        print(f"Morning Brief Agent Error: {e}")
+
+
+def _morning_brief_job_all_ngos():
+    """Cron: deliver morning brief for demo NGO (extend to all NGOs when multi-tenant cron matures)."""
+    ngo_id = _demo_default_ngo_id()
+    try:
+        run_morning_brief_delivery(ngo_id=ngo_id, ngo_name=os.getenv("DEMO_NGO_NAME", "GoodJobs Demo NGO"))
+    except Exception as e:
+        print(f"Morning brief cron error: {e}")
+
+
 @app.post("/trigger/board-brief")
 async def trigger_board_brief(background_tasks: BackgroundTasks):
     """Manually trigger board brief (cron also calls this daily at 6 AM IST)."""
@@ -3972,6 +4010,35 @@ async def trigger_board_brief(background_tasks: BackgroundTasks):
     }
     background_tasks.add_task(_run_board_brief, payload)
     return {"status": "accepted", "message": "Board briefing agent triggered"}
+
+
+@app.post("/trigger/morning-brief")
+async def trigger_morning_brief(
+    background_tasks: BackgroundTasks,
+    current_user: TokenUser = Depends(require_role("ed", "admin", "programs", "field")),
+):
+    """Morning Brief Agent — role Today priorities + optional field WhatsApp delivery."""
+    from datetime import date
+    ngo_id = current_user.ngo_id
+    ngo_name = current_user.ngo_name or "NGO"
+
+    def _task():
+        morning_brief_agent.invoke({
+            "ngo_id": ngo_id,
+            "ngo_name": ngo_name,
+            "run_date": str(date.today()),
+            "result": {},
+            "status": "pending",
+        })
+
+    background_tasks.add_task(_task)
+    return {"status": "accepted", "message": "Morning brief agent triggered"}
+
+
+@app.get("/morning-brief/agent-status", tags=["Agentic UX"])
+def get_morning_brief_agent_status(current_user: TokenUser = Depends(get_current_user)):
+    rec = MORNING_BRIEF_MEM_BY_NGO.get(current_user.ngo_id) or {}
+    return {"last_run": rec, "source": "memory" if rec else "none"}
 
 # ── RAG Ingestion ───────────────────────────────────────────────────────────────
 
@@ -4267,6 +4334,64 @@ def get_donor_propensity(donor_id: str, current_user: TokenUser = Depends(requir
             "monetary": f"₹{history['average_gift_amount']:,} avg"
         }
     }
+
+
+class DonorPropensityBatchRequest(BaseModel):
+    donor_ids: List[str] = Field(default_factory=list)
+
+
+def _donor_transactions_for_rfm(ngo_id: str) -> List[Dict[str, Any]]:
+    with db_conn() as conn:
+        if conn is None:
+            return list(TX_MEM_BY_NGO.get(ngo_id, []))
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT donor_id::text, amount, transaction_date, created_at
+                FROM transactions
+                WHERE ngo_id = %s::uuid AND donor_id IS NOT NULL
+                ORDER BY transaction_date DESC NULLS LAST
+                LIMIT 5000
+                """,
+                (ngo_id,),
+            )
+            rows = cur.fetchall() or []
+            return [
+                {
+                    "donor_id": str(r[0]),
+                    "amount": float(r[1] or 0),
+                    "transaction_date": r[2].isoformat() if r[2] else None,
+                    "created_at": r[3].isoformat() if r[3] else None,
+                }
+                for r in rows
+            ]
+        except Exception:
+            return list(TX_MEM_BY_NGO.get(ngo_id, []))
+
+
+@app.post("/analytics/donor-propensity-batch", tags=["Analytics"])
+def post_donor_propensity_batch(
+    body: DonorPropensityBatchRequest,
+    current_user: TokenUser = Depends(require_role("ed", "crm")),
+):
+    """RFM propensity scores for many donors (CRM heatmap + nurture queue)."""
+    donor_ids = [str(d) for d in (body.donor_ids or [])[:200] if d]
+    txs = _donor_transactions_for_rfm(current_user.ngo_id)
+    scores: Dict[str, int] = {}
+    for did in donor_ids:
+        history = donor_rfm_from_transactions(txs, did)
+        if history["total_gifts_count"] == 0:
+            donor_profiles = {
+                "1": {"days_since_last_gift": 10, "total_gifts_count": 25, "average_gift_amount": 5000},
+                "2": {"days_since_last_gift": 30, "total_gifts_count": 12, "average_gift_amount": 2000},
+                "4": {"days_since_last_gift": 240, "total_gifts_count": 2, "average_gift_amount": 1000},
+                "5": {"days_since_last_gift": 60, "total_gifts_count": 5, "average_gift_amount": 1500},
+            }
+            history = donor_profiles.get(did, history)
+        scores[did] = calculate_propensity_score(history)
+    return {"scores": scores}
+
 
 # ── Intelligent Workflows ──────────────────────────────────────────────────────
 
@@ -5037,6 +5162,59 @@ def decide_mis_review(
     }
 
 
+@app.get("/programs/field-checkins", tags=["Programs"])
+def list_field_checkins(current_user: TokenUser = Depends(require_role("ed", "programs", "field"))):
+    """Geo-tagged field activity from approved MIS reviews (location text + date)."""
+    rows: List[Dict[str, Any]] = []
+    with db_conn() as conn:
+        if conn is None:
+            for r in MIS_REVIEWS_MEM_BY_NGO.get(current_user.ngo_id, []):
+                if r.get("status") not in ("approved", "edited"):
+                    continue
+                ext = r.get("extracted") or {}
+                loc = ext.get("location") or ext.get("village") or ""
+                if not loc:
+                    continue
+                rows.append({
+                    "id": str(r.get("id")),
+                    "beneficiary": ext.get("beneficiary") or "Field report",
+                    "location": loc,
+                    "program": ext.get("program") or "",
+                    "report_date": r.get("report_date") or r.get("created_at"),
+                    "metric": ext.get("metric") or "",
+                })
+        else:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    SELECT id::text, extracted, report_date, decided_at
+                    FROM mis_field_reviews
+                    WHERE ngo_id = %s::uuid AND status IN ('approved', 'edited')
+                    ORDER BY COALESCE(decided_at, created_at) DESC
+                    LIMIT 50
+                    """,
+                    (current_user.ngo_id,),
+                )
+                for rid, extracted, report_date, decided_at in cur.fetchall():
+                    ext = extracted if isinstance(extracted, dict) else {}
+                    loc = ext.get("location") or ext.get("village") or ""
+                    if not loc:
+                        continue
+                    rows.append({
+                        "id": rid,
+                        "beneficiary": ext.get("beneficiary") or "Field report",
+                        "location": loc,
+                        "program": ext.get("program") or "",
+                        "report_date": (report_date.isoformat() if hasattr(report_date, "isoformat") else str(report_date or ""))
+                        or (decided_at.isoformat() if hasattr(decided_at, "isoformat") else ""),
+                        "metric": ext.get("metric") or "",
+                    })
+            except Exception:
+                pass
+    return {"checkins": rows, "map_configured": bool(os.getenv("MAPBOX_TOKEN") or os.getenv("VITE_MAPBOX_TOKEN"))}
+
+
 @app.get("/programs/mis-whatsapp-intake", tags=["Programs"])
 def list_mis_whatsapp_intake(current_user: TokenUser = Depends(require_role("ed", "programs"))):
     items: List[Dict[str, Any]] = list(list_mis_intake(current_user.ngo_id, limit=100))
@@ -5165,37 +5343,160 @@ class FinanceJournalEntryRequest(BaseModel):
     amount: float
     entry_type: str = "Expense"  # Expense | Income
     fund: str = "General"
+    grant_id: Optional[str] = None
+    budget_head_id: Optional[str] = None
+    donor_id: Optional[str] = None
+    programme_id: Optional[str] = None
+    receipt_donor_name: Optional[str] = None
+    receipt_donor_pan: Optional[str] = None
+    receipt_number: Optional[str] = None
+    is_admin_overhead: bool = False
+    category: Optional[str] = None
 
 
 @app.post("/finance/journal-entry", tags=["Finance"])
 def post_finance_journal_entry(body: FinanceJournalEntryRequest, current_user: TokenUser = Depends(require_role("ed", "finance"))):
+    entry_type = (body.entry_type or "Expense").strip()
+    is_income = entry_type.lower() == "income"
+    receipt_number: Optional[str] = None
+    if is_income:
+        if body.receipt_number:
+            receipt_number = str(body.receipt_number).strip()
+        elif body.donor_id:
+            receipt_number = _next_receipt_number(
+                current_user.ngo_id,
+                current_user.ngo_name or "NGO",
+            )
     event = {
         "id": f"fj_{int(datetime.now(timezone.utc).timestamp() * 1000)}",
         "ngo_id": current_user.ngo_id,
         "by": current_user.email,
         "description": body.description[:5000],
         "amount": float(body.amount),
-        "entry_type": body.entry_type,
+        "entry_type": entry_type,
         "fund": body.fund,
+        "grant_id": body.grant_id,
+        "donor_id": body.donor_id,
+        "programme_id": body.programme_id,
+        "receipt_number": receipt_number,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     FINANCE_EVENTS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).append(event)
-    return {"status": "recorded", "event": event}
+    if is_income and body.donor_id:
+        donor_name = (body.receipt_donor_name or "").strip() or "Donor"
+        tx = {
+            "id": f"TRX-{event['id']}",
+            "ngo_id": current_user.ngo_id,
+            "donor_id": body.donor_id,
+            "donor_name": donor_name,
+            "amount": float(body.amount),
+            "fund_classification": body.fund,
+            "payment_method": "journal",
+            "transaction_date": datetime.now(timezone.utc).date().isoformat(),
+            "receipt_generated": bool(receipt_number),
+            "meta": {"receipt_number": receipt_number} if receipt_number else {},
+        }
+        with db_conn() as conn:
+            if conn is None:
+                TX_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, tx)
+            else:
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        INSERT INTO transactions (
+                            ngo_id, donor_id, donor_name, amount, fund_classification,
+                            payment_method, transaction_date, receipt_generated, meta
+                        )
+                        VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, CURRENT_DATE, %s, %s::jsonb)
+                        """,
+                        (
+                            current_user.ngo_id,
+                            body.donor_id,
+                            donor_name,
+                            float(body.amount),
+                            body.fund,
+                            "journal",
+                            bool(receipt_number),
+                            json.dumps({"receipt_number": receipt_number} if receipt_number else {}),
+                        ),
+                    )
+                except Exception:
+                    TX_MEM_BY_NGO.setdefault(current_user.ngo_id, []).insert(0, tx)
+    out: Dict[str, Any] = {"status": "recorded", "event": event}
+    if receipt_number:
+        out["receipt_number"] = receipt_number
+        out["fiscal_year"] = _fiscal_year_label()
+    return out
 
 
 @app.post("/finance/tally/sync", tags=["Finance"])
 def post_finance_tally_sync(current_user: TokenUser = Depends(require_role("ed", "finance"))):
     """
-    Placeholder for a real Tally integration: returns a deterministic export count.
+    Export finance journal + income transactions as Tally-importable XML voucher stubs.
     """
+    ngo_id = current_user.ngo_id
+    vouchers: List[Dict[str, Any]] = []
     with db_conn() as conn:
         if conn is None:
-            exported = min(24, len(TX_MEM_BY_NGO.get(current_user.ngo_id, [])) + 1)
+            for ev in FINANCE_EVENTS_MEM_BY_NGO.get(ngo_id, [])[-50:]:
+                vouchers.append({
+                    "voucher_type": "Receipt" if str(ev.get("entry_type", "")).lower() == "income" else "Payment",
+                    "amount": float(ev.get("amount") or 0),
+                    "narration": ev.get("description") or "",
+                    "fund": ev.get("fund") or "General",
+                })
+            for tx in TX_MEM_BY_NGO.get(ngo_id, [])[:50]:
+                vouchers.append({
+                    "voucher_type": "Receipt",
+                    "amount": float(tx.get("amount") or 0),
+                    "narration": tx.get("donor_name") or "Donation",
+                    "fund": tx.get("fund_classification") or "General",
+                })
         else:
             cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM transactions WHERE ngo_id = %s", (current_user.ngo_id,))
-            exported = int(cur.fetchone()[0] or 0)
-    return {"status": "ok", "exported_vouchers": exported, "synced_at": datetime.now(timezone.utc).isoformat()}
+            try:
+                cur.execute(
+                    """
+                    SELECT amount, donor_name, fund_classification, payment_method, transaction_date
+                    FROM transactions
+                    WHERE ngo_id = %s::uuid
+                    ORDER BY transaction_date DESC NULLS LAST
+                    LIMIT 100
+                    """,
+                    (ngo_id,),
+                )
+                for r in cur.fetchall():
+                    vouchers.append({
+                        "voucher_type": "Receipt",
+                        "amount": float(r[0] or 0),
+                        "narration": r[1] or "Donation",
+                        "fund": r[2] or "General",
+                        "payment_method": r[3],
+                        "date": r[4].isoformat() if r[4] else None,
+                    })
+            except Exception:
+                pass
+    exported = len(vouchers)
+    tally_xml_lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<TALLYMESSAGE>",
+        f"  <!-- GoodJobs Tally export {datetime.now(timezone.utc).isoformat()} -->",
+    ]
+    for i, v in enumerate(vouchers[:exported]):
+        tally_xml_lines.append(
+            f'  <VOUCHER id="gj-{i}" type="{v["voucher_type"]}" amount="{v["amount"]:.2f}">'
+            f'<NARRATION>{(v.get("narration") or "")[:200]}</NARRATION></VOUCHER>'
+        )
+    tally_xml_lines.append("</TALLYMESSAGE>")
+    return {
+        "status": "ok",
+        "exported_vouchers": exported,
+        "vouchers": vouchers[:25],
+        "tally_xml_preview": "\n".join(tally_xml_lines[:12]) + ("\n  ..." if exported > 10 else ""),
+        "synced_at": datetime.now(timezone.utc).isoformat(),
+        "integration": "tally_xml_stub",
+    }
 
 
 @app.post("/finance/aa/consents/refresh", tags=["Finance"])
@@ -5332,14 +5633,29 @@ def list_notifications(current_user: TokenUser = Depends(get_current_user)):
 
         # Build from inbox (DB mode)
         inbox = get_inbox(current_user)["items"]
+        now_utc = datetime.now(timezone.utc)
         for it in inbox[:20]:
             kind = it.get("kind")
             ref_id = str((it.get("ref") or {}).get("id") or "")
             if not ref_id:
                 continue
-            st = states.get("notification", {}).get(f"{kind}:{ref_id}", {})
+            nid = f"{kind}:{ref_id}"
+            st = states.get("notification", {}).get(nid, {})
+            snooze_raw = st.get("snoozed_until")
+            snoozed_until_ms = None
+            if snooze_raw:
+                try:
+                    su = datetime.fromisoformat(str(snooze_raw).replace("Z", "+00:00"))
+                    if su.tzinfo is None:
+                        su = su.replace(tzinfo=timezone.utc)
+                    if su > now_utc:
+                        snoozed_until_ms = int(su.timestamp() * 1000)
+                except Exception:
+                    pass
+            if st.get("resolved_at") and not snoozed_until_ms:
+                continue
             items.append({
-                "id": f"{kind}:{ref_id}",
+                "id": nid,
                 "kind": kind,
                 "ref_id": ref_id,
                 "tasks_path": _tasks_focus_path(kind, ref_id),
@@ -5352,12 +5668,29 @@ def list_notifications(current_user: TokenUser = Depends(get_current_user)):
                 "message": it.get("title") or "",
                 "time": "Just now",
                 "read": bool(st.get("resolved_at")),
+                "snoozed_until": snoozed_until_ms,
             })
         seen = {n["id"] for n in items}
         for cn in _compliance_renewal_notification_rows(current_user.ngo_id, cur):
             nid = cn["id"]
             st = states.get("notification", {}).get(nid, {})
+            if st.get("resolved_at"):
+                continue
+            snooze_raw = st.get("snoozed_until")
+            snoozed_until_ms = None
+            if snooze_raw:
+                try:
+                    su = datetime.fromisoformat(str(snooze_raw).replace("Z", "+00:00"))
+                    if su.tzinfo is None:
+                        su = su.replace(tzinfo=timezone.utc)
+                    if su > now_utc:
+                        snoozed_until_ms = int(su.timestamp() * 1000)
+                    else:
+                        continue
+                except Exception:
+                    pass
             cn["read"] = bool(st.get("resolved_at"))
+            cn["snoozed_until"] = snoozed_until_ms
             if nid not in seen:
                 items.append(cn)
                 seen.add(nid)
@@ -5366,6 +5699,44 @@ def list_notifications(current_user: TokenUser = Depends(get_current_user)):
 
 class NotificationActionRequest(BaseModel):
     action: str  # mark_all_read | clear_all
+
+
+class NotificationItemActionRequest(BaseModel):
+    notification_id: str
+    action: str  # snooze | dismiss
+    snooze_hours: Optional[float] = 24
+
+
+@app.post("/notifications/item", tags=["System"])
+def post_notification_item_action(
+    body: NotificationItemActionRequest,
+    current_user: TokenUser = Depends(get_current_user),
+):
+    """Snooze or dismiss a single notification (persisted via inbox_item_states)."""
+    nid = (body.notification_id or "").strip()
+    if not nid:
+        raise HTTPException(status_code=400, detail="notification_id required")
+    action = (body.action or "").strip().lower()
+    now = datetime.now(timezone.utc)
+    with db_conn() as conn:
+        if conn is None:
+            if action == "snooze":
+                until = now + timedelta(hours=float(body.snooze_hours or 24))
+                _mem_upsert_state(current_user.ngo_id, "notification", nid, snoozed_until=until.isoformat())
+            elif action == "dismiss":
+                _mem_upsert_state(current_user.ngo_id, "notification", nid, resolved_at=now.isoformat())
+            else:
+                raise HTTPException(status_code=400, detail="action must be snooze or dismiss")
+            return {"status": "ok", "notification_id": nid, "action": action, "source": "memory"}
+        cur = conn.cursor()
+        if action == "snooze":
+            until = now + timedelta(hours=float(body.snooze_hours or 24))
+            _db_upsert_inbox_state(cur, current_user.ngo_id, "notification", nid, snoozed_until=until.isoformat())
+        elif action == "dismiss":
+            _db_upsert_inbox_state(cur, current_user.ngo_id, "notification", nid, resolved_at=now.isoformat())
+        else:
+            raise HTTPException(status_code=400, detail="action must be snooze or dismiss")
+        return {"status": "ok", "notification_id": nid, "action": action, "source": "db"}
 
 
 @app.post("/notifications/action", tags=["System"])
@@ -5890,10 +6261,20 @@ def get_morning_brief(
             seen_titles.add(t)
     out = out[:8]
     handled = _handled_by_agents_rows(current_user)
+    brief_rec = MORNING_BRIEF_MEM_BY_NGO.get(current_user.ngo_id) or {}
+    role_key = (current_user.role or "ed").lower()
+    narrative = (
+        (brief_rec.get("brief_by_role") or {}).get(role_key)
+        or (brief_rec.get("brief_by_role") or {}).get("ed")
+        or ""
+    )
     return {
         "priorities": out,
         "handled_by_agents": handled,
         "role": current_user.role,
+        "brief_narrative": narrative,
+        "brief_last_run": brief_rec.get("generated_at"),
+        "whatsapp_queued": brief_rec.get("whatsapp_queued", 0),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "app_public_base_url": (os.getenv("APP_PUBLIC_URL") or "").rstrip("/"),
     }

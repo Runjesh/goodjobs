@@ -7,10 +7,14 @@ import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
 import { readApiError } from '../../utils/apiPersist';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
+import DonationCompletionDrawer from '../../components/Donor/DonationCompletionDrawer';
+import type { DonationCompletionSnapshot } from '../../utils/donationCompletion';
+import { finishDonationWorkflow, handleDonationThanked } from '../../utils/donationWorkflow';
 import './Fundraising.css';
 
 const Fundraising: React.FC = () => {
-  const { campaigns, transactions, addTransaction, donors, deleteCampaign } = useStore();
+  const { campaigns, transactions, addTransaction, donors, deleteCampaign, ngoDetails, complianceDocs } = useStore();
+  const eightyGRegNo = complianceDocs.find(d => /80g/i.test(d.type || d.name || ''))?.registration_number ?? '';
   const campBreakdownScrollRef = useRef<HTMLDivElement>(null);
   const campBreakdownVirtualizer = useVirtualizer({
     count: campaigns.length,
@@ -70,6 +74,7 @@ const Fundraising: React.FC = () => {
   });
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [donationData, setDonationData] = useState({ amount: 1000, donorId: donors[0]?.id || '', campaignId: campaigns[0]?.id || '' });
+  const [donationCompletion, setDonationCompletion] = useState<DonationCompletionSnapshot | null>(null);
   const [mandate, setMandate] = useState({ donorId: donors[0]?.id || '', amount: 500, frequency: 'monthly', upiId: '', campaign: campaigns[0]?.id || '' });
 
   const [showEditCamp, setShowEditCamp] = useState(false);
@@ -266,57 +271,26 @@ const Fundraising: React.FC = () => {
     const campaign = campaigns.find(c => c.id === donationData.campaignId);
     if (!donor || !campaign) return;
 
-    // 1b. Persist transaction (DB or memory backend)
     try {
-      const txRes = await apiFetch('/finance/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          donorId: donor.id,
-          donorName: donor.name,
-          amount: Number(donationData.amount),
-          method: 'UPI AutoPay',
-          campaignId: campaign.id,
-          campaignTitle: campaign.title,
-          programmeId: campaign.id,
-        }),
+      const snap = await finishDonationWorkflow({
+        source: 'fundraising',
+        donorId: donor.id,
+        donorName: donor.name,
+        donorEmail: donor.email,
+        donorPhone: donor.phone,
+        donorPan: donor.pan,
+        amount: Number(donationData.amount),
+        method: 'UPI AutoPay',
+        campaignId: campaign.id,
+        campaignTitle: campaign.title,
+        programmeId: campaign.id,
+        description: campaign.title,
       });
-      if (!txRes.ok) throw new Error('tx');
-      const data = await txRes.json();
-      if (data?.transaction?.id) {
-        useStore.getState().addTransactionWithId(data.transaction);
-      }
-      // refresh campaigns so aggregates (raised/donorsCount) stay consistent
-      const r = await apiFetch('/fundraising/campaigns');
-      if (r.ok) {
-        const cData = await r.json();
-        if (Array.isArray(cData.campaigns)) useStore.getState().setCampaigns(cData.campaigns);
-      }
-      toast.success('Donation recorded.');
+      setDonationCompletion(snap);
+      setShowDonateModal(false);
     } catch {
       toast.error('Failed to record donation (backend not reachable).');
-      return;
     }
-
-    // 2. Trigger the Python FastAPI Agent backend (Donor Nurture)
-    try {
-      await apiFetch('/webhook/donation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event_type: "donation_received",
-          donor_id: donor.id,
-          donor_name: donor.name,
-          donation_amount: Number(donationData.amount),
-          preferred_language: "English"
-        })
-      });
-      console.log("Agent webhook triggered successfully.");
-    } catch (err) {
-      console.log("Note: FastAPI server not running on port 8000. Start it with `uvicorn api.main:app` to test the LangGraph agent integration.");
-    }
-
-    setShowDonateModal(false);
   };
 
   const [isZeroTouchLoading, setIsZeroTouchLoading] = useState(false);
@@ -960,6 +934,21 @@ const Fundraising: React.FC = () => {
       )}
 
       {/* ── Delete Confirm Modal ───────────────────────────────────── */}
+      {donationCompletion && (
+        <DonationCompletionDrawer
+          snapshot={donationCompletion}
+          donorPan={donors.find(d => d.id === donationCompletion.donorId)?.pan || ''}
+          ngoName={ngoDetails.name || 'GoodJobs NGO'}
+          ngoPan={ngoDetails.pan || ''}
+          eightyGRegNo={eightyGRegNo}
+          onActions={{
+            onClose: () => setDonationCompletion(null),
+            onSnapshotChange: setDonationCompletion,
+            onMarkThanked: () => handleDonationThanked(donationCompletion),
+          }}
+        />
+      )}
+
       {showDeleteCampConfirm && (
         <ModalOverlay onBackdropClick={() => setShowDeleteCampConfirm(false)}>
           <div

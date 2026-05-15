@@ -225,7 +225,17 @@ const DonorImpactPanel: React.FC<Props> = ({ donor, propensityScore }) => {
                   }}
                 >
                   <TrendingUp size={14} color="var(--color-success)" />
-                  <span style={{ fontWeight: 600, fontSize: '0.85rem', textTransform: 'capitalize' }}>{p.programLabel}</span>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontWeight: 600, fontSize: '0.85rem', textTransform: 'capitalize' }}>{p.programLabel}</span>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                      {p.beneficiariesMeasured} measured
+                      {p.avgImprovementPct > 0 && (
+                        <> · {p.avgImprovementPct.toFixed(0)}% avg improvement</>
+                      )}
+                      {p.sroiScore > 0 && <> · SROI {p.sroiScore.toFixed(1)}</>}
+                    </div>
+                  </div>
+                  <Users size={14} style={{ opacity: 0.5 }} />
                 </li>
               ))}
             </ul>

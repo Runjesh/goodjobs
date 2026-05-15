@@ -1002,6 +1002,7 @@ const Dashboard: React.FC = () => {
     } catch { return new Set(); }
   });
   const [briefLoading, setBriefLoading] = useState(true);
+  const [briefNarrative, setBriefNarrative] = useState('');
   const [lastRefresh,  setLastRefresh]  = useState<Date>(new Date());
   const [snoozed,      setSnoozed]      = useState<Set<string>>(new Set());
   const [woken,        setWoken]        = useState<Set<string>>(new Set());
@@ -1108,6 +1109,7 @@ const Dashboard: React.FC = () => {
         if (!cancelled) {
           setRibbonCards(ribbon);
           setHandledByAgents(Array.isArray(data.handled_by_agents) ? data.handled_by_agents : []);
+          setBriefNarrative(typeof data.brief_narrative === 'string' ? data.brief_narrative : '');
         }
         const mapped: PriorityItem[] = priorities.map((p: any, i: number) => {
           const pr = String(p.priority ?? '').toLowerCase();
@@ -1190,14 +1192,28 @@ const Dashboard: React.FC = () => {
     return off;
   }, []);
 
+  const filterForPreset = useCallback((items: PriorityItem[], preset: typeof layoutRole): PriorityItem[] => {
+    if (preset === 'ed') return items;
+    const pathOk = (path?: string) => {
+      const p = (path || '').toLowerCase();
+      if (preset === 'field') {
+        return !p || p.includes('program') || p.includes('task') || p.includes('mis') || p.includes('volunteer') || p === '/';
+      }
+      if (preset === 'programs') {
+        return !p || p.includes('program') || p.includes('grant') || p.includes('task') || p.includes('csr') || p === '/';
+      }
+      return true;
+    };
+    return items.filter(i => pathOk(i.path));
+  }, []);
+
   const allItems = useMemo(() => {
     void lifecycleTick;
-    // Pass auth `role` (not layout preset) so ED-only logic (clawback, grant T-7)
-    // fires only for actual ED users, regardless of dashboard preset.
     const store = deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets);
     const combined = [...taskItems, ...briefItems, ...store];
-    return combined.length === 0 ? getStaticFallback(layoutRole) : combined;
-  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets, lifecycleTick]);
+    const base = combined.length === 0 ? getStaticFallback(layoutRole) : combined;
+    return filterForPreset(base, layoutRole);
+  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets, lifecycleTick, filterForPreset, role]);
 
   const isSnoozedFn = useCallback((id: string) => !woken.has(id) && isSnoozed(id, snoozed), [snoozed, woken]);
 
@@ -1286,6 +1302,8 @@ const Dashboard: React.FC = () => {
         <FirstRunEmptyState />
       ) : (
         <DashboardActiveBody
+          layoutPreset={layoutRole}
+          briefNarrative={briefNarrative}
           briefLoading={briefLoading}
           ribbonCards={visibleRibbon}
           onRibbonDismiss={handleRibbonDismiss}
@@ -1313,7 +1331,15 @@ const Dashboard: React.FC = () => {
   );
 };
 
+const PRESET_FOCUS: Record<string, { title: string; subtitle: string }> = {
+  field: { title: 'Field officer view', subtitle: 'Visits, enrollments, and MIS capture first.' },
+  programs: { title: 'Programme manager view', subtitle: 'Beneficiaries, budgets, and grant delivery.' },
+  ed: { title: 'Executive view', subtitle: 'Funding, compliance, and org-wide priorities.' },
+};
+
 interface DashboardActiveBodyProps {
+  layoutPreset: import('../../context/AuthContext').DashboardPreset;
+  briefNarrative?: string;
   briefLoading: boolean;
   ribbonCards: BriefPriorityCard[];
   onRibbonDismiss: (card: BriefPriorityCard) => void;
@@ -1338,14 +1364,26 @@ interface DashboardActiveBodyProps {
 }
 
 const DashboardActiveBody: React.FC<DashboardActiveBodyProps> = ({
-  briefLoading, ribbonCards, onRibbonDismiss, handledByAgents,
+  layoutPreset, briefNarrative, briefLoading, ribbonCards, onRibbonDismiss, handledByAgents,
   allItems, urgentItems, attentionItems, wellItems, snoozedItems,
   yesterdayWins, quickActions, goingWellChips, showAllUrgent, setShowAllUrgent,
   handleSnooze, handleWake, navigate,
   beneficiariesCount, donorsCount, campaigns, complianceDocs,
 }) => {
+  const focus = PRESET_FOCUS[layoutPreset] ?? PRESET_FOCUS.ed;
+
   return (
     <>
+      <motion.div className="today-role-focus" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+        <strong>{focus.title}</strong>
+        <span>{focus.subtitle}</span>
+      </motion.div>
+      {briefNarrative && (
+        <motion.div className="today-brief-narrative" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <MessageCircle size={14} />
+          <p>{briefNarrative.split('\n').slice(0, 4).join(' ')}</p>
+        </motion.div>
+      )}
       <PrioritiesRibbon cards={ribbonCards} loading={briefLoading} onDismiss={onRibbonDismiss} />
 
       {handledByAgents.length > 0 && (
@@ -1414,7 +1452,7 @@ const DashboardActiveBody: React.FC<DashboardActiveBodyProps> = ({
         </div>
       </motion.div>
 
-      {/* ── Stats Row ────────────────────────────────────────────────── */}
+      {layoutPreset !== 'field' && (
       <motion.div className="today-stats" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
         <div className="today-stat-card" onClick={() => navigate('/programs')}>
           <Users size={18} className="today-stat-icon" />
@@ -1433,6 +1471,7 @@ const DashboardActiveBody: React.FC<DashboardActiveBodyProps> = ({
           <div><div className="today-stat-value">{complianceDocs.filter((d: any) => d.status === 'Valid').length || '—'}</div><div className="today-stat-label">Docs Current</div></div>
         </div>
       </motion.div>
+      )}
     </>
   );
 };

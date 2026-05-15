@@ -442,7 +442,70 @@ const HANDLERS: Handler[] = [
   // ── Morning brief / agent HQ summaries ─────────────────────────────────────
   {
     test: (_p, m) => m === 'GET' && _p.startsWith('/morning-brief'),
-    handle: () => jsonResponse({ priorities: [] }),
+    handle: () => jsonResponse({
+      priorities: [
+        {
+          id: 'wf-finance-classify',
+          title: '2 unclassified transactions from the last 2 days',
+          summary: 'Tag programme & FCRA category — then issue 80G receipts for income rows.',
+          priority: 'High',
+          category: 'Finance',
+          label: 'Classify now',
+          deep_link: '/finance?view=exceptions',
+        },
+        {
+          id: 'wf-programs-verify',
+          title: '1 new enrollment needs Aadhaar verification',
+          summary: 'Verify ID before the beneficiary counts in MIS.',
+          priority: 'High',
+          category: 'Programs',
+          label: 'Review docs',
+          deep_link: '/programs?tab=mis&filter=verify',
+        },
+      ],
+      handled_by_agents: [],
+      brief_narrative: 'Good morning! 2 enrollments need Aadhaar verification. Review Programs → Verify ID.',
+    }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/trigger/morning-brief',
+    handle: () => jsonResponse({ status: 'accepted', message: 'Morning brief agent triggered' }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/notifications/item',
+    handle: () => jsonResponse({ status: 'ok', source: 'memory' }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/team/invite',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const invites = Array.isArray(body.invites) ? body.invites : [];
+      return jsonResponse({ queued: invites.length, invites, source: 'memory' });
+    },
+  },
+  {
+    test: (p, m) => m === 'GET' && p === '/programs/field-checkins',
+    handle: () => jsonResponse({
+      checkins: [{ id: 'chk1', beneficiary: 'Sunita Bai', location: 'Pune, MH', program: 'Healthcare Camp', report_date: '2026-05-14' }],
+      map_configured: false,
+    }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/finance/tally/sync',
+    handle: () => jsonResponse({ status: 'ok', exported_vouchers: 12, synced_at: new Date().toISOString(), integration: 'tally_xml_stub' }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/finance/journal-entry',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const isIncome = String(body.entry_type || '').toLowerCase() === 'income';
+      return jsonResponse({
+        status: 'recorded',
+        event: { id: rid('fj'), ...body },
+        receipt_number: isIncome ? '80G/2025-26/DEMO/00042' : undefined,
+        fiscal_year: isIncome ? '2025-2026' : undefined,
+      });
+    },
   },
   {
     test: (p, m) => m === 'GET' && p === '/agent-hq/summary',
@@ -508,19 +571,25 @@ const HANDLERS: Handler[] = [
     handle: (_p, init) => {
       const body = readBody(init);
       const ids: string[] = Array.isArray(body.donor_ids) ? body.donor_ids : [];
-      return jsonResponse({
-        scores: ids.map(id => ({
-          donor_id: id,
-          score: Math.round(40 + Math.random() * 55),
-          band: Math.random() > 0.66 ? 'high' : Math.random() > 0.33 ? 'mid' : 'low',
-          next_action: 'Send a quarterly impact update',
-        })),
+      const scores: Record<string, number> = {};
+      ids.forEach((id, i) => {
+        scores[String(id)] = 35 + ((i * 17) % 55);
       });
+      return jsonResponse({ scores });
     },
   },
   {
     test: (p, m) => m === 'GET' && p.startsWith('/analytics/donor-propensity/'),
-    handle: () => jsonResponse({ score: 72, band: 'mid', drivers: ['Recency: 45 days', 'Channel: WhatsApp'], next_action: 'Send personalised impact note' }),
+    handle: (p) => {
+      const donorId = p.split('/').pop() || '0';
+      const base = 40 + (parseInt(donorId, 10) || 0) * 7 % 50;
+      return jsonResponse({
+        donor_id: donorId,
+        propensity_score: base,
+        recommendation: base > 70 ? 'High probability — personal outreach.' : 'Send regular impact updates.',
+        insights: { recency: '30 days ago', frequency: '5 gifts', monetary: '₹1,500 avg' },
+      });
+    },
   },
 
   // ── Gen-AI ─────────────────────────────────────────────────────────────────
@@ -610,6 +679,68 @@ const HANDLERS: Handler[] = [
   {
     test: (p, m) => m === 'POST' && p === '/finance/issue-receipt',
     handle: () => jsonResponse({ status: 'issued', receipt_number: '80G/2025-26/DEMO/00001', fiscal_year: '2025-2026' }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/finance/transactions',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const id = rid('trx');
+      return jsonResponse({
+        transaction: {
+          id,
+          donorId: body.donorId || 'd-new',
+          donorName: body.donorName || 'Donor',
+          amount: Number(body.amount) || 0,
+          method: body.method || 'UPI',
+          campaignId: body.campaignId || '',
+          campaignTitle: body.campaignTitle || 'General',
+          programmeId: body.programmeId || body.campaignId,
+          date: new Date().toISOString().slice(0, 10),
+          timestamp: Date.now(),
+        },
+      });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/public/donations',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const id = rid('trx');
+      const donorId = body.donor_email || rid('donor');
+      return jsonResponse({
+        ok: true,
+        ngo_name: 'GoodJobs NGO',
+        transaction: {
+          id,
+          donorId,
+          donorName: body.donor_name || 'Donor',
+          amount: Number(body.amount) || 0,
+          method: body.method || 'UPI',
+          campaignId: body.campaign_slug || '',
+          campaignTitle: body.cause || 'General Fund',
+          date: new Date().toISOString().slice(0, 10),
+          timestamp: Date.now(),
+        },
+      });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/crm/donors',
+    handle: (_p, init) => {
+      const body = readBody(init);
+      const id = rid('donor');
+      return jsonResponse({
+        donor: {
+          id,
+          name: body.name || 'Donor',
+          type: body.type || 'Individual',
+          pan: body.pan || '',
+          email: body.email,
+          phone: body.phone,
+          tags: body.tags || [],
+        },
+      });
+    },
   },
   {
     test: (p, m) => m === 'POST' && p === '/gen-ai/donor-outreach-draft',

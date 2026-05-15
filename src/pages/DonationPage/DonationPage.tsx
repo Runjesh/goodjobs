@@ -3,13 +3,19 @@ import { useParams } from 'react-router-dom';
 import { ShieldCheck, Heart, IndianRupee, QrCode, CreditCard, Smartphone } from 'lucide-react';
 import toast from 'react-hot-toast';
 import './DonationPage.css';
-import { apiFetch } from '../../api/client';
+import { useStore } from '../../store/useStore';
+import DonationCompletionDrawer from '../../components/Donor/DonationCompletionDrawer';
+import type { DonationCompletionSnapshot } from '../../utils/donationCompletion';
+import { finishDonationWorkflow, handleDonationThanked } from '../../utils/donationWorkflow';
 
 const presets = [500, 1000, 2000, 5000, 10000];
 const causes = ['General Fund', 'Education', 'Healthcare', 'Women Empowerment'];
 
 const DonationPage: React.FC = () => {
   const { campaignSlug } = useParams();
+  const { ngoDetails, complianceDocs } = useStore();
+  const eightyGRegNo = complianceDocs.find(d => /80g/i.test(d.type || d.name || ''))?.registration_number ?? '';
+
   const [amount, setAmount] = useState(1000);
   const [customAmount, setCustomAmount] = useState('');
   const [payMethod, setPayMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
@@ -28,7 +34,7 @@ const DonationPage: React.FC = () => {
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [step, setStep] = useState<'form' | 'success'>('form');
   const [processing, setProcessing] = useState(false);
-  const [txId, setTxId] = useState<string | null>(null);
+  const [completion, setCompletion] = useState<DonationCompletionSnapshot | null>(null);
   const [ngoName, setNgoName] = useState<string>('GoodJobs NGO');
 
   const finalAmount = customAmount ? Number(customAmount) : amount;
@@ -38,41 +44,35 @@ const DonationPage: React.FC = () => {
     if (!isAnonymous && (!name || !email)) { toast.error('Please fill in your name and email.'); return; }
     setProcessing(true);
     try {
-      const res = await apiFetch('/public/donations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          campaign_slug: campaignSlug || null,
-          cause,
-          donor_name: isAnonymous ? 'Anonymous' : name,
-          donor_email: isAnonymous ? '' : email,
-          pan: pan || null,
-          amount: finalAmount,
-          method: payMethod === 'upi' ? 'UPI' : payMethod === 'card' ? 'Card' : 'NetBanking',
-          phone: isAnonymous ? null : phone || null,
-          address_line1: isAnonymous ? null : addressLine1 || null,
-          city: isAnonymous ? null : city || null,
-          state: isAnonymous ? null : stateField || null,
-          pincode: isAnonymous ? null : pincode || null,
-          company_name: isAnonymous ? null : companyName || null,
-          message: message || null,
-          consent_impact_updates: consentImpact,
-        }),
+      const snap = await finishDonationWorkflow({
+        source: 'public',
+        donorName: isAnonymous ? 'Anonymous' : name.trim(),
+        donorEmail: isAnonymous ? undefined : email,
+        donorPhone: isAnonymous ? undefined : phone,
+        donorPan: pan || undefined,
+        amount: finalAmount,
+        method: payMethod === 'upi' ? 'UPI' : payMethod === 'card' ? 'Card' : 'NetBanking',
+        campaignSlug: campaignSlug || null,
+        cause,
+        campaignTitle: cause,
+        description: message || cause,
+        isAnonymous,
+        addressLine1: isAnonymous ? null : addressLine1 || null,
+        city: isAnonymous ? null : city || null,
+        state: isAnonymous ? null : stateField || null,
+        pincode: isAnonymous ? null : pincode || null,
+        companyName: isAnonymous ? null : companyName || null,
+        message: message || null,
+        consentImpact,
       });
-      if (!res.ok) throw new Error('donate');
-      const data = await res.json();
-      setTxId(data?.transaction?.id || null);
-      setNgoName(data?.ngo_name || 'GoodJobs NGO');
+      setNgoName(useStore.getState().ngoDetails.name || 'GoodJobs NGO');
+      setCompletion(snap);
       setStep('success');
     } catch {
       toast.error('Failed to record donation.');
     } finally {
       setProcessing(false);
     }
-  };
-
-  const handleDownload80G = () => {
-    toast('80G certificate download is not available yet.', { icon: '📄' });
   };
 
   if (step === 'success') {
@@ -83,18 +83,21 @@ const DonationPage: React.FC = () => {
           <div className="success-icon">🎉</div>
           <h1>Thank you, {thanksName}!</h1>
           <p>Your donation of <strong>₹{finalAmount.toLocaleString()}</strong> to {ngoName} has been recorded.</p>
-          <div className="success-details">
-            <div className="success-detail-row"><span>Transaction ID</span><span style={{ fontFamily: 'monospace' }}>{txId || '—'}</span></div>
-            <div className="success-detail-row"><span>Campaign</span><span>{campaignSlug || 'General Fund'}</span></div>
-            <div className="success-detail-row"><span>Fund</span><span>{cause}</span></div>
-            {!isAnonymous && companyName ? (
-              <div className="success-detail-row"><span>Donor on record</span><span>{companyName} · {name}</span></div>
-            ) : null}
-            <div className="success-detail-row"><span>80G Deduction</span><span style={{ color: 'var(--color-success)', fontWeight: 600 }}>₹{Math.round(finalAmount * 0.5).toLocaleString()} eligible</span></div>
-          </div>
-          <button className="btn btn-primary" style={{ width: '100%', marginTop: '1.5rem' }} onClick={handleDownload80G}>
-            <ShieldCheck size={16} /> Download 80G Certificate
-          </button>
+          {completion && (
+            <DonationCompletionDrawer
+              variant="inline"
+              snapshot={completion}
+              donorPan={pan}
+              ngoName={ngoName || ngoDetails.name || 'GoodJobs NGO'}
+              ngoPan={ngoDetails.pan || ''}
+              eightyGRegNo={eightyGRegNo}
+              onActions={{
+                onClose: () => setCompletion(null),
+                onSnapshotChange: setCompletion,
+                onMarkThanked: () => handleDonationThanked(completion),
+              }}
+            />
+          )}
           <p style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--color-text-tertiary)', textAlign: 'center' }}>
             {isAnonymous
               ? 'Anonymous gifts are receipted per NGO policy — contact the organisation if you need documentation.'
@@ -138,13 +141,11 @@ const DonationPage: React.FC = () => {
                 <span style={{ color: 'var(--color-text-tertiary)' }}>Campaign stats not configured</span>
               </div>
               <div style={{ background: '#e2e8f0', height: 8, borderRadius: 999, overflow: 'hidden', marginTop: '0.5rem' }}>
-                <div style={{ width: '0%', height: '100%', background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', borderRadius: 999 }}></div>
+                <div style={{ width: '0%', height: '100%', background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', borderRadius: 999 }} />
               </div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-tertiary)', marginTop: '0.25rem' }}>—</div>
             </div>
           </div>
 
-          {/* UPI QR */}
           <div className="upi-qr-box">
             <QrCode size={64} color="var(--color-primary)" />
             <div>
@@ -159,7 +160,6 @@ const DonationPage: React.FC = () => {
           <form onSubmit={handleDonate}>
             <h3 style={{ marginBottom: '1.5rem', fontSize: '1.25rem' }}>Make a Donation</h3>
 
-            {/* Amount presets */}
             <div className="amount-label">Select Amount</div>
             <div className="amount-presets">
               {presets.map(p => (
@@ -179,7 +179,6 @@ const DonationPage: React.FC = () => {
               style={{ marginTop: '0.75rem', marginBottom: '1.5rem' }}
             />
 
-            {/* Cause */}
             <div className="input-group" style={{ marginBottom: '1rem' }}>
               <label className="input-label">Donate Towards</label>
               <select className="input-field" value={cause} onChange={e => setCause(e.target.value)}>
@@ -187,7 +186,6 @@ const DonationPage: React.FC = () => {
               </select>
             </div>
 
-            {/* Donor info */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label className="input-label">Full Name</label>
@@ -244,13 +242,12 @@ const DonationPage: React.FC = () => {
               <label htmlFor="anon" style={{ fontSize: '0.875rem' }}>Donate anonymously</label>
             </div>
 
-            {/* Payment Method */}
             <div className="amount-label">Payment Method</div>
             <div className="payment-methods">
               {[{ id: 'upi', label: 'UPI', icon: <Smartphone size={18} /> }, { id: 'card', label: 'Card', icon: <CreditCard size={18} /> }, { id: 'netbanking', label: 'Net Banking', icon: <IndianRupee size={18} /> }].map(m => (
                 <button key={m.id} type="button"
                   className={`payment-method-btn ${payMethod === m.id ? 'active' : ''}`}
-                  onClick={() => setPayMethod(m.id as any)}>
+                  onClick={() => setPayMethod(m.id as 'upi' | 'card' | 'netbanking')}>
                   {m.icon} {m.label}
                 </button>
               ))}
@@ -274,5 +271,9 @@ const DonationPage: React.FC = () => {
     </div>
   );
 };
+
+function div({ className, children, style }: { className?: string; children?: React.ReactNode; style?: React.CSSProperties }) {
+  return <div className={className} style={style}>{children}</div>;
+}
 
 export default DonationPage;

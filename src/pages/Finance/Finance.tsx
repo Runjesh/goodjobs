@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { IndianRupee, RefreshCw, FileText, Download, AlertCircle, ArrowUpRight, Plus, X, Bot, Globe, Tag, PackageOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
+import { generate80GReceiptPdf, nextReceiptNumber } from '../../utils/donationReceiptPdf';
+import DonationCompletionDrawer from '../../components/Donor/DonationCompletionDrawer';
+import type { DonationCompletionSnapshot } from '../../utils/donationCompletion';
+import { finishDonationWorkflow, handleDonationThanked } from '../../utils/donationWorkflow';
 import PermissionGate from '../../components/Auth/PermissionGate';
 import './Finance.css';
 import { apiFetch, getApiBaseUrl } from '../../api/client';
@@ -13,27 +16,6 @@ import { programIdFromName } from '../../utils/programFinance';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
 import { resolvePersistedJournalEntryId } from '../../utils/journalEntryId';
-
-// ── Persistent receipt sequence (Feature 2) ──────────────────────────────────
-// Counter stored in localStorage so it never resets on refresh.
-// Returns the next formatted receipt number and advances the counter.
-const RECEIPT_SEQ_KEY = 'goodjobs.receipt_seq.v1';
-function nextReceiptNumber(ngoName: string): string {
-  let seq = 1;
-  try {
-    const raw = localStorage.getItem(RECEIPT_SEQ_KEY);
-    seq = raw ? (parseInt(raw, 10) + 1) : 1;
-    localStorage.setItem(RECEIPT_SEQ_KEY, String(seq));
-  } catch { /* ignore */ }
-  const fy = (() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = now.getMonth() + 1;
-    return m >= 4 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
-  })();
-  const prefix = ngoName.replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase() || 'NGO';
-  return `${prefix}/80G/${fy}/${String(seq).padStart(5, '0')}`;
-}
 
 // ── Pure-JS ZIP creator (STORE/no-compression) ───────────────────────────────
 // Builds a valid ZIP binary in memory without any external library dependency.
@@ -130,124 +112,6 @@ function createZip(files: Array<{ name: string; content: string }>): Uint8Array 
   return result;
 }
 
-// ── 80G receipt PDF generator ─────────────────────────────────────────────────
-function generate80GReceiptPdf(opts: {
-  receiptNo: string;
-  donorName: string;
-  donorPan: string;
-  amount: number;
-  date: string;
-  description: string;
-  ngoName: string;
-  ngoPan: string;
-  eighty_g_no: string;
-}): jsPDF {
-  const amountWords = (n: number): string => {
-    if (n === 0) return 'Zero';
-    const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-    const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-    const cvt = (x: number): string => {
-      if (x < 20) return ones[x];
-      if (x < 100) return tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
-      if (x < 1000) return ones[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' + cvt(x % 100) : '');
-      if (x < 100000) return cvt(Math.floor(x / 1000)) + ' Thousand' + (x % 1000 ? ' ' + cvt(x % 1000) : '');
-      return cvt(Math.floor(x / 100000)) + ' Lakh' + (x % 100000 ? ' ' + cvt(x % 100000) : '');
-    };
-    return cvt(Math.round(n)) + ' Only';
-  };
-
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const W = 210;
-  const M = 18;
-  let y = 16;
-
-  // Border
-  doc.setDrawColor(60, 60, 60);
-  doc.setLineWidth(0.6);
-  doc.rect(10, 10, W - 20, 277);
-
-  // NGO name
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.setTextColor(15, 118, 110); // teal-700
-  doc.text(opts.ngoName, W / 2, y, { align: 'center' });
-  y += 7;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(60, 60, 60);
-  doc.text('80G Donation Receipt — Section 80G, Income Tax Act 1961', W / 2, y, { align: 'center' });
-  y += 5;
-  doc.text(
-    `80G Cert No: ${opts.eighty_g_no || 'N/A'}   |   NGO PAN: ${opts.ngoPan || 'N/A'}`,
-    W / 2, y, { align: 'center' }
-  );
-  y += 4;
-  doc.setDrawColor(180, 180, 180);
-  doc.line(M, y, W - M, y);
-  y += 7;
-
-  // Fields — two-column grid
-  const labelW = 38;
-  const col2 = W / 2 + 3;
-  const lh = 7;
-  const field = (label: string, value: string, x: number, yy: number) => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(80, 80, 80);
-    doc.text(label + ':', x, yy);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(20, 20, 20);
-    doc.text(value, x + labelW, yy);
-  };
-
-  field('Receipt No', opts.receiptNo, M, y);
-  field('Date', opts.date, col2, y);
-  y += lh;
-  field('Donor Name', opts.donorName, M, y);
-  field('Donor PAN', opts.donorPan || 'N/A', col2, y);
-  y += lh;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(15, 118, 110);
-  doc.text(`Amount: Rs. ${Number(opts.amount).toLocaleString('en-IN')}`, M, y);
-  y += lh;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(60, 60, 60);
-  field('In words', amountWords(opts.amount), M, y);
-  y += lh;
-  field('Purpose', opts.description || 'Donation', M, y);
-  y += 6;
-
-  doc.setDrawColor(200, 200, 200);
-  doc.line(M, y, W - M, y);
-  y += 7;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(70, 70, 70);
-  const note = 'This receipt is issued for the donation received and qualifies for tax deduction under Section 80G of the Income Tax Act, 1961.';
-  const noteLines = doc.splitTextToSize(note, W - 2 * M);
-  doc.text(noteLines, M, y);
-  y += (noteLines.length * 5) + 14;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(40, 40, 40);
-  doc.text(`For ${opts.ngoName}`, M, y);
-  y += 18;
-  doc.line(M, y, M + 55, y);
-  y += 4;
-  doc.text('Authorised Signatory', M, y);
-  y += 8;
-  doc.setFontSize(7.5);
-  doc.setTextColor(150, 150, 150);
-  doc.text('Computer-generated receipt. No physical signature required.', M, y);
-
-  return doc;
-}
-
 const Finance: React.FC = () => {
   const grantBudgetHeads = useStore(s => s.grantBudgetHeads);
   const journalEntries   = useStore(s => s.journalEntries);
@@ -336,13 +200,7 @@ const Finance: React.FC = () => {
   // Dashboard clawback-risk links navigate here with ?filter=clawback&grantId=<id>
   // so the matching grant is highlighted in the grants section.
   const [highlightGrantId, setHighlightGrantId] = useState<string | null>(null);
-  const [receiptPrompt, setReceiptPrompt] = useState<null | {
-    donorId: string;
-    donorName: string;
-    amount: number;
-    receiptNo?: string;
-    description: string;
-  }>(null);
+  const [donationCompletion, setDonationCompletion] = useState<DonationCompletionSnapshot | null>(null);
 
   // ── Feature 5: bulk receipt generation ───────────────────────────────────
   const [bulkReceiptBusy, setBulkReceiptBusy] = useState(false);
@@ -681,13 +539,22 @@ const Finance: React.FC = () => {
     });
 
     if (entryToSave.type === 'Income' && entryToSave.donorId) {
-      setReceiptPrompt({
+      const linkedDonor = donors.find(d => d.id === entryToSave.donorId);
+      const snap = await finishDonationWorkflow({
+        source: 'finance',
         donorId: entryToSave.donorId,
-        donorName: entryToSave.receiptDonorName || entryToSave.donorId,
+        donorName: entryToSave.receiptDonorName || linkedDonor?.name || 'Donor',
+        donorPan: entryToSave.receiptDonorPan || linkedDonor?.pan,
+        donorEmail: linkedDonor?.email,
+        donorPhone: linkedDonor?.phone,
         amount: Number(entryToSave.amount) || 0,
-        receiptNo,
+        method: 'Journal',
+        programmeId: entryToSave.programmeId,
         description: entryToSave.description,
+        existingTransactionId: `je-${id}`,
+        existingReceiptNumber: receiptNo,
       });
+      setDonationCompletion(snap);
     } else if (entryToSave.type === 'Income' && receiptNo) {
       const doc = generate80GReceiptPdf({
         receiptNo,
@@ -705,10 +572,13 @@ const Finance: React.FC = () => {
 
     const tagSuffix = tag ? ' · tagged' : '';
     const receiptSuffix = receiptNo ? ` · Receipt ${receiptNo}` : '';
-    if (source === 'backend') {
-      toast.success(`Journal entry recorded: ₹${Number(entryToSave.amount).toLocaleString()} (${entryToSave.type})${tagSuffix}${receiptSuffix}.`);
-    } else {
-      toast.success(`Saved locally: ₹${Number(entryToSave.amount).toLocaleString()} (${entryToSave.type})${tagSuffix}${receiptSuffix}. Will sync when the server is reachable.`);
+    const skipJournalToast = entryToSave.type === 'Income' && !!entryToSave.donorId;
+    if (!skipJournalToast) {
+      if (source === 'backend') {
+        toast.success(`Journal entry recorded: ₹${Number(entryToSave.amount).toLocaleString()} (${entryToSave.type})${tagSuffix}${receiptSuffix}.`);
+      } else {
+        toast.success(`Saved locally: ₹${Number(entryToSave.amount).toLocaleString()} (${entryToSave.type})${tagSuffix}${receiptSuffix}. Will sync when the server is reachable.`);
+      }
     }
     setShowEntryModal(false);
     setEntry({ description: '', amount: 1000, type: 'Expense', fund: 'General', grantId: '', budgetHeadId: '', donorId: '', programmeId: '', receiptDonorName: '', receiptDonorPan: '', category: '', isAdminOverhead: false });
@@ -2353,55 +2223,19 @@ const Finance: React.FC = () => {
         </ModalOverlay>
       )}
 
-      {receiptPrompt && (
-        <ModalOverlay onClose={() => setReceiptPrompt(null)}>
-          <div className="card" style={{ maxWidth: 420, width: '100%', padding: '1.25rem' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.05rem' }}>Generate 80G receipt?</h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem' }}>
-              Income of ₹{receiptPrompt.amount.toLocaleString('en-IN')} recorded for <strong>{receiptPrompt.donorName}</strong>.
-              Send the donor their tax receipt now.
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  const receiptNo = receiptPrompt.receiptNo || nextReceiptNumber(ngoName);
-                  const doc = generate80GReceiptPdf({
-                    receiptNo,
-                    donorName: receiptPrompt.donorName,
-                    donorPan: '',
-                    amount: receiptPrompt.amount,
-                    date: new Date().toLocaleDateString('en-IN'),
-                    description: receiptPrompt.description,
-                    ngoName,
-                    ngoPan: ngoDetails.pan || '',
-                    eighty_g_no: eightyGRegNo,
-                  });
-                  doc.save(`${receiptNo.replace(/\//g, '_')}.pdf`);
-                  toast.success('80G receipt downloaded.');
-                  setReceiptPrompt(null);
-                }}
-              >
-                <Download size={14} /> Download PDF
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={async () => {
-                  const id = receiptPrompt.donorId;
-                  const url = `${getApiBaseUrl()}/crm/donors/${encodeURIComponent(id)}/80g/${encodeURIComponent(receiptPrompt.receiptNo || 'latest')}.pdf`;
-                  window.open(url, '_blank');
-                  toast.success('Receipt opened — share with donor.');
-                  setReceiptPrompt(null);
-                }}
-              >
-                Email to donor
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={() => setReceiptPrompt(null)}>Later</button>
-            </div>
-          </div>
-        </ModalOverlay>
+      {donationCompletion && (
+        <DonationCompletionDrawer
+          snapshot={donationCompletion}
+          donorPan={donors.find(d => d.id === donationCompletion.donorId)?.pan || ''}
+          ngoName={ngoName}
+          ngoPan={ngoDetails.pan || ''}
+          eightyGRegNo={eightyGRegNo}
+          onActions={{
+            onClose: () => setDonationCompletion(null),
+            onSnapshotChange: setDonationCompletion,
+            onMarkThanked: () => handleDonationThanked(donationCompletion),
+          }}
+        />
       )}
     </div>
   );

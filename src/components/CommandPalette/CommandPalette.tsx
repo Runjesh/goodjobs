@@ -118,7 +118,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
     const out: { label: string; hint: string; path: string; icon: React.ComponentType<{ size?: number }> }[] = [];
     if (q.includes('receipt') || q.includes('80g')) {
       out.push(
-        { label: 'Generate receipt for recent donation', hint: 'Finance', path: '/finance', icon: ReceiptText },
+        { label: 'Issue 80G receipt (Finance)', hint: 'Income journal', path: '/finance?view=exceptions', icon: ReceiptText },
         { label: 'View donor CRM & outreach', hint: 'CRM', path: '/crm', icon: Heart },
       );
     }
@@ -312,8 +312,20 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
         setBusy(false);
       }
     }
-    if (s.startsWith('/donate ') || s.startsWith('/enroll ')) {
-      const rest = s.replace(/^\/(donate|enroll)\s+/i, '');
+    if (s.startsWith('/enroll')) {
+      pushHistory(s);
+      navigate('/programs?action=enroll');
+      onClose();
+      return true;
+    }
+    if (s.startsWith('/receipt') || s.startsWith('/80g')) {
+      pushHistory(s);
+      navigate('/finance?view=exceptions');
+      onClose();
+      return true;
+    }
+    if (s.startsWith('/donate ')) {
+      const rest = s.replace(/^\/donate\s+/i, '');
       const donor = parseDonorQuickCapture(`add donor ${rest}`);
       if (donor) {
         setConfirmDonor(donor);

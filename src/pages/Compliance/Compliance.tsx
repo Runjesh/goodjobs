@@ -1040,6 +1040,7 @@ const Compliance: React.FC = () => {
 
       {renewalDoc && (
         <ComplianceRenewalChecklist
+          docId={String(renewalDoc.id)}
           docName={renewalDoc.name}
           docType={renewalDoc.type}
           daysUntilExpiry={

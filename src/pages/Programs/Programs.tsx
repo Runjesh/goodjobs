@@ -27,6 +27,14 @@ import MisReviewQueue from '../../components/AgentHQ/MisReviewQueue';
 import { waIntakeRowsToMisIntents } from '../../utils/waIntakeToMis';
 import { createMisReviewOnServer, syncMisReviewsFromServer } from '../../utils/misReviewApi';
 import { applyMisApproval } from '../../utils/applyMisApproval';
+import EnrollCompletionDrawer from '../../components/Programs/EnrollCompletionDrawer';
+import {
+  applyPostEnrollWorkflow,
+  mergeTimelineIntoDetails,
+  type EnrollCompletionSnapshot,
+  type EnrollSourceContext,
+} from '../../utils/enrollCompletion';
+import '../../components/Programs/EnrollCompletionDrawer.css';
 
 const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize,phone,email,gender,dob,referral_source,referral_detail,vulnerability,id_doc_type,id_doc_ref,notes\nSita Devi,Health,"Pune, MH",false,4,+9198***01,,female,1992-03-01,shg,Block 4 AWC,"woman_headed,pwd",aadhaar_masked,****8212,\nRavi K,Education,Delhi,true,3,,,male,,camp,,,election_id,ABC1234567,\n';
 
@@ -167,6 +175,8 @@ const Programs: React.FC = () => {
     [misReviewIntents],
   );
   const [outcomeFor, setOutcomeFor] = useState<{ id: string; name: string; program: string } | null>(null);
+  const [enrollCompletion, setEnrollCompletion] = useState<EnrollCompletionSnapshot | null>(null);
+  const enrollSourceRef = useRef<EnrollSourceContext | undefined>(undefined);
   const { user } = useAuth();
   const { tier: effectiveTierVal, openUpgrade, inTrial } = useTier();
   const [upgradePromptOpen, setUpgradePromptOpen] = useState(false);
@@ -219,10 +229,14 @@ const Programs: React.FC = () => {
 
   const [benSort, setBenSort] = useState<'attention' | 'alpha'>('attention');
   const [activeProgFilter, setActiveProgFilter] = useState<string | null>(null);
-  const [benStatusFilter, setBenStatusFilter] = useState<'all' | 'inactive'>('all');
+  const [benStatusFilter, setBenStatusFilter] = useState<'all' | 'inactive' | 'verify'>('all');
   const [waServerIntake, setWaServerIntake] = useState<
     { id: string; summary?: string; created_at?: string; raw_text?: string; from_phone?: string }[]
   >([]);
+  const [fieldCheckins, setFieldCheckins] = useState<
+    { id: string; beneficiary: string; location: string; program?: string; report_date?: string; metric?: string }[]
+  >([]);
+  const [mapConfigured, setMapConfigured] = useState(false);
 
   // ── Deep-link query-param consumers ────────────────────────────────────────
   // Dashboard brief links navigate here with ?tab= and ?action= context params
@@ -237,8 +251,41 @@ const Programs: React.FC = () => {
     else if (tab === 'mis' || tab === 'outcomes') setActiveTab('mis'); // outcomes live inside MIS tab
     if (action === 'enroll' || action === 'mis') setShowModal(true);
     if (filter === 'inactive') setBenStatusFilter('inactive');
+    if (filter === 'verify') {
+      setActiveTab('mis');
+      setBenStatusFilter('verify');
+    }
+    const benId = params.get('beneficiary');
+    const focus = params.get('focus');
+    if (benId) {
+      const match = useStore.getState().beneficiaries.find(b => String(b.id) === benId);
+      if (match) {
+        if (action === 'outcome') {
+          setOutcomeFor({ id: match.id, name: match.name, program: match.program || 'General' });
+        }
+        if (focus === 'documents') {
+          setEditBenExtra(unpackBenDetails(match.details));
+          setEditBen(match);
+          setEditMissingFields(new Set(['doc_aadhaar', 'doc_photo', 'docs_skipped']));
+          setShowEditBen(true);
+        }
+      }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    const loadCheckins = async () => {
+      try {
+        const res = await apiFetch('/programs/field-checkins');
+        if (!res.ok) return;
+        const data = await res.json();
+        setFieldCheckins(Array.isArray(data.checkins) ? data.checkins : []);
+        setMapConfigured(Boolean(data.map_configured));
+      } catch { /* ignore */ }
+    };
+    void loadCheckins();
+  }, [misReviewIntents.length]);
+
   // Server-side WhatsApp MIS intake + flush IndexedDB enrolment queue when back online
   useEffect(() => {
     const pull = async () => {
@@ -376,6 +423,26 @@ const Programs: React.FC = () => {
     }
   }
 
+  const finishEnrollWorkflow = (
+    f: EnrollFormData,
+    beneficiaryId: string,
+    beneficiary: { id: string; name: string; program: string; location: string; aadhaar: boolean; familySize: number; details?: Record<string, unknown> },
+  ) => {
+    const source = enrollSourceRef.current;
+    enrollSourceRef.current = undefined;
+    const snap = applyPostEnrollWorkflow({
+      form: f,
+      beneficiaryId,
+      beneficiary,
+      source,
+      upsertTask: useStore.getState().upsertTaskByIntent,
+      updateBeneficiary: useStore.getState().updateBeneficiary,
+    });
+    setShowModal(false);
+    setEnrollCompletion(snap);
+    toast.success(`${f.name.trim()} enrolled — choose your next step →`, { duration: 3500 });
+  };
+
   const handleSectionedEnroll = async (f: EnrollFormData) => {
     if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
     if (expectsRealBackend() && isDemoAuthToken(getAccessToken())) {
@@ -397,9 +464,14 @@ const Programs: React.FC = () => {
         /* IndexedDB unavailable */
       }
       addBeneficiary(payload);
-      void logEnrollmentConsentToRegistry(f, undefined);
-      toast.success(`${payload.name} queued — will sync when you are back online.`);
-      setShowModal(false);
+      const created = useStore.getState().beneficiaries[0];
+      void logEnrollmentConsentToRegistry(f, created?.id);
+      if (created) {
+        finishEnrollWorkflow(f, created.id, created);
+      } else {
+        toast.success(`${payload.name} queued — will sync when you are back online.`);
+        setShowModal(false);
+      }
       return;
     }
     try {
@@ -430,15 +502,18 @@ const Programs: React.FC = () => {
         useStore.getState().setBeneficiaries([serverBen, ...after]);
       }
       void logEnrollmentConsentToRegistry(f, beneficiaryId);
-      toast.success(`${payload.name} enrolled in ${payload.program}!`);
-      setShowModal(false);
+      finishEnrollWorkflow(f, beneficiaryId, serverBen);
     } catch (err) {
       if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
       if (allowLocalPersistFallback()) {
         addBeneficiary(payload);
         void logEnrollmentConsentToRegistry(f, undefined);
-        toast.success(`${payload.name} enrolled (saved locally — sync when backend is back).`);
-        setShowModal(false);
+        const created = useStore.getState().beneficiaries.find(b => b.name === payload.name && b.program === payload.program);
+        if (created) finishEnrollWorkflow(f, created.id, created);
+        else {
+          toast.success(`${payload.name} enrolled (saved locally — sync when backend is back).`);
+          setShowModal(false);
+        }
       } else {
         toast.error(err instanceof Error ? err.message : 'Could not enroll beneficiary.');
       }
@@ -704,10 +779,16 @@ const Programs: React.FC = () => {
     [inactiveMap, beneficiaries],
   );
 
+  const unverifiedAadhaarCount = useMemo(
+    () => beneficiaries.filter(b => !b.aadhaar).length,
+    [beneficiaries],
+  );
+
   const sortedBeneficiaries = useMemo(() => {
     let list = [...beneficiaries];
     if (activeProgFilter) list = list.filter(b => b.program === activeProgFilter);
     if (benStatusFilter === 'inactive') list = list.filter(b => isInactive(b.id));
+    if (benStatusFilter === 'verify') list = list.filter(b => !b.aadhaar);
     const withScore = list.map(b => {
       const d = b.details || {};
       let score = 0;
@@ -1029,14 +1110,30 @@ const Programs: React.FC = () => {
                             const patch: Partial<typeof match> = {};
                             if (ex.location && !match.location) patch.location = ex.location;
                             if (ex.program && !match.program) patch.program = ex.program;
-                            if (Object.keys(patch).length) {
+                            patch.details = mergeTimelineIntoDetails(match.details, [{
+                              at: new Date().toISOString(),
+                              type: 'field_mis',
+                              text: intent.narrative,
+                            }]);
+                            if (Object.keys(patch).length > 1 || patch.details) {
                               updateBeneficiary(match.id, patch);
-                              toast.success(`MIS approved and ${Object.keys(patch).join(', ')} updated for ${match.name}.`);
+                              toast.success(`MIS approved and timeline updated for ${match.name}.`);
                             } else {
                               toast.success(`MIS submission confirmed for ${match.name}.`);
                             }
                           } else {
-                            toast('No matching beneficiary found. Use the ✎ Edit button to link or create a record.', { icon: 'ℹ️', duration: 5000 });
+                            enrollSourceRef.current = {
+                              misIntentId: intent.id,
+                              fieldNote: intent.narrative,
+                            };
+                            setForm(prev => ({
+                              ...prev,
+                              name: ex.beneficiary || '',
+                              program: ex.program || programs[0] || '',
+                              location: ex.location || '',
+                            }));
+                            setShowModal(true);
+                            toast('No match yet — complete enrollment to link this field report.', { icon: 'ℹ️', duration: 5000 });
                             return;
                           }
                           void applyMisApproval(intent, 'approved');
@@ -1096,6 +1193,14 @@ const Programs: React.FC = () => {
                     style={{ color: benStatusFilter === 'inactive' ? '#DC2626' : undefined }}
                   >
                     <Clock size={11} /> Inactive {inactiveCount > 0 && `(${inactiveCount})`}
+                  </button>
+                  <button
+                    className={`ben-sort-btn ${benStatusFilter === 'verify' ? 'active' : ''}`}
+                    onClick={() => setBenStatusFilter(prev => prev === 'verify' ? 'all' : 'verify')}
+                    title="Aadhaar not yet verified"
+                    style={{ color: benStatusFilter === 'verify' ? '#D97706' : undefined }}
+                  >
+                    Verify ID {unverifiedAadhaarCount > 0 && `(${unverifiedAadhaarCount})`}
                   </button>
                 </div>
                 <div className="ben-sort-toggle">
@@ -1298,13 +1403,23 @@ const Programs: React.FC = () => {
           <div className="card-header"><h3 className="card-title">Geo-Tagged Field Activity</h3></div>
           <div className="card-body">
             <div style={{ height: '180px', background: 'linear-gradient(135deg, #e2e8f0, #f1f5f9)', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.875rem', border: '1px dashed var(--color-border)' }}>
-              🗺️ Map not configured
+              {mapConfigured ? '🗺️ Map provider connected' : '🗺️ Set MAPBOX_TOKEN for live map'}
+              {fieldCheckins.length > 0 ? ` · ${fieldCheckins.length} visit(s)` : ''}
             </div>
             <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '1rem' }}>Recent Check-ins</h4>
             <div className="field-visit-list">
-              <div style={{ padding: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-                No check-ins yet.
-              </div>
+              {fieldCheckins.length === 0 ? (
+                <div style={{ padding: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                  No check-ins yet — approve field MIS with a location.
+                </div>
+              ) : (
+                fieldCheckins.slice(0, 8).map(c => (
+                  <div key={c.id} style={{ padding: '0.65rem 0', borderBottom: '1px solid var(--color-border)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{c.beneficiary}</div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>📍 {c.location}</div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -1324,8 +1439,44 @@ const Programs: React.FC = () => {
           programs={programs}
           existingBeneficiaries={beneficiaries.length > 0 ? beneficiaries : initialBeneficiaries}
           initialProgram={programs[0]}
-          onClose={() => setShowModal(false)}
+          onClose={() => { enrollSourceRef.current = undefined; setShowModal(false); }}
           onSubmit={handleSectionedEnroll}
+        />
+      )}
+
+      {enrollCompletion && (
+        <EnrollCompletionDrawer
+          snapshot={enrollCompletion}
+          onActions={{
+            onClose: () => setEnrollCompletion(null),
+            onLogVisit: () => {
+              setEffortForm(prev => ({
+                ...prev,
+                programme: enrollCompletion.program,
+                staffName: prev.staffName || '',
+              }));
+              setEnrollCompletion(null);
+              setShowLogEffort(true);
+            },
+            onUploadDocuments: () => {
+              const ben = useStore.getState().beneficiaries.find(b => b.id === enrollCompletion.beneficiaryId);
+              if (ben) {
+                setEditBenExtra(unpackBenDetails(ben.details));
+                setEditBen(ben);
+                setEditMissingFields(new Set(['doc_aadhaar', 'doc_photo', 'docs_skipped']));
+                setShowEditBen(true);
+              }
+              setEnrollCompletion(null);
+            },
+            onRecordOutcome: () => {
+              setOutcomeFor({
+                id: enrollCompletion.beneficiaryId,
+                name: enrollCompletion.beneficiaryName,
+                program: enrollCompletion.program,
+              });
+              setEnrollCompletion(null);
+            },
+          }}
         />
       )}
       {/* eslint-disable-next-line no-constant-binary-expression -- legacy enroll modal retained but disabled */}

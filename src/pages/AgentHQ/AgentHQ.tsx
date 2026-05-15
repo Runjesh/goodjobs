@@ -1038,13 +1038,16 @@ const AgentHQ: React.FC = () => {
           <button
             className="btn btn-secondary"
             onClick={async () => {
-              toast('Triggering Board Briefing Agent...', { icon: '🤖' });
+              toast('Running Morning Brief Agent…', { icon: '🌅' });
               try {
-                const res = await apiFetch('/trigger/board-brief', { method: 'POST' });
-                if (!res.ok) toast.error('Failed to trigger board brief.');
-                else toast.success('Board briefing triggered.');
+                const res = await apiFetch('/trigger/morning-brief', { method: 'POST' });
+                if (!res.ok) toast.error('Failed to run morning brief.');
+                else {
+                  toast.success('Morning brief queued — Today page and field WhatsApp will update.');
+                  window.dispatchEvent(new Event('goodjobs:brief-invalidate'));
+                }
               } catch {
-                toast.error('Failed to trigger board brief (backend not reachable).');
+                toast.error('Failed to run morning brief (backend not reachable).');
               }
             }}
           >

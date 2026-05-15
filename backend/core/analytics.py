@@ -60,6 +60,39 @@ def detect_anomalies(data: List[float], threshold_z: float = 2.0) -> List[int]:
             
     return anomalies
 
+def donor_rfm_from_transactions(transactions: List[Dict[str, Any]], donor_id: str) -> Dict[str, Any]:
+    """Build RFM inputs for one donor from transaction rows."""
+    from datetime import datetime, timezone
+
+    did = str(donor_id)
+    rows = [
+        t for t in transactions
+        if str(t.get("donor_id") or "") == did and float(t.get("amount") or 0) > 0
+    ]
+    if not rows:
+        return {"days_since_last_gift": 365, "total_gifts_count": 0, "average_gift_amount": 0}
+
+    def _tx_date(t: Dict[str, Any]) -> datetime:
+        raw = t.get("transaction_date") or t.get("date") or t.get("created_at")
+        if isinstance(raw, datetime):
+            return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            return datetime.now(timezone.utc)
+
+    rows.sort(key=_tx_date, reverse=True)
+    latest = _tx_date(rows[0])
+    now = datetime.now(timezone.utc)
+    days_since = max(0, int((now - latest).total_seconds() / 86400))
+    amounts = [float(t.get("amount") or 0) for t in rows]
+    return {
+        "days_since_last_gift": days_since,
+        "total_gifts_count": len(rows),
+        "average_gift_amount": int(sum(amounts) / max(1, len(amounts))),
+    }
+
+
 def calculate_propensity_score(donor_history: Dict[str, Any]) -> int:
     """
     Calculates probability (0-100) of donation in the next 30 days.

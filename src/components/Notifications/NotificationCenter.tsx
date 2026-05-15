@@ -60,13 +60,29 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
   const resolveRoute = (n: Notification): string =>
     n.action_route || notificationTasksHref(n);
 
-  const snooze = (id: string, ms: number) => {
+  const snooze = async (id: string, ms: number) => {
+    const hours = ms / (60 * 60 * 1000);
     setNotifications(prev => prev.map(x => x.id === id ? { ...x, snoozed_until: Date.now() + ms } : x));
+    try {
+      const res = await apiFetch('/notifications/item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_id: id, action: 'snooze', snooze_hours: hours }),
+      });
+      if (!res.ok) throw new Error('snooze');
+    } catch { /* local state still applies in demo */ }
     toast(`Snoozed for ${SNOOZE_OPTIONS.find(o => o.ms === ms)?.label ?? 'a while'}.`, { icon: '⏰' });
   };
 
-  const dismiss = (id: string) => {
+  const dismiss = async (id: string) => {
     setNotifications(prev => prev.filter(x => x.id !== id));
+    try {
+      await apiFetch('/notifications/item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notification_id: id, action: 'dismiss' }),
+      });
+    } catch { /* ignore */ }
   };
 
   const markAllRead = async () => {
