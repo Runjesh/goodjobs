@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { CheckCircle2, Clock, Lock, Wallet } from 'lucide-react';
 import { useStore } from '../../store/useStore';
@@ -18,7 +18,13 @@ const STATUS_META: Record<GrantTranche['status'], { label: string; tone: string;
 };
 
 const GrantTrancheCard: React.FC<Props> = ({ grantId }) => {
-  const tranches = useStore(s => s.grantTranches.filter(t => t.grantId === grantId).sort((a,b) => a.number - b.number));
+  const allTranches = useStore(s => s.grantTranches);
+  const tranches = useMemo(
+    () => allTranches
+      .filter(t => String(t.grantId) === String(grantId))
+      .sort((a, b) => a.number - b.number),
+    [allTranches, grantId],
+  );
   const release  = useStore(s => s.releaseGrantTranche);
   const upsert   = useStore(s => s.upsertGrantTranche);
 

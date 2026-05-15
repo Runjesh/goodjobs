@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -194,6 +194,7 @@ const COL_TITLES: Record<string, string> = {
 
 const GrantDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const cardId = id ? String(id) : '';
   const navigate = useNavigate();
   const { csrCards, updateCSRCard, moveCSRCard } = useStore();
   const grantBudgetHeads = useStore(s => s.grantBudgetHeads);
@@ -281,28 +282,34 @@ const GrantDetail: React.FC = () => {
   // on `serverHydratedFor` so the initial mount can't PUT stale cache before
   // we've seen what the server already has.
   useEffect(() => {
-    if (!card) return;
-    if (hydratedForId !== String(card.id)) return;
+    if (!card || !cardId) return;
+    if (hydratedForId !== cardId) return;
     saveGrantState(card.id, state);
-    if (serverHydratedFor !== String(card.id)) return;
+    if (serverHydratedFor !== cardId) return;
 
-    const cardKey = String(card.id);
-    setSyncStatus('saving');
+    const putSig = JSON.stringify(sanitiseGrantStateForServer(state));
+    if (putSig === lastPutSigRef.current) return;
+
     const handle = window.setTimeout(async () => {
       try {
         const payload = sanitiseGrantStateForServer(state);
-        const res = await apiFetch(`/csr/cards/${encodeURIComponent(cardKey)}/grant-state`, {
+        const res = await apiFetch(`/csr/cards/${encodeURIComponent(cardId)}/grant-state`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ state: payload }),
         });
-        setSyncStatus(res.ok ? 'saved' : 'error');
+        if (res.ok) {
+          lastPutSigRef.current = putSig;
+          setSyncStatus('saved');
+        } else {
+          setSyncStatus('error');
+        }
       } catch {
         setSyncStatus('error');
       }
     }, 800);
     return () => window.clearTimeout(handle);
-  }, [state, card, hydratedForId, serverHydratedFor]);
+  }, [state, card, cardId, hydratedForId, serverHydratedFor]);
 
   // Server-extracted parser rows + cache state. We start with the local
   // mock so the UI is never blank, then replace once the server responds.
@@ -320,6 +327,13 @@ const GrantDetail: React.FC = () => {
   // is gated on this so the previous card's parser rows can never be written
   // into the new card's deliverables/budget/reports during navigation.
   const [parserHydratedFor, setParserHydratedFor] = useState<string | null>(null);
+  const lastProjectedSigRef = useRef('');
+  const lastPutSigRef = useRef('');
+
+  useEffect(() => {
+    lastProjectedSigRef.current = '';
+    lastPutSigRef.current = '';
+  }, [cardId]);
 
   // Fetch the cached extraction on mount; if the server has nothing yet,
   // POST once to generate the heuristic/LLM rows so the user sees a real
@@ -399,47 +413,38 @@ const GrantDetail: React.FC = () => {
   // Whenever the parser decisions/edits change OR a fresh extraction lands,
   // mirror the approved/edited rows into the active-stage tabs so users
   // don't have to manually re-enter deliverables/budget/reports.
+  const parserProjectionSig = useMemo(
+    () => JSON.stringify({
+      rows: parserRows,
+      decisions: state.parserDecisions,
+      edits: state.parserEdits,
+    }),
+    [parserRows, state.parserDecisions, state.parserEdits],
+  );
+
   useEffect(() => {
-    if (!card) return;
-    const cardKey = String(card.id);
-    // Both gates are required: state must be hydrated for this card, AND
-    // the parser fetch must have settled for this card. Otherwise we could
-    // mirror the previous card's rows into this card's tabs.
-    if (hydratedForId !== cardKey) return;
-    if (parserHydratedFor !== cardKey) return;
+    if (!card || !cardId) return;
+    if (hydratedForId !== cardId) return;
+    if (parserHydratedFor !== cardId) return;
+    const sig = `${cardId}:${parserProjectionSig}`;
+    if (lastProjectedSigRef.current === sig) return;
+    // Mark handled before scheduling state work so rapid effect re-fires cannot loop.
+    lastProjectedSigRef.current = sig;
+
     setState(prev => {
       const next = projectParserRowsIntoState(parserRows, prev.parserDecisions, prev.parserEdits, prev);
-      // Avoid a no-op state churn that would re-trigger the debounced PUT.
       if (
         next.deliverables === prev.deliverables &&
         next.budget === prev.budget &&
         next.reports === prev.reports
       ) return prev;
-      // Cheap deep-equal: if all three arrays serialize to the same JSON,
-      // skip the update (projection produces new array refs every call).
       const sameDel = JSON.stringify(next.deliverables) === JSON.stringify(prev.deliverables);
       const sameBud = JSON.stringify(next.budget) === JSON.stringify(prev.budget);
       const sameRep = JSON.stringify(next.reports) === JSON.stringify(prev.reports);
       if (sameDel && sameBud && sameRep) return prev;
       return next;
     });
-  }, [parserRows, state.parserDecisions, state.parserEdits, card, hydratedForId, parserHydratedFor]);
-
-  if (!card) {
-    return (
-      <div className="grant-detail">
-        <div className="grant-empty">
-          <AlertCircle size={36} />
-          <h2>Grant not found</h2>
-          <p>This grant may have been removed or is loading. Try the CSR pipeline.</p>
-          <div className="grant-empty-actions">
-            <button className="btn btn-secondary" onClick={() => navigate(-1)}><ArrowLeft size={14} /> Back</button>
-            <button className="btn btn-primary" onClick={() => navigate('/csr')}>Open CSR Pipeline</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  }, [parserProjectionSig, card, cardId, hydratedForId, parserHydratedFor, parserRows]);
 
   const healthMetrics = useMemo(() => {
     if (!card) return null;
@@ -461,6 +466,22 @@ const GrantDetail: React.FC = () => {
     complianceGrantLinks, complianceDocs, programGrantLinks,
     beneficiaries, customPrograms, beneficiaryOutcomes,
   ]);
+
+  if (!card) {
+    return (
+      <div className="grant-detail">
+        <div className="grant-empty">
+          <AlertCircle size={36} />
+          <h2>Grant not found</h2>
+          <p>This grant may have been removed or is loading. Try the CSR pipeline.</p>
+          <div className="grant-empty-actions">
+            <button className="btn btn-secondary" onClick={() => navigate(-1)}><ArrowLeft size={14} /> Back</button>
+            <button className="btn btn-primary" onClick={() => navigate('/csr')}>Open CSR Pipeline</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const reportStubId = grantReports.find(r => r.id === `rpt-grant-${card?.id}`)?.id;
 

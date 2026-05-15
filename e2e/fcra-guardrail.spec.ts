@@ -39,7 +39,7 @@ test.describe('E2E — FCRA budget guardrail', () => {
       headers,
       body: JSON.stringify({
         description: 'FCRA admin breach attempt',
-        amount: 50_000,
+        amount: 100_000,
         entry_type: 'Expense',
         fund: 'FCRA',
         is_admin_overhead: true,

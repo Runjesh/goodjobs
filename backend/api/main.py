@@ -2584,7 +2584,7 @@ def public_record_donation(body: PublicDonationRequest, user: Optional[TokenUser
     Records a donor+transaction in memory (demo) or DB when configured.
     This intentionally does NOT trigger HITL/agent actions automatically.
     """
-    ngo_id = user.ngo_id if user else "public_ngo"
+    ngo_id = user.ngo_id if user else _demo_default_ngo_id()
     ngo_name = user.ngo_name if user else "GoodJobs NGO"
     donor_name = (body.donor_name or "Anonymous").strip()[:200]
     donor_email = (body.donor_email or "").strip().lower()[:255]
@@ -5479,6 +5479,8 @@ def post_finance_journal_entry(body: FinanceJournalEntryRequest, current_user: T
         "donor_id": body.donor_id,
         "programme_id": body.programme_id,
         "receipt_number": receipt_number,
+        "is_admin_overhead": bool(body.is_admin_overhead),
+        "category": body.category,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     FINANCE_EVENTS_MEM_BY_NGO.setdefault(current_user.ngo_id, []).append(event)

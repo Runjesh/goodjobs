@@ -10,36 +10,24 @@ test.describe('E2E — agent intent execution', () => {
       'Content-Type': 'application/json',
     };
 
-    const queueRes = await fetch(`${API}/intent/queue?status=queued&limit=20`, { headers });
-    expect(queueRes.ok).toBeTruthy();
-    const before = ((await queueRes.json()).items as { id: string }[]) || [];
-
     const directive = encodeURIComponent('Generate all pending receipts');
     const routeRes = await fetch(`${API}/intent/process?directive=${directive}`, {
       method: 'POST',
       headers,
     });
-    expect([200, 201, 202].includes(routeRes.status)).toBeTruthy();
+    expect(routeRes.ok).toBeTruthy();
+    const routed = await routeRes.json();
+    const queueId = routed.queue_id as string | undefined;
+    expect(queueId).toBeTruthy();
 
-    const afterRes = await fetch(`${API}/intent/queue?status=queued&limit=20`, { headers });
-    const after = ((await afterRes.json()).items as { id: string; directive?: string }[]) || [];
-    const candidate =
-      after.find(i => !before.some(b => b.id === i.id))
-      || after.find(i => /receipt/i.test(i.directive || ''));
-
-    if (!candidate) {
-      test.skip(true, 'No queued intent available in this environment');
-      return;
-    }
-
-    const decision = await fetch(`${API}/intent/queue/${candidate.id}/decision`, {
+    const decision = await fetch(`${API}/intent/queue/${queueId}/decision`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ decision: 'approved' }),
     });
     expect(decision.ok).toBeTruthy();
 
-    const execute = await fetch(`${API}/intent/queue/${candidate.id}/execute`, {
+    const execute = await fetch(`${API}/intent/queue/${queueId}/execute`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ dry_run: false }),
@@ -48,6 +36,6 @@ test.describe('E2E — agent intent execution', () => {
 
     await login(page, 'admin@indiango.org');
     await page.goto('/agent-hq');
-    await expect(page.getByText(/Agent HQ|Intent/i).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/GoodJobs Copilot|Agent HQ/i).first()).toBeVisible({ timeout: 15_000 });
   });
 });

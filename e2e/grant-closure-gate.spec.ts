@@ -19,22 +19,16 @@
  * The active demo seed card with `col: 'live'` is id 5 (Mahindra Finance —
  * see Layout.tsx seedDemoCsrIfDev + backend _seed_memory_csr).
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { dismissWelcomeIfPresent, login } from './helpers/auth';
 
 const CARD_ID = '5';
 const STORAGE_KEY = `goodjobs.grant.${CARD_ID}.v1`;
 
-async function loginAsEd(page: Page) {
-  await page.goto('/login');
-  await page.getByLabel('Work Email').fill('admin@indiango.org');
-  await page.getByLabel('Password').fill('demo1234');
-  await page.getByRole('button', { name: /Sign In/i }).click();
-  await expect(page).not.toHaveURL(/\/login/, { timeout: 20_000 });
-}
-
 test.describe('Grant closure gate', () => {
   test('Active → Begin Closure → cannot close until all 6 ticked; Closed UI persists across reload', async ({ page }) => {
-    await loginAsEd(page);
+    await login(page, 'admin@indiango.org');
+    await dismissWelcomeIfPresent(page);
     await page.goto(`/grants/${CARD_ID}`);
 
     // We're on an Active grant — header shows the "Begin Closure" CTA.
