@@ -7,7 +7,7 @@ So every GenAI function has a deterministic fallback when OPENAI_API_KEY is miss
 
 from __future__ import annotations
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Optional
 
 try:
     from langchain_core.prompts import ChatPromptTemplate
@@ -129,3 +129,56 @@ def draft_annual_report(ngo_name: str, impact_data: Dict[str, Any], ngo_id: Opti
         return chain.invoke({"ngo_name": ngo_name, "impact_data": str(impact_data)})
     except Exception:
         return f"{ngo_name}: Annual report draft unavailable (LLM error)."
+
+
+def draft_donor_outreach_whatsapp(
+    *,
+    donor_name: str,
+    first_name: str,
+    total_given: float,
+    propensity_score: Optional[int] = None,
+    program_hint: str = "",
+    ngo_name: str = "our organisation",
+    ngo_id: Optional[str] = None,
+) -> str:
+    """Draft a short WhatsApp stewardship / re-engagement message for one donor."""
+    band = "high" if (propensity_score or 0) >= 80 else "mid" if (propensity_score or 0) >= 50 else "low"
+    llm = _get_llm(ngo_id)
+    ctx = (
+        f"Donor: {donor_name}. Lifetime giving approx ₹{total_given:,.0f}. "
+        f"Propensity band: {band}. Programme hint: {program_hint or 'general fund'}."
+    )
+    if llm is None or ChatPromptTemplate is None or StrOutputParser is None:
+        if band == "high":
+            return (
+                f"Namaste {first_name}! 🙏 Your past support through {ngo_name} helped us reach more families. "
+                f"We are planning the next phase of our {program_hint or 'programmes'} — would love to share a short update. "
+                "Reply if you would like to hear more."
+            )
+        if band == "mid":
+            return (
+                f"Hi {first_name}, this is {ngo_name}. Your gift made a real difference on the ground. "
+                f"Sharing a quick impact note from our {program_hint or 'recent work'} — hope it brings a smile. 🌱"
+            )
+        return (
+            f"Namaste {first_name}! We have been continuing our work and your earlier support still matters. "
+            "Would love to reconnect when you have a moment."
+        )
+    try:
+        prompt = ChatPromptTemplate.from_template(
+            "Write a warm WhatsApp message (under 320 chars, no markdown) from an Indian NGO to a donor. "
+            "Use Namaste or Hi. Context: {ctx}. Sign off briefly as the NGO team. "
+            "Do not ask for money in the first line; focus on impact and relationship."
+        )
+        chain = prompt | llm | StrOutputParser()
+        return chain.invoke({"ctx": ctx})[:500]
+    except Exception:
+        return draft_donor_outreach_whatsapp(
+            donor_name=donor_name,
+            first_name=first_name,
+            total_given=total_given,
+            propensity_score=propensity_score,
+            program_hint=program_hint,
+            ngo_name=ngo_name,
+            ngo_id=None,
+        )

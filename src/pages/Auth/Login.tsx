@@ -88,6 +88,11 @@ const Login: React.FC = () => {
 
   // Direct demo login — one click, no email/password needed
   const handleDemoLogin = (roleId: string) => {
+    if (expectsRealBackend()) {
+      toast.error('Explore Demo is offline-only. Sign in with the email and password you registered.');
+      setLoginMode('signin');
+      return;
+    }
     const acc = demoAccounts.find(a => a.role === roleId)!;
     doLogin(roleId, acc, null);
   };
@@ -213,20 +218,24 @@ const Login: React.FC = () => {
               >
                 Sign In
               </button>
+              {!expectsRealBackend() && (
               <button
                 className={`auth-mode-tab ${loginMode === 'demo' ? 'active' : ''}`}
                 onClick={() => setLoginMode('demo')}
               >
                 <Sparkles size={13} /> Explore Demo
               </button>
+              )}
             </div>
 
-            {loginMode === 'demo' ? (
+            {loginMode === 'demo' && !expectsRealBackend() ? (
               /* ── Demo mode: direct role cards ──────────────────── */
               <div className="demo-role-section">
                 <div className="demo-sandbox-banner">
                   <Sparkles size={14} />
-                  <span>Sandbox environment — no real data, no account needed</span>
+                  <span>{expectsRealBackend()
+                    ? 'This deployment saves data to the database. Use Sign In with your registered account — Explore Demo does not persist.'
+                    : 'Sandbox environment — no real data, no account needed'}</span>
                 </div>
                 <div className="demo-role-grid">
                   {roles.map(role => {

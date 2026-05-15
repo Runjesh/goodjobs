@@ -28,9 +28,16 @@ from core.observability import init_sentry
 from jobs.lapse_detector import run_lapse_detection
 from jobs.scheduled_export import run_scheduled_exports
 from core.export_builder import build_ngo_export_zip
-from core.analytics import predict_revenue, detect_anomalies, calculate_propensity_score, suggest_campaign_goal, classify_fcra_transaction
+from core.analytics import (
+    predict_revenue,
+    detect_anomalies,
+    calculate_propensity_score,
+    suggest_campaign_goal,
+    classify_fcra_transaction,
+    match_donor_from_bank_line,
+)
 from agents.orchestrator import process_orchestration
-from core.gen_ai import summarize_conversations, analyze_sentiment, draft_annual_report
+from core.gen_ai import summarize_conversations, analyze_sentiment, draft_annual_report, draft_donor_outreach_whatsapp
 from core.intent_router import route_intent
 from fastapi.responses import Response, FileResponse
 from datetime import datetime, timezone, timedelta
@@ -115,6 +122,8 @@ DONOR_LIFECYCLE_MEM_BY_NGO: Dict[str, Dict[str, Dict[str, Any]]] = {}
 FINANCE_EVENTS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 NOTIFICATIONS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
 EXPORT_SCHEDULE_MEM_BY_NGO: Dict[str, Dict[str, Any]] = {}
+MIS_REVIEWS_MEM_BY_NGO: Dict[str, List[Dict[str, Any]]] = {}
+RECEIPT_SEQ_MEM_BY_NGO: Dict[str, int] = {}
 
 
 def _demo_default_ngo_id() -> str:
@@ -771,8 +780,11 @@ class BeneficiaryCreate(BaseModel):
     details: Optional[Dict[str, Any]] = None
 
 
+BENEFICIARY_ROLES = ("ed", "programs", "field")
+
+
 @app.get("/programs/beneficiaries", tags=["Programs"])
-def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "programs", "board"))):
+def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "programs", "field", "board"))):
     with db_conn() as conn:
         if conn is None:
             _seed_memory_beneficiaries(current_user.ngo_id)
@@ -808,7 +820,7 @@ def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "pro
 
 
 @app.post("/programs/beneficiaries", tags=["Programs"])
-def create_beneficiary(body: BeneficiaryCreate, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+def create_beneficiary(body: BeneficiaryCreate, current_user: TokenUser = Depends(require_role(*BENEFICIARY_ROLES))):
     with db_conn() as conn:
         if conn is None:
             _seed_memory_beneficiaries(current_user.ngo_id)
@@ -869,7 +881,7 @@ class BeneficiaryBulkImport(BaseModel):
 
 
 @app.post("/programs/beneficiaries/bulk", tags=["Programs"])
-def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUser = Depends(require_role(*BENEFICIARY_ROLES))):
     n = 0
     with db_conn() as conn:
         if conn is None:
@@ -919,7 +931,7 @@ def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUs
 
 
 @app.put("/programs/beneficiaries/{ben_id}", tags=["Programs"])
-def update_beneficiary(ben_id: str, body: BeneficiaryCreate, current_user: TokenUser = Depends(require_role("ed", "programs"))):
+def update_beneficiary(ben_id: str, body: BeneficiaryCreate, current_user: TokenUser = Depends(require_role(*BENEFICIARY_ROLES))):
     with db_conn() as conn:
         if conn is None:
             _seed_memory_beneficiaries(current_user.ngo_id)
@@ -4270,12 +4282,143 @@ def post_suggest_goal(cause: str, current_user: TokenUser = Depends(require_role
     ]
     return suggest_campaign_goal(cause, mock_history)
 
+def _fiscal_year_label(now: Optional[datetime] = None) -> str:
+    dt = now or datetime.now(timezone.utc)
+    y = dt.year
+    if dt.month < 4:
+        y -= 1
+    return f"{y}-{y + 1}"
+
+
+def _next_receipt_number(ngo_id: str, ngo_name: str) -> str:
+    fy = _fiscal_year_label()
+    seq = 1
+    with db_conn() as conn:
+        if conn is None:
+            key = f"{ngo_id}:{fy}"
+            seq = RECEIPT_SEQ_MEM_BY_NGO.get(key, 0) + 1
+            RECEIPT_SEQ_MEM_BY_NGO[key] = seq
+        else:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO ngo_receipt_sequences (ngo_id, fiscal_year, last_seq)
+                    VALUES (%s, %s, 1)
+                    ON CONFLICT (ngo_id, fiscal_year)
+                    DO UPDATE SET last_seq = ngo_receipt_sequences.last_seq + 1
+                    RETURNING last_seq
+                    """,
+                    (ngo_id, fy),
+                )
+                seq = int(cur.fetchone()[0])
+            except Exception:
+                key = f"{ngo_id}:{fy}"
+                seq = RECEIPT_SEQ_MEM_BY_NGO.get(key, 0) + 1
+                RECEIPT_SEQ_MEM_BY_NGO[key] = seq
+    slug = (ngo_name or "NGO")[:12].upper().replace(" ", "")
+    return f"80G/{fy}/{slug}/{seq:05d}"
+
+
+def _load_donors_for_match(ngo_id: str) -> List[Dict[str, Any]]:
+    with db_conn() as conn:
+        if conn is None:
+            return list(DONORS_MEM_BY_NGO.get(ngo_id, []))
+        cur = conn.cursor()
+        apply_ngo_session(cur, ngo_id)
+        cur.execute(
+            "SELECT id::text, name, email, phone FROM donors WHERE ngo_id = %s::uuid",
+            (ngo_id,),
+        )
+        return [{"id": r[0], "name": r[1], "email": r[2] or "", "phone": r[3] or ""} for r in cur.fetchall()]
+
+
 @app.post("/workflows/classify-transaction", tags=["Workflows"])
 def post_classify_tx(description: str, current_user: TokenUser = Depends(require_role("ed", "finance"))):
     """
-    AI Classifies an FCRA transaction.
+    AI classifies an FCRA/bank line and suggests a donor match when possible.
     """
-    return classify_fcra_transaction(description)
+    out = dict(classify_fcra_transaction(description))
+    donors = _load_donors_for_match(current_user.ngo_id)
+    match = match_donor_from_bank_line(description, donors)
+    if match:
+        out["suggested_donor_id"] = match.get("donor_id")
+        out["suggested_donor_name"] = match.get("donor_name")
+        out["donor_match_confidence"] = match.get("confidence")
+    if "donation" in (description or "").lower() or "upi" in (description or "").lower():
+        if out.get("category") == "General Welfare":
+            out["category"] = "Donation"
+            out["confidence"] = max(float(out.get("confidence") or 0), 0.75)
+    return out
+
+
+class IssueReceiptRequest(BaseModel):
+    journal_entry_id: Optional[str] = None
+    donor_id: Optional[str] = None
+    amount: Optional[float] = None
+    ngo_name: Optional[str] = None
+
+
+@app.post("/finance/issue-receipt", tags=["Finance"])
+def post_finance_issue_receipt(
+    body: IssueReceiptRequest,
+    current_user: TokenUser = Depends(require_role("ed", "finance")),
+):
+    """Allocate the next authoritative 80G receipt number for this NGO (per Indian FY)."""
+    ngo_name = (body.ngo_name or current_user.ngo_name or "NGO").strip()
+    receipt_number = _next_receipt_number(current_user.ngo_id, ngo_name)
+    if body.donor_id:
+        with db_conn() as conn:
+            if conn is not None:
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        UPDATE transactions
+                        SET receipt_generated = true,
+                            meta = COALESCE(meta, '{}'::jsonb) || %s::jsonb
+                        WHERE ngo_id = %s::uuid AND donor_id = %s::uuid
+                        """,
+                        (
+                            json.dumps({"receipt_number": receipt_number}),
+                            current_user.ngo_id,
+                            body.donor_id,
+                        ),
+                    )
+                except Exception:
+                    pass
+    return {
+        "status": "issued",
+        "receipt_number": receipt_number,
+        "journal_entry_id": body.journal_entry_id,
+        "fiscal_year": _fiscal_year_label(),
+    }
+
+
+class DonorOutreachDraftRequest(BaseModel):
+    donor_name: str
+    total_given: float = 0
+    propensity_score: Optional[int] = None
+    program_hint: str = ""
+
+
+@app.post("/gen-ai/donor-outreach-draft", tags=["GenAI"])
+def post_donor_outreach_draft(
+    body: DonorOutreachDraftRequest,
+    current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising")),
+):
+    first = (body.donor_name or "Friend").split()[0]
+    message = draft_donor_outreach_whatsapp(
+        donor_name=body.donor_name,
+        first_name=first,
+        total_given=float(body.total_given or 0),
+        propensity_score=body.propensity_score,
+        program_hint=body.program_hint,
+        ngo_name=current_user.ngo_name,
+        ngo_id=current_user.ngo_id,
+    )
+    return {"message": message, "channel": "whatsapp"}
+
 
 @app.post("/workflows/trigger-orchestration", tags=["Workflows"])
 def post_trigger_orchestration(event_type: str, data: Dict[str, Any], current_user: TokenUser = Depends(require_role("ed"))):
@@ -4520,6 +4663,18 @@ async def post_crm_outreach(
     }
 
 
+@app.post("/crm/outreach/email", tags=["CRM"])
+async def post_crm_outreach_email(
+    body: CrmOutreachRequest,
+    background_tasks: BackgroundTasks,
+    current_user: TokenUser = Depends(require_role("ed", "crm")),
+):
+    """Email outreach uses the same pipeline as WhatsApp (mode=send, channel=email)."""
+    body.channel = "email"
+    body.mode = "send"
+    return await post_crm_outreach(body, background_tasks, current_user)
+
+
 @app.get("/crm/outreach/{outreach_id}/status", tags=["CRM"])
 def get_outreach_status(outreach_id: str, current_user: TokenUser = Depends(get_current_user)):
     """
@@ -4670,6 +4825,216 @@ def post_whatsapp_field_code(
     current_user: TokenUser = Depends(require_role("ed")),
 ):
     return {"org_code": ensure_org_code_for_ngo(current_user.ngo_id, preferred=preferred)}
+
+
+class MisReviewCreateRequest(BaseModel):
+    narrative: str
+    extracted: Optional[Dict[str, Any]] = None
+    reporter_id: str = "field"
+    report_date: Optional[str] = None
+    source_id: Optional[str] = None
+
+
+class MisReviewDecideRequest(BaseModel):
+    status: str  # approved | edited | dismissed | rejected
+    extracted: Optional[Dict[str, Any]] = None
+    budget_increment: Optional[float] = None
+
+
+def _mis_review_api_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    ex = row.get("extracted") or {}
+    if isinstance(ex, str):
+        try:
+            ex = json.loads(ex)
+        except Exception:
+            ex = {}
+    return {
+        "id": row.get("id"),
+        "narrative": row.get("narrative") or "",
+        "extracted": ex,
+        "reporter_id": row.get("reporter_id") or "field",
+        "report_date": row.get("report_date"),
+        "status": row.get("status") or "pending",
+        "created_at": row.get("created_at"),
+        "decided_at": row.get("decided_at"),
+    }
+
+
+@app.get("/programs/mis-reviews", tags=["Programs"])
+def list_mis_reviews(
+    status: Optional[str] = "pending",
+    current_user: TokenUser = Depends(require_role("ed", "programs", "field")),
+):
+    rows: List[Dict[str, Any]] = []
+    with db_conn() as conn:
+        if conn is None:
+            rows = list(MIS_REVIEWS_MEM_BY_NGO.get(current_user.ngo_id, []))
+        else:
+            cur = conn.cursor()
+            apply_ngo_session(cur, current_user.ngo_id)
+            try:
+                if status:
+                    cur.execute(
+                        """
+                        SELECT id, narrative, extracted, reporter_id, report_date, status, created_at, decided_at
+                        FROM mis_field_reviews
+                        WHERE ngo_id = %s AND status = %s
+                        ORDER BY created_at DESC LIMIT 100
+                        """,
+                        (current_user.ngo_id, status),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id, narrative, extracted, reporter_id, report_date, status, created_at, decided_at
+                        FROM mis_field_reviews
+                        WHERE ngo_id = %s
+                        ORDER BY created_at DESC LIMIT 100
+                        """,
+                        (current_user.ngo_id,),
+                    )
+                for r in cur.fetchall():
+                    rows.append({
+                        "id": r[0],
+                        "narrative": r[1],
+                        "extracted": r[2],
+                        "reporter_id": r[3],
+                        "report_date": r[4].isoformat() if hasattr(r[4], "isoformat") else r[4],
+                        "status": r[5],
+                        "created_at": r[6].isoformat() if hasattr(r[6], "isoformat") else r[6],
+                        "decided_at": r[7].isoformat() if r[7] and hasattr(r[7], "isoformat") else r[7],
+                    })
+            except Exception:
+                rows = list(MIS_REVIEWS_MEM_BY_NGO.get(current_user.ngo_id, []))
+    if status:
+        rows = [r for r in rows if str(r.get("status")) == status]
+    return {"reviews": [_mis_review_api_row(r) for r in rows], "source": "memory" if not rows else "db"}
+
+
+@app.post("/programs/mis-reviews", tags=["Programs"])
+def create_mis_review(
+    body: MisReviewCreateRequest,
+    current_user: TokenUser = Depends(require_role("ed", "programs", "field")),
+):
+    rid = body.source_id or f"mis-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "id": rid,
+        "ngo_id": current_user.ngo_id,
+        "narrative": body.narrative[:8000],
+        "extracted": body.extracted or {},
+        "reporter_id": body.reporter_id,
+        "report_date": body.report_date or now[:10],
+        "status": "pending",
+        "created_at": now,
+        "decided_at": None,
+    }
+    with db_conn() as conn:
+        if conn is None:
+            lst = MIS_REVIEWS_MEM_BY_NGO.setdefault(current_user.ngo_id, [])
+            lst[:] = [r for r in lst if str(r.get("id")) != rid] + [row]
+        else:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO mis_field_reviews (id, ngo_id, narrative, extracted, reporter_id, report_date, status)
+                    VALUES (%s, %s, %s, %s::jsonb, %s, %s, 'pending')
+                    ON CONFLICT (id) DO UPDATE SET narrative = EXCLUDED.narrative, extracted = EXCLUDED.extracted
+                    """,
+                    (
+                        rid,
+                        current_user.ngo_id,
+                        row["narrative"],
+                        json.dumps(row["extracted"]),
+                        row["reporter_id"],
+                        row["report_date"],
+                    ),
+                )
+            except Exception:
+                lst = MIS_REVIEWS_MEM_BY_NGO.setdefault(current_user.ngo_id, [])
+                lst[:] = [r for r in lst if str(r.get("id")) != rid] + [row]
+    return {"review": _mis_review_api_row(row), "status": "created"}
+
+
+@app.post("/programs/mis-reviews/{review_id}/decide", tags=["Programs"])
+def decide_mis_review(
+    review_id: str,
+    body: MisReviewDecideRequest,
+    current_user: TokenUser = Depends(require_role("ed", "programs")),
+):
+    status = (body.status or "").strip().lower()
+    if status not in ("approved", "edited", "dismissed", "rejected"):
+        raise HTTPException(status_code=400, detail="status must be approved, edited, dismissed, or rejected")
+    now = datetime.now(timezone.utc).isoformat()
+    extracted = body.extracted or {}
+    budget_applied = 0.0
+    with db_conn() as conn:
+        if conn is None:
+            lst = MIS_REVIEWS_MEM_BY_NGO.get(current_user.ngo_id, [])
+            found = None
+            for r in lst:
+                if str(r.get("id")) == review_id:
+                    found = r
+                    break
+            if not found:
+                raise HTTPException(status_code=404, detail="Review not found")
+            if body.extracted:
+                found["extracted"] = {**(found.get("extracted") or {}), **extracted}
+            found["status"] = status
+            found["decided_at"] = now
+            extracted = found.get("extracted") or {}
+        else:
+            cur = conn.cursor()
+            apply_ngo_session(cur, current_user.ngo_id)
+            try:
+                patch = json.dumps(extracted) if extracted else None
+                if patch:
+                    cur.execute(
+                        """
+                        UPDATE mis_field_reviews
+                        SET status = %s, decided_at = NOW(), extracted = extracted || %s::jsonb
+                        WHERE id = %s AND ngo_id = %s
+                        RETURNING extracted
+                        """,
+                        (status, patch, review_id, current_user.ngo_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE mis_field_reviews
+                        SET status = %s, decided_at = NOW()
+                        WHERE id = %s AND ngo_id = %s
+                        RETURNING extracted
+                        """,
+                        (status, review_id, current_user.ngo_id),
+                    )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Review not found")
+                extracted = row[0] if isinstance(row[0], dict) else json.loads(row[0] or "{}")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=404, detail="Review not found")
+    if status in ("approved", "edited") and body.budget_increment and float(body.budget_increment) > 0:
+        budget_applied = float(body.budget_increment)
+    program = str((extracted or {}).get("program") or "")
+    log_audit(
+        ngo_id=current_user.ngo_id,
+        user_id=current_user.user_id,
+        action="mis_review.decide",
+        entity_type="mis_field_review",
+        entity_id=review_id,
+        new_values={"status": status, "budget_applied": budget_applied, "program": program},
+    )
+    return {
+        "status": status,
+        "review_id": review_id,
+        "extracted": extracted,
+        "budget_applied": budget_applied,
+        "decided_at": now,
+    }
 
 
 @app.get("/programs/mis-whatsapp-intake", tags=["Programs"])
@@ -4860,6 +5225,69 @@ def get_finance_uc(
     })
 
 
+def _compliance_renewal_notification_rows(ngo_id: str, cur: Any = None) -> List[Dict[str, Any]]:
+    """Compliance documents expiring within 45 days → high-priority notification cards."""
+    out: List[Dict[str, Any]] = []
+    today = datetime.now(timezone.utc).date()
+    rows: List[tuple] = []
+    if cur is not None:
+        try:
+            cur.execute(
+                """
+                SELECT id::text, name, doc_type, expiry_date
+                FROM compliance_documents
+                WHERE ngo_id = %s
+                  AND expiry_date IS NOT NULL
+                  AND expiry_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '45 days')
+                ORDER BY expiry_date ASC
+                LIMIT 10
+                """,
+                (ngo_id,),
+            )
+            rows = cur.fetchall()
+        except Exception:
+            rows = []
+    else:
+        for d in COMPLIANCE_DOCS_MEM_BY_NGO.get(ngo_id, []):
+            exp = d.get("expiry_date") or d.get("expiry")
+            if not exp:
+                continue
+            try:
+                exp_d = datetime.fromisoformat(str(exp)[:10]).date()
+            except Exception:
+                continue
+            days = (exp_d - today).days
+            if 0 <= days <= 45:
+                rows.append((str(d.get("id")), d.get("name"), d.get("doc_type"), exp_d))
+    for r in rows:
+        doc_id, name, doc_type, exp = r[0], r[1], r[2], r[3]
+        if isinstance(exp, datetime):
+            exp_d = exp.date()
+        elif hasattr(exp, "isoformat"):
+            exp_d = exp
+        else:
+            try:
+                exp_d = datetime.fromisoformat(str(exp)[:10]).date()
+            except Exception:
+                continue
+        days = (exp_d - today).days
+        label = name or doc_type or "Certificate"
+        doc_q = quote(str(doc_type or name or ""), safe="")
+        out.append({
+            "id": f"compliance-renewal:{doc_id}",
+            "kind": "compliance_doc",
+            "ref_id": str(doc_id),
+            "tasks_path": "/compliance",
+            "action_route": f"/compliance?alert=true&doc={doc_q}",
+            "type": "urgent" if days <= 30 else "info",
+            "title": "Compliance renewal",
+            "message": f"{label} expires in {days} days — start renewal workflow",
+            "time": f"{days}d left",
+            "read": False,
+        })
+    return out
+
+
 # ── Notifications (UI) ───────────────────────────────────────────────────────
 @app.get("/notifications", tags=["System"])
 def list_notifications(current_user: TokenUser = Depends(get_current_user)):
@@ -4882,13 +5310,22 @@ def list_notifications(current_user: TokenUser = Depends(get_current_user)):
                     "kind": kind,
                     "ref_id": ref_id,
                     "tasks_path": _tasks_focus_path(kind, ref_id),
+                    "action_route": _morning_brief_deep_link(
+                        kind, ref_id, (it.get("primary_action") or {}).get("route") or "/tasks",
+                        it.get("meta") if isinstance(it.get("meta"), dict) else {},
+                    ),
                     "type": "urgent" if it.get("priority") == "High" else ("agent" if kind in ("intent",) else "info"),
                     "title": it.get("pill") or kind.replace("_", " ").title(),
                     "message": it.get("title") or "",
                     "time": "Just now",
                     "read": False,
                 })
-            return {"notifications": items, "source": "memory"}
+            seen = {n["id"] for n in items}
+            for cn in _compliance_renewal_notification_rows(current_user.ngo_id):
+                if cn["id"] not in seen:
+                    items.append(cn)
+                    seen.add(cn["id"])
+            return {"notifications": items[:30], "source": "memory"}
 
         cur = conn.cursor()
         states = _db_load_inbox_states(cur, current_user.ngo_id)
@@ -4906,13 +5343,25 @@ def list_notifications(current_user: TokenUser = Depends(get_current_user)):
                 "kind": kind,
                 "ref_id": ref_id,
                 "tasks_path": _tasks_focus_path(kind, ref_id),
+                "action_route": _morning_brief_deep_link(
+                    kind, ref_id, (it.get("primary_action") or {}).get("route") or "/tasks",
+                    it.get("meta") if isinstance(it.get("meta"), dict) else {},
+                ),
                 "type": "urgent" if it.get("priority") == "High" else ("agent" if kind in ("intent",) else "info"),
                 "title": it.get("pill") or kind.replace("_", " ").title(),
                 "message": it.get("title") or "",
                 "time": "Just now",
                 "read": bool(st.get("resolved_at")),
             })
-        return {"notifications": items, "source": "db"}
+        seen = {n["id"] for n in items}
+        for cn in _compliance_renewal_notification_rows(current_user.ngo_id, cur):
+            nid = cn["id"]
+            st = states.get("notification", {}).get(nid, {})
+            cn["read"] = bool(st.get("resolved_at"))
+            if nid not in seen:
+                items.append(cn)
+                seen.add(nid)
+        return {"notifications": items[:30], "source": "db"}
 
 
 class NotificationActionRequest(BaseModel):
@@ -5216,6 +5665,165 @@ def post_intent_execute(
             r2 = cur.fetchone()
             raise HTTPException(status_code=500, detail={"id": r2[0], "status": r2[1], "error": str(e)})
 
+def _synthesize_workflow_priorities(user: TokenUser) -> List[Dict[str, Any]]:
+    """
+    Role-specific actionable jobs (not aggregate stats). Prepended to the brief
+    when the unified inbox is thin.
+    """
+    role = (user.role or "ed").lower()
+    ngo_id = user.ngo_id
+    cards: List[Dict[str, Any]] = []
+
+    def _card(
+        cid: str,
+        *,
+        title: str,
+        summary: str,
+        priority: str,
+        category: str,
+        label: str,
+        deep_link: str,
+        kind: str = "workflow",
+    ) -> Dict[str, Any]:
+        return {
+            "id": cid,
+            "priority": priority,
+            "category": category,
+            "title": title,
+            "summary": summary,
+            "primary_action": {"label": label, "route": deep_link},
+            "secondary_action": {"label": "Open Tasks inbox", "route": "/tasks"},
+            "tertiary_action": {"label": "Open Tasks inbox", "route": "/tasks"},
+            "ref": {"id": cid},
+            "kind": kind,
+            "meta": {"synthesized": True},
+            "tasks_deep_link_path": "/tasks",
+            "deep_link": deep_link,
+        }
+
+    with db_conn() as conn:
+        if conn is None:
+            if role == "finance":
+                cards.append(
+                    _card(
+                        "wf-finance-classify",
+                        title="Unclassified bank lines need you",
+                        summary="Review yesterday's donations in the exception queue and tag FCRA vs domestic.",
+                        priority="High",
+                        category="Finance",
+                        label="Classify now",
+                        deep_link="/finance?view=exceptions",
+                    )
+                )
+            elif role in ("programs", "field"):
+                cards.append(
+                    _card(
+                        "wf-programs-verify",
+                        title="New enrollments need document check",
+                        summary="Confirm Aadhaar / ID proofs for beneficiaries added in the last 48 hours.",
+                        priority="High",
+                        category="Programs",
+                        label="Review docs",
+                        deep_link="/programs?tab=mis&filter=verify",
+                    )
+                )
+            elif role in ("ed", "admin"):
+                cards.append(
+                    _card(
+                        "wf-ed-grant-burn",
+                        title="Grant burn rate needs a look",
+                        summary="Open Finance to see programmes trending above 80% utilisation this month.",
+                        priority="Medium",
+                        category="Executive",
+                        label="View burn rate",
+                        deep_link="/finance",
+                    )
+                )
+            return cards
+
+        cur = conn.cursor()
+        apply_ngo_session(cur, ngo_id)
+        try:
+            if role == "finance":
+                cur.execute(
+                    """
+                    SELECT COUNT(*)::int FROM transactions
+                    WHERE ngo_id = %s::uuid
+                      AND transaction_date >= (CURRENT_TIMESTAMP - INTERVAL '2 days')
+                      AND (requires_review = true OR COALESCE(meta->>'agent_category', '') = '')
+                    """,
+                    (ngo_id,),
+                )
+                n = int((cur.fetchone() or [0])[0] or 0)
+                if n > 0:
+                    cards.append(
+                        _card(
+                            "wf-finance-classify",
+                            title=f"{n} unclassified transaction{'s' if n != 1 else ''} from the last 2 days",
+                            summary="Tag programme & FCRA category inline — then issue 80G receipts for income rows.",
+                            priority="High",
+                            category="Finance",
+                            label="Classify now",
+                            deep_link="/finance?view=exceptions",
+                        )
+                    )
+            if role in ("programs", "field", "ed"):
+                cur.execute(
+                    """
+                    SELECT COUNT(*)::int FROM program_beneficiaries
+                    WHERE ngo_id = %s
+                      AND aadhaar = false
+                      AND created_at >= (CURRENT_TIMESTAMP - INTERVAL '2 days')
+                    """,
+                    (ngo_id,),
+                )
+                n = int((cur.fetchone() or [0])[0] or 0)
+                if n > 0:
+                    cards.append(
+                        _card(
+                            "wf-programs-verify",
+                            title=f"{n} new enrollment{'s' if n != 1 else ''} need Aadhaar verification",
+                            summary="Field staff enrolled beneficiaries — verify ID before they count in MIS.",
+                            priority="High",
+                            category="Programs",
+                            label="Review docs",
+                            deep_link="/programs?tab=mis&filter=verify",
+                        )
+                    )
+            if role in ("ed", "admin", "board"):
+                cur.execute(
+                    """
+                    SELECT name, doc_type, expiry_date
+                    FROM compliance_documents
+                    WHERE ngo_id = %s
+                      AND expiry_date IS NOT NULL
+                      AND expiry_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '45 days')
+                    ORDER BY expiry_date ASC
+                    LIMIT 1
+                    """,
+                    (ngo_id,),
+                )
+                row = cur.fetchone()
+                if row:
+                    doc_name, doc_type, exp = row[0], row[1], row[2]
+                    days = (exp.date() - datetime.now(timezone.utc).date()).days if hasattr(exp, "date") else 45
+                    cards.append(
+                        _card(
+                            "wf-compliance-renewal",
+                            title=f"{doc_name or doc_type or 'Certificate'} expires in {days} days",
+                            summary="Start the renewal checklist before auditors or funders ask.",
+                            priority="High" if days <= 30 else "Medium",
+                            category="Compliance",
+                            label="Start renewal workflow",
+                            deep_link=f"/compliance?alert=true&doc={quote(str(doc_name or doc_type or ''), safe='')}",
+                            kind="compliance_doc",
+                        )
+                    )
+        except Exception:
+            pass
+    return cards
+
+
 @app.get("/morning-brief", tags=["Agentic UX"])
 def get_morning_brief(
     current_user: TokenUser = Depends(
@@ -5223,8 +5831,9 @@ def get_morning_brief(
     ),
 ):
     """
-    Role-personalized brief + handled-by-agents section (inbox-derived).
+    Role-personalized action queue (workflow jobs + inbox-derived tasks).
     """
+    synthesized = _synthesize_workflow_priorities(current_user)
     inbox_all = get_inbox(current_user).get("items", [])
     allow = _brief_kinds_for_role(current_user.role)
     inbox = [it for it in inbox_all if allow is None or it.get("kind") in allow]
@@ -5273,6 +5882,13 @@ def get_morning_brief(
                 "deep_link": deep_link,
             }
         )
+    seen_titles = {str(x.get("title") or "").lower() for x in out}
+    for s in synthesized:
+        t = str(s.get("title") or "").lower()
+        if t and t not in seen_titles:
+            out.insert(0, s)
+            seen_titles.add(t)
+    out = out[:8]
     handled = _handled_by_agents_rows(current_user)
     return {
         "priorities": out,

@@ -12,8 +12,8 @@ import FormBuilder from '../../components/FormBuilder/FormBuilder';
 import TheoryOfChangeBuilder from '../../components/Programs/TheoryOfChangeBuilder';
 import '../../components/FormBuilder/FormBuilder.css';
 import './Programs.css';
-import { apiFetch } from '../../api/client';
-import { allowLocalPersistFallback, readApiError } from '../../utils/apiPersist';
+import { apiFetch, expectsRealBackend, getAccessToken } from '../../api/client';
+import { allowLocalPersistFallback, isDemoAuthToken, readApiError } from '../../utils/apiPersist';
 import { flushOfflineBeneficiaryCreates, enqueueOfflineBeneficiaryCreate } from '../../lib/offlineFieldQueue';
 import { parseCsvToRecords } from '../../utils/csvParse';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
@@ -23,6 +23,10 @@ import ProgramBudgetBar from '../../components/Programs/ProgramBudgetBar';
 import ProgramEffortSummary from '../../components/Programs/ProgramEffortSummary';
 import OutcomeForm from '../../components/Programs/OutcomeForm';
 import ProgramGrantsPanel from '../../components/Programs/ProgramGrantsPanel';
+import MisReviewQueue from '../../components/AgentHQ/MisReviewQueue';
+import { waIntakeRowsToMisIntents } from '../../utils/waIntakeToMis';
+import { createMisReviewOnServer, syncMisReviewsFromServer } from '../../utils/misReviewApi';
+import { applyMisApproval } from '../../utils/applyMisApproval';
 
 const BEN_CSV_TEMPLATE = 'name,program,location,aadhaar,familySize,phone,email,gender,dob,referral_source,referral_detail,vulnerability,id_doc_type,id_doc_ref,notes\nSita Devi,Health,"Pune, MH",false,4,+9198***01,,female,1992-03-01,shg,Block 4 AWC,"woman_headed,pwd",aadhaar_masked,****8212,\nRavi K,Education,Delhi,true,3,,,male,,camp,,,election_id,ABC1234567,\n';
 
@@ -242,7 +246,14 @@ const Programs: React.FC = () => {
         const res = await apiFetch('/programs/mis-whatsapp-intake');
         if (!res.ok) return;
         const data = await res.json();
-        setWaServerIntake(Array.isArray(data.items) ? data.items : []);
+        const items = Array.isArray(data.items) ? data.items : [];
+        setWaServerIntake(items);
+        const existing = new Set(useStore.getState().misReviewIntents.map(i => i.id));
+        for (const intent of waIntakeRowsToMisIntents(items, existing)) {
+          addMisReviewIntent(intent);
+          void createMisReviewOnServer(intent);
+          existing.add(intent.id);
+        }
       } catch {
         /* ignore */
       }
@@ -293,6 +304,15 @@ const Programs: React.FC = () => {
 
   useEffect(() => {
     refreshBeneficiaries();
+    void syncMisReviewsFromServer().then(remote => {
+      if (remote.length === 0) return;
+      const store = useStore.getState();
+      for (const r of remote) {
+        if (!store.misReviewIntents.some(i => i.id === r.id)) {
+          store.addMisReviewIntent(r);
+        }
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -358,6 +378,10 @@ const Programs: React.FC = () => {
 
   const handleSectionedEnroll = async (f: EnrollFormData) => {
     if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
+    if (expectsRealBackend() && isDemoAuthToken(getAccessToken())) {
+      toast.error('Explore Demo cannot save to the server. Sign in with your registered email and password.');
+      return;
+    }
     const payload = {
       name: f.name.trim(),
       program: f.program,
@@ -384,19 +408,13 @@ const Programs: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('create');
-      let beneficiaryId: string | undefined;
-      let created: { id?: string; name?: string; program?: string; location?: string; aadhaar?: boolean; familySize?: number; details?: Record<string, unknown> } | undefined;
-      try {
-        const data = await res.json();
-        created = data?.beneficiary;
-        beneficiaryId = created?.id != null ? String(created.id) : undefined;
-      } catch {
-        beneficiaryId = undefined;
-      }
-      if (!created?.id) throw new Error('create');
+      if (!res.ok) throw new Error(await readApiError(res));
+      const data = await res.json().catch(() => ({}));
+      const created = data?.beneficiary;
+      if (!created?.id) throw new Error('Server did not return a beneficiary id.');
+      const beneficiaryId = String(created.id);
       const serverBen = {
-        id: String(created.id),
+        id: beneficiaryId,
         name: created.name ?? payload.name,
         program: created.program ?? payload.program,
         location: created.location ?? payload.location,
@@ -413,17 +431,18 @@ const Programs: React.FC = () => {
       }
       void logEnrollmentConsentToRegistry(f, beneficiaryId);
       toast.success(`${payload.name} enrolled in ${payload.program}!`);
-    } catch {
+      setShowModal(false);
+    } catch (err) {
       if (!enforceBeneficiaryCap()) { setShowModal(false); return; }
       if (allowLocalPersistFallback()) {
         addBeneficiary(payload);
         void logEnrollmentConsentToRegistry(f, undefined);
         toast.success(`${payload.name} enrolled (saved locally — sync when backend is back).`);
+        setShowModal(false);
       } else {
-        toast.error('Could not enroll beneficiary. Check your connection and try again.');
+        toast.error(err instanceof Error ? err.message : 'Could not enroll beneficiary.');
       }
     }
-    setShowModal(false);
   };
 
   // Legacy handler retained for the edit-beneficiary modal which still uses the flat form.
@@ -855,6 +874,7 @@ const Programs: React.FC = () => {
       {activeTab === 'toc' && <TheoryOfChangeBuilder programs={programs} />}
 
       {activeTab === 'mis' && (<>
+        <MisReviewQueue />
         <div className="flex items-center gap-3">
           <Smartphone size={24} />
           <div>
@@ -1019,7 +1039,7 @@ const Programs: React.FC = () => {
                             toast('No matching beneficiary found. Use the ✎ Edit button to link or create a record.', { icon: 'ℹ️', duration: 5000 });
                             return;
                           }
-                          decideMisReviewIntent(intent.id, 'approved');
+                          void applyMisApproval(intent, 'approved');
                         }}
                       >
                         ✓ Confirm
@@ -1692,15 +1712,17 @@ const Programs: React.FC = () => {
                     }
                   } catch { /* ignore parse — fall back to local heuristics */ }
 
-                  addMisReviewIntent({
+                  const misIntent = {
                     id: `mis-${Date.now()}`,
                     narrative: conversationalInput,
                     extracted,
                     reporterId: 'field_staff_001',
                     reportDate: new Date().toISOString().slice(0, 10),
                     createdAt: new Date().toISOString(),
-                    status: 'pending',
-                  });
+                    status: 'pending' as const,
+                  };
+                  addMisReviewIntent(misIntent);
+                  void createMisReviewOnServer(misIntent);
 
                   toast.success("Submitted. Routed to Supervisor review queue in Agent HQ.", { icon: '✅', duration: 4500 });
                   setShowConversationalModal(false);

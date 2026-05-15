@@ -386,7 +386,12 @@ const CRM: React.FC = () => {
         (d.phone || '').includes(q) ||
         emp.includes(q);
       const stage = donorStages.get(String(d.id)) ?? 'unknown';
+      const score = propensityScores[String(d.id)];
+      const needsAttention = (typeof score === 'number' && score >= 50 && score < 80)
+        || stage === 'lapse_risk'
+        || computeDaysSinceLastContact(d, outreachLog) >= 60;
       const matchesFilter = activeFilter === 'All' ||
+        (activeFilter === 'Needs Attention' && needsAttention) ||
         (activeFilter === 'Major' && computeDonorLifecycleStage(d) === 'Major') ||
         (activeFilter === 'Recurring' && d.type === 'Recurring') ||
         (activeFilter === 'Acquisition' && stage === 'acquisition') ||
@@ -396,7 +401,7 @@ const CRM: React.FC = () => {
         (activeFilter === 'Dormant'     && stage === 'lapsed');
       return matchesSearch && matchesFilter;
     });
-  }, [donors, searchQuery, activeFilter, donorStages, lifecycleTick]);
+  }, [donors, searchQuery, activeFilter, donorStages, lifecycleTick, propensityScores, outreachLog]);
 
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => () => { if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current); }, []);
@@ -1018,7 +1023,7 @@ const CRM: React.FC = () => {
                 style={{ paddingLeft: '2rem' }} value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
             </div>
             <div className="filter-tags">
-              {['All', 'Major', 'Recurring', 'Acquisition', 'Stewardship', 'Renewal', 'Lapse Risk', 'Dormant'].map(tag => (
+              {['All', 'Needs Attention', 'Major', 'Recurring', 'Acquisition', 'Stewardship', 'Renewal', 'Lapse Risk', 'Dormant'].map(tag => (
                 <span key={tag} className={`filter-tag ${activeFilter === tag ? 'active' : ''}`} onClick={() => setActiveFilter(tag)}>{tag}</span>
               ))}
             </div>
@@ -1434,7 +1439,10 @@ const CRM: React.FC = () => {
               {detailTab === 'overview' && (
                 <>
                   {/* Donor → campaign(s) → programme(s) → outcomes trail. */}
-                  <DonorImpactPanel donor={activeDonor} />
+                  <DonorImpactPanel
+                    donor={activeDonor}
+                    propensityScore={propensity?.score ?? propensityScores[String(activeDonor.id)]}
+                  />
 
                   <div style={{ marginTop: '1rem' }}>
                     <RecordTasksPanel

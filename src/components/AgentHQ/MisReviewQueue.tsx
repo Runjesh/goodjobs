@@ -2,16 +2,42 @@ import React, { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { ClipboardCheck, Check, Pencil, X } from 'lucide-react';
 import { useStore, type MisReviewIntent } from '../../store/useStore';
+import { applyMisApproval } from '../../utils/applyMisApproval';
 import './MisReviewQueue.css';
 
 const MisReviewRow: React.FC<{ intent: MisReviewIntent }> = ({ intent }) => {
-  const decide = useStore(s => s.decideMisReviewIntent);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(intent.extracted);
+  const [busy, setBusy] = useState(false);
 
-  const approve  = () => { decide(intent.id, 'approved'); toast.success('Approved — counted in dashboard.'); };
-  const dismiss  = () => { decide(intent.id, 'dismissed'); toast('Dismissed.', { icon: '✕' }); };
-  const saveEdit = () => { decide(intent.id, 'edited', draft); setEditing(false); toast.success('Edited & approved.'); };
+  const approve = async () => {
+    setBusy(true);
+    try {
+      await applyMisApproval(intent, 'approved');
+      toast.success('Approved — counted in dashboard & budget.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dismiss = async () => {
+    setBusy(true);
+    try {
+      await applyMisApproval(intent, 'dismissed');
+      toast('Dismissed.', { icon: '✕' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveEdit = async () => {
+    setBusy(true);
+    try {
+      await applyMisApproval(intent, 'edited', draft);
+      setEditing(false);
+      toast.success('Edited & approved.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="mis-review-row" data-status={intent.status}>
@@ -48,9 +74,9 @@ const MisReviewRow: React.FC<{ intent: MisReviewIntent }> = ({ intent }) => {
       <div className="mis-review-row-actions">
         {!editing ? (
           <>
-            <button type="button" className="intent-btn intent-btn--approve" onClick={approve}><Check size={14} /> Approve</button>
-            <button type="button" className="intent-btn intent-btn--modify" onClick={() => setEditing(true)}><Pencil size={13} /> Edit</button>
-            <button type="button" className="intent-btn intent-btn--reject" onClick={dismiss}><X size={14} /> Dismiss</button>
+            <button type="button" className="intent-btn intent-btn--approve" onClick={() => void approve()} disabled={busy}><Check size={14} /> Approve</button>
+            <button type="button" className="intent-btn intent-btn--modify" onClick={() => setEditing(true)} disabled={busy}><Pencil size={13} /> Edit</button>
+            <button type="button" className="intent-btn intent-btn--reject" onClick={() => void dismiss()} disabled={busy}><X size={14} /> Dismiss</button>
           </>
         ) : (
           <>

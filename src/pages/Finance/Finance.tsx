@@ -6,7 +6,7 @@ import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import PermissionGate from '../../components/Auth/PermissionGate';
 import './Finance.css';
-import { apiFetch } from '../../api/client';
+import { apiFetch, getApiBaseUrl } from '../../api/client';
 import { isMockEnabled } from '../../api/mockBackend';
 import { allowLocalPersistFallback, readApiError } from '../../utils/apiPersist';
 import { programIdFromName } from '../../utils/programFinance';
@@ -336,13 +336,13 @@ const Finance: React.FC = () => {
   // Dashboard clawback-risk links navigate here with ?filter=clawback&grantId=<id>
   // so the matching grant is highlighted in the grants section.
   const [highlightGrantId, setHighlightGrantId] = useState<string | null>(null);
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('filter') === 'clawback') {
-      setHighlightGrantId(params.get('grantId'));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [receiptPrompt, setReceiptPrompt] = useState<null | {
+    donorId: string;
+    donorName: string;
+    amount: number;
+    receiptNo?: string;
+    description: string;
+  }>(null);
 
   // ── Feature 5: bulk receipt generation ───────────────────────────────────
   const [bulkReceiptBusy, setBulkReceiptBusy] = useState(false);
@@ -383,6 +383,18 @@ const Finance: React.FC = () => {
       setExLoading(false);
     }
   }, [minConf]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('filter') === 'clawback') {
+      setHighlightGrantId(params.get('grantId'));
+    }
+    if (params.get('view') === 'exceptions') {
+      setExceptionMode(true);
+      void loadExceptionTx();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     loadGrants();
@@ -668,18 +680,25 @@ const Finance: React.FC = () => {
       category:      entryToSave.category      || undefined,
     });
 
-    // Feature 2: If income, auto-download the 80G receipt as PDF.
-    if (entryToSave.type === 'Income' && receiptNo) {
+    if (entryToSave.type === 'Income' && entryToSave.donorId) {
+      setReceiptPrompt({
+        donorId: entryToSave.donorId,
+        donorName: entryToSave.receiptDonorName || entryToSave.donorId,
+        amount: Number(entryToSave.amount) || 0,
+        receiptNo,
+        description: entryToSave.description,
+      });
+    } else if (entryToSave.type === 'Income' && receiptNo) {
       const doc = generate80GReceiptPdf({
         receiptNo,
-        donorName:    entryToSave.receiptDonorName || entryToSave.donorId || 'Donor',
-        donorPan:     entryToSave.receiptDonorPan  || '',
-        amount:       Number(entryToSave.amount) || 0,
-        date:         new Date().toLocaleDateString('en-IN'),
-        description:  entryToSave.description,
-        ngoName:      ngoName,
-        ngoPan:       ngoDetails.pan || '',
-        eighty_g_no:  eightyGRegNo,
+        donorName: entryToSave.receiptDonorName || 'Donor',
+        donorPan: entryToSave.receiptDonorPan || '',
+        amount: Number(entryToSave.amount) || 0,
+        date: new Date().toLocaleDateString('en-IN'),
+        description: entryToSave.description,
+        ngoName,
+        ngoPan: ngoDetails.pan || '',
+        eighty_g_no: eightyGRegNo,
       });
       doc.save(`${receiptNo.replace(/\//g, '_')}.pdf`);
     }
@@ -2024,8 +2043,26 @@ const Finance: React.FC = () => {
                           const aiAdminOverhead = aiFund === 'FCRA'
                             ? (cat.includes('admin') || cat.includes('overhead') || cat.includes('management'))
                             : false;
-                          setEntry(prev => ({ ...prev, fund: aiFund, type: aiType, programmeId: aiProg, amount: aiAmount, category: data.category, isAdminOverhead: aiAdminOverhead }));
-                          toast.success('Fields pre-filled from AI categorisation.', { duration: 3000 });
+                          const patch: typeof entry = {
+                            ...entry,
+                            fund: aiFund,
+                            type: aiType,
+                            programmeId: aiProg,
+                            amount: aiAmount,
+                            category: data.category,
+                            isAdminOverhead: aiAdminOverhead,
+                          };
+                          if (data.suggested_donor_id) {
+                            patch.donorId = String(data.suggested_donor_id);
+                            const dn = String(data.suggested_donor_name || '');
+                            if (dn) patch.receiptDonorName = dn;
+                            setDonorSearch(dn);
+                          }
+                          setEntry(prev => ({ ...prev, ...patch }));
+                          const matchNote = data.suggested_donor_name
+                            ? ` Matched donor: ${data.suggested_donor_name}.`
+                            : '';
+                          toast.success(`Fields pre-filled from AI categorisation.${matchNote}`, { duration: 4000 });
                         }
                       } catch { toast.error('Categorisation failed.'); }
                       finally { setIsClassifying(false); }
@@ -2311,6 +2348,57 @@ const Finance: React.FC = () => {
               >
                 Save anyway
               </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {receiptPrompt && (
+        <ModalOverlay onClose={() => setReceiptPrompt(null)}>
+          <div className="card" style={{ maxWidth: 420, width: '100%', padding: '1.25rem' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.05rem' }}>Generate 80G receipt?</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', margin: '0 0 1rem' }}>
+              Income of ₹{receiptPrompt.amount.toLocaleString('en-IN')} recorded for <strong>{receiptPrompt.donorName}</strong>.
+              Send the donor their tax receipt now.
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const receiptNo = receiptPrompt.receiptNo || nextReceiptNumber(ngoName);
+                  const doc = generate80GReceiptPdf({
+                    receiptNo,
+                    donorName: receiptPrompt.donorName,
+                    donorPan: '',
+                    amount: receiptPrompt.amount,
+                    date: new Date().toLocaleDateString('en-IN'),
+                    description: receiptPrompt.description,
+                    ngoName,
+                    ngoPan: ngoDetails.pan || '',
+                    eighty_g_no: eightyGRegNo,
+                  });
+                  doc.save(`${receiptNo.replace(/\//g, '_')}.pdf`);
+                  toast.success('80G receipt downloaded.');
+                  setReceiptPrompt(null);
+                }}
+              >
+                <Download size={14} /> Download PDF
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={async () => {
+                  const id = receiptPrompt.donorId;
+                  const url = `${getApiBaseUrl()}/crm/donors/${encodeURIComponent(id)}/80g/${encodeURIComponent(receiptPrompt.receiptNo || 'latest')}.pdf`;
+                  window.open(url, '_blank');
+                  toast.success('Receipt opened — share with donor.');
+                  setReceiptPrompt(null);
+                }}
+              >
+                Email to donor
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => setReceiptPrompt(null)}>Later</button>
             </div>
           </div>
         </ModalOverlay>

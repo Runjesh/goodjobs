@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 from datetime import timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 def predict_revenue(transactions: List[Dict[str, Any]], days_ahead: int = 90) -> List[Dict[str, Any]]:
     """
@@ -115,3 +115,40 @@ def classify_fcra_transaction(description: str) -> Dict[str, Any]:
         return {"category": "Medical", "confidence": 0.90}
         
     return {"category": "General Welfare", "confidence": 0.65}
+
+
+def match_donor_from_bank_line(description: str, donors: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Heuristic donor match from UPI/bank narration (name fragments, phone tail).
+    Returns {donor_id, donor_name, confidence} or None.
+    """
+    desc = (description or "").lower()
+    if not desc.strip() or not donors:
+        return None
+    best: Optional[Dict[str, Any]] = None
+    best_score = 0.0
+    for d in donors:
+        name = str(d.get("name") or "").strip()
+        if not name:
+            continue
+        parts = [p.lower() for p in name.split() if len(p) > 2]
+        score = 0.0
+        for p in parts:
+            if p in desc:
+                score += 0.35
+        phone = str(d.get("phone") or "").replace(" ", "")
+        if len(phone) >= 4 and phone[-4:] in desc.replace(" ", ""):
+            score += 0.4
+        email = str(d.get("email") or "").split("@")[0].lower()
+        if email and len(email) > 3 and email in desc:
+            score += 0.25
+        if score > best_score:
+            best_score = score
+            best = d
+    if best_score < 0.35 or not best:
+        return None
+    return {
+        "donor_id": str(best.get("id")),
+        "donor_name": str(best.get("name") or ""),
+        "confidence": round(min(0.98, best_score), 2),
+    }

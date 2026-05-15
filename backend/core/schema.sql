@@ -622,6 +622,28 @@ CREATE POLICY ngo_isolate_intent_queue
     USING (ngo_id = current_ngo_id_text())
     WITH CHECK (ngo_id = current_ngo_id_text());
 
+-- Field MIS supervisor review queue (Programs)
+CREATE TABLE IF NOT EXISTS mis_field_reviews (
+    id          TEXT PRIMARY KEY,
+    ngo_id      TEXT NOT NULL,
+    narrative   TEXT NOT NULL,
+    extracted   JSONB NOT NULL DEFAULT '{}'::jsonb,
+    reporter_id TEXT,
+    report_date DATE,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    decided_at  TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mis_field_reviews_ngo ON mis_field_reviews(ngo_id, status);
+
+-- Authoritative 80G receipt sequence per NGO per Indian FY (Apr–Mar)
+CREATE TABLE IF NOT EXISTS ngo_receipt_sequences (
+    ngo_id      TEXT NOT NULL,
+    fiscal_year TEXT NOT NULL,
+    last_seq    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (ngo_id, fiscal_year)
+);
+
 -- Per-NGO OpenAI key material (encrypted at rest). No RLS: only backend superuser / app reads full table at boot + scoped writes.
 CREATE TABLE IF NOT EXISTS ngo_llm_settings (
     ngo_id TEXT PRIMARY KEY,

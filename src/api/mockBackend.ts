@@ -599,7 +599,41 @@ const HANDLERS: Handler[] = [
   // ── Workflows ──────────────────────────────────────────────────────────────
   {
     test: (p, m) => m === 'POST' && p.startsWith('/workflows/classify-transaction'),
-    handle: () => jsonResponse({ category: 'Programs · Beneficiary support', confidence: 0.84 }),
+    handle: () => jsonResponse({
+      category: 'Donation',
+      confidence: 0.84,
+      suggested_donor_id: 'd1',
+      suggested_donor_name: 'Demo Donor',
+      donor_match_confidence: 0.72,
+    }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/finance/issue-receipt',
+    handle: () => jsonResponse({ status: 'issued', receipt_number: '80G/2025-26/DEMO/00001', fiscal_year: '2025-2026' }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/gen-ai/donor-outreach-draft',
+    handle: async (_p, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      const name = (body.donor_name || 'Friend').split(' ')[0];
+      return jsonResponse({ message: `Namaste ${name}! Thank you for your continued support.`, channel: 'whatsapp' });
+    },
+  },
+  {
+    test: (p, m) => m === 'POST' && p.startsWith('/programs/mis-reviews/') && p.endsWith('/decide'),
+    handle: () => jsonResponse({ status: 'approved', budget_applied: 450 }),
+  },
+  {
+    test: (p, m) => m === 'GET' && p.startsWith('/programs/mis-reviews'),
+    handle: () => jsonResponse({ reviews: [] }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/programs/mis-reviews',
+    handle: () => jsonResponse({ status: 'created' }),
+  },
+  {
+    test: (p, m) => m === 'POST' && p === '/crm/outreach/email',
+    handle: () => jsonResponse({ status: 'queued', outreach_id: 'out_demo_email', results: [] }),
   },
   {
     test: (p, m) => m === 'POST' && p.startsWith('/workflows/suggest-goal'),

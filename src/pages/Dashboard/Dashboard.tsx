@@ -22,6 +22,7 @@ import { readComplianceReminders } from '../../utils/complianceReminders';
 import toast from 'react-hot-toast';
 import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
 import MorningBriefBanner from '../../components/Onboarding/MorningBriefBanner';
+import PrioritiesRibbon, { type BriefPriorityCard } from '../../components/Dashboard/PrioritiesRibbon';
 import TrialDay7Card from '../../components/Onboarding/TrialDay7Card';
 import FirstRunEmptyState from '../../components/Onboarding/FirstRunEmptyState';
 import { STORE_CHANGED_EVENT } from '../../components/System/StoreChangedBridge';
@@ -29,6 +30,7 @@ import './Dashboard.css';
 
 const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
 const SNOOZE_KEY      = 'goodjobs.snoozed_items.v2';
+const RIBBON_DISMISS_KEY = 'goodjobs.ribbon_dismissed.v1';
 
 // ── Greeting ──────────────────────────────────────────────────────────────────
 function getGreeting(): string {
@@ -990,6 +992,15 @@ const Dashboard: React.FC = () => {
   const beneficiaryOutcomes = useStore(s => s.beneficiaryOutcomes);
 
   const [briefItems,   setBriefItems]   = useState<PriorityItem[]>([]);
+  const [ribbonCards,  setRibbonCards]  = useState<BriefPriorityCard[]>([]);
+  const [handledByAgents, setHandledByAgents] = useState<{ directive?: string; intent_type?: string; executed_at?: string }[]>([]);
+  const [ribbonDismissed, setRibbonDismissed] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(RIBBON_DISMISS_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch { return new Set(); }
+  });
   const [briefLoading, setBriefLoading] = useState(true);
   const [lastRefresh,  setLastRefresh]  = useState<Date>(new Date());
   const [snoozed,      setSnoozed]      = useState<Set<string>>(new Set());
@@ -1075,6 +1086,29 @@ const Dashboard: React.FC = () => {
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const priorities = Array.isArray(data.priorities) ? data.priorities : [];
+        const ribbon: BriefPriorityCard[] = priorities.map((p: any, i: number) => {
+          const route = p.primary_action?.route;
+          const pathFromRoute =
+            typeof route === 'string' ? (route.startsWith('/') ? route : `/${route}`) : '/tasks';
+          const path = (typeof p.deep_link === 'string' && p.deep_link.startsWith('/')
+            ? p.deep_link
+            : pathFromRoute);
+          return {
+            id: String(p.id ?? `brief-${i}`),
+            title: String(p.title ?? 'Priority'),
+            summary: String(p.summary ?? p.subtitle ?? ''),
+            priority: String(p.priority ?? 'Medium'),
+            category: String(p.category ?? p.kind ?? ''),
+            primaryLabel: String(p.primary_action?.label ?? 'Open'),
+            path,
+            tasksDeepLink: typeof p.tasks_deep_link_path === 'string' ? p.tasks_deep_link_path : undefined,
+            kind: typeof p.kind === 'string' ? p.kind : undefined,
+          };
+        });
+        if (!cancelled) {
+          setRibbonCards(ribbon);
+          setHandledByAgents(Array.isArray(data.handled_by_agents) ? data.handled_by_agents : []);
+        }
         const mapped: PriorityItem[] = priorities.map((p: any, i: number) => {
           const pr = String(p.priority ?? '').toLowerCase();
           const level: PriorityLevel =
@@ -1184,6 +1218,19 @@ const Dashboard: React.FC = () => {
   // entities exists.
   const hasNoRealData = donors.length === 0 && beneficiaries.length === 0 && csrCards.length === 0;
 
+  const visibleRibbon = useMemo(
+    () => ribbonCards.filter(c => !ribbonDismissed.has(c.id)),
+    [ribbonCards, ribbonDismissed],
+  );
+
+  const handleRibbonDismiss = useCallback((card: BriefPriorityCard) => {
+    setRibbonDismissed(prev => {
+      const next = new Set([...prev, card.id]);
+      try { localStorage.setItem(RIBBON_DISMISS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   return (
     <div className="today-page">
       {/* ── Greeting Header ─────────────────────────────────────────── */}
@@ -1240,6 +1287,9 @@ const Dashboard: React.FC = () => {
       ) : (
         <DashboardActiveBody
           briefLoading={briefLoading}
+          ribbonCards={visibleRibbon}
+          onRibbonDismiss={handleRibbonDismiss}
+          handledByAgents={handledByAgents}
           allItems={allItems}
           urgentItems={urgentItems}
           attentionItems={attentionItems}
@@ -1265,6 +1315,9 @@ const Dashboard: React.FC = () => {
 
 interface DashboardActiveBodyProps {
   briefLoading: boolean;
+  ribbonCards: BriefPriorityCard[];
+  onRibbonDismiss: (card: BriefPriorityCard) => void;
+  handledByAgents: { directive?: string; intent_type?: string; executed_at?: string }[];
   allItems: PriorityItem[];
   urgentItems: PriorityItem[];
   attentionItems: PriorityItem[];
@@ -1285,13 +1338,26 @@ interface DashboardActiveBodyProps {
 }
 
 const DashboardActiveBody: React.FC<DashboardActiveBodyProps> = ({
-  briefLoading, allItems, urgentItems, attentionItems, wellItems, snoozedItems,
+  briefLoading, ribbonCards, onRibbonDismiss, handledByAgents,
+  allItems, urgentItems, attentionItems, wellItems, snoozedItems,
   yesterdayWins, quickActions, goingWellChips, showAllUrgent, setShowAllUrgent,
   handleSnooze, handleWake, navigate,
   beneficiariesCount, donorsCount, campaigns, complianceDocs,
 }) => {
   return (
     <>
+      <PrioritiesRibbon cards={ribbonCards} loading={briefLoading} onDismiss={onRibbonDismiss} />
+
+      {handledByAgents.length > 0 && (
+        <div className="handled-by-agents-strip" role="status">
+          <Sparkles size={13} />
+          <strong>Handled for you:</strong>
+          {handledByAgents.slice(0, 3).map((h, i) => (
+            <span key={i}>{h.directive || h.intent_type || 'Agent task'}</span>
+          ))}
+        </div>
+      )}
+
       {/* ── Yesterday strip ──────────────────────────────────────────── */}
       <motion.div className="yesterday-strip" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
         <div className="yesterday-strip-header">

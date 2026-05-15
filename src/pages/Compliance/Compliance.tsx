@@ -16,6 +16,7 @@ import {
   persistComplianceReminders,
   pickUntoastedReminders,
 } from '../../utils/complianceReminders';
+import ComplianceRenewalChecklist from '../../components/Compliance/ComplianceRenewalChecklist';
 
 const PAGE_TABS = [
   { id: 'vault',  label: '📁 Registration Vault' },
@@ -37,6 +38,7 @@ const Compliance: React.FC = () => {
   // right tab opens and expiring/expired documents are visually highlighted.
   // Tracks which doc type to highlight when arriving via deep link
   const [deepLinkDocType, setDeepLinkDocType] = useState<string | null>(null);
+  const [renewalDoc, setRenewalDoc] = useState<ComplianceDocument | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const alert  = params.get('alert');
@@ -52,6 +54,19 @@ const Compliance: React.FC = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('alert') !== 'true') return;
+    const doc = params.get('doc');
+    if (!doc || complianceDocs.length === 0) return;
+    const needle = doc.toLowerCase();
+    const match = complianceDocs.find(d =>
+      d.name.toLowerCase().includes(needle) || d.type.toLowerCase().includes(needle),
+    );
+    if (match) setRenewalDoc(match);
+  }, [complianceDocs]);
+
   const [showDocModal, setShowDocModal] = useState(false);
   const [docForm, setDocForm] = useState({
     name: '',
@@ -1021,6 +1036,19 @@ const Compliance: React.FC = () => {
             />
           </div>
         </ModalOverlay>
+      )}
+
+      {renewalDoc && (
+        <ComplianceRenewalChecklist
+          docName={renewalDoc.name}
+          docType={renewalDoc.type}
+          daysUntilExpiry={
+            renewalDoc.expiry
+              ? Math.ceil((new Date(renewalDoc.expiry).getTime() - Date.now()) / 86_400_000)
+              : undefined
+          }
+          onClose={() => setRenewalDoc(null)}
+        />
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Search, Sparkles, UserPlus, IndianRupee, ShieldCheck, Mail, ArrowRight, Clock, Users, Briefcase, Heart, Flag, FolderKanban } from 'lucide-react';
+import { Search, Sparkles, UserPlus, IndianRupee, ShieldCheck, Mail, ArrowRight, Clock, Users, Briefcase, Heart, Flag, FolderKanban, ReceiptText, UserCheck, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../../api/client';
@@ -111,6 +111,32 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
     }
     return [...groups.entries()];
   }, [entityResults]);
+
+  const workflowSuggestions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || q.startsWith('/')) return [];
+    const out: { label: string; hint: string; path: string; icon: React.ComponentType<{ size?: number }> }[] = [];
+    if (q.includes('receipt') || q.includes('80g')) {
+      out.push(
+        { label: 'Generate receipt for recent donation', hint: 'Finance', path: '/finance', icon: ReceiptText },
+        { label: 'View donor CRM & outreach', hint: 'CRM', path: '/crm', icon: Heart },
+      );
+    }
+    if (q === 'new' || q.startsWith('new ')) {
+      out.push(
+        { label: 'Enroll beneficiary', hint: 'Programs', path: '/programs?action=enroll', icon: UserCheck },
+        { label: 'Log donation', hint: 'Fundraising', path: '/fundraising', icon: IndianRupee },
+        { label: 'Create campaign', hint: 'Fundraising', path: '/fundraising', icon: Flag },
+      );
+    }
+    if (q.includes('enroll') || q.includes('beneficiar')) {
+      out.push({ label: 'Enroll beneficiary', hint: 'Programs', path: '/programs?action=enroll', icon: UserCheck });
+    }
+    if (q.includes('donat') || q.includes('gift')) {
+      out.push({ label: 'Log donation', hint: 'Fundraising', path: '/fundraising', icon: PlusCircle });
+    }
+    return out;
+  }, [query]);
 
   // Reset selection whenever the result set changes.
   useEffect(() => { setActiveIndex(0); }, [entityResults]);
@@ -508,6 +534,22 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {workflowSuggestions.length > 0 && !confirmDonor && !confirmIntent && (
+            <div className="suggestion-group">
+              <motion.div className="suggestion-group-title">Jobs to be done</motion.div>
+              {workflowSuggestions.map(s => {
+                const Icon = s.icon;
+                return (
+                  <div key={s.path + s.label} className="suggestion-item" onClick={() => handleAction(s.path)}>
+                    <div className="suggestion-icon"><Icon size={16} /></div>
+                    <div className="suggestion-text">{s.label}</div>
+                    <div className="suggestion-hint">{s.hint}</div>
+                  </div>
+                );
+              })}
             </div>
           )}
 

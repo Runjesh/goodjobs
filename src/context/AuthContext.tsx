@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { makeFreshTrial, loadOrgBilling, saveOrgBilling, type TrialState, type SubscriptionTier, type BillingState } from '../utils/trial';
+import { expectsRealBackend } from '../api/client';
 
 // ── Role Definitions ──────────────────────────────────────────────────────────
 export type UserRole = 'ed' | 'finance' | 'programs' | 'field' | 'board';
@@ -199,6 +200,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [demoRole, setDemoRole] = useState<UserRole | null>(null);
+
+  useEffect(() => {
+    if (!expectsRealBackend()) return;
+    try {
+      const token = localStorage.getItem('access_token') || '';
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) as AuthUser : null;
+      if (token.startsWith('demo-jwt-') || parsed?.token?.startsWith('demo-jwt-')) {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem('access_token');
+        setUser(null);
+        setDemoRole(null);
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   const permissions = user ? ROLE_PERMISSIONS[demoRole ?? user.role] : [];
 
