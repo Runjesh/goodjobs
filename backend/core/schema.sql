@@ -292,9 +292,8 @@ CREATE TABLE IF NOT EXISTS data_erasure_requests (
     request_reason    TEXT,
     status            erasure_status NOT NULL DEFAULT 'received',
     received_at       TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    -- DPDP §12: must complete within 30 days
-    deadline_at       TIMESTAMP WITH TIME ZONE GENERATED ALWAYS AS
-                        (received_at + INTERVAL '30 days') STORED,
+    -- DPDP §12: must complete within 30 days (set on INSERT; not GENERATED — timestamptz+interval is not immutable on PG 16+)
+    deadline_at       TIMESTAMP WITH TIME ZONE,
     completed_at      TIMESTAMP WITH TIME ZONE,
     completed_by      UUID REFERENCES users(id),
     rejection_reason  TEXT
@@ -314,9 +313,8 @@ CREATE TABLE IF NOT EXISTS breach_log (
     severity            breach_severity NOT NULL,
     affected_records    INTEGER DEFAULT 0,
     discovered_at       TIMESTAMP WITH TIME ZONE NOT NULL,
-    -- DPDP §8: notify DPB within 72 hours
-    notification_due_at TIMESTAMP WITH TIME ZONE GENERATED ALWAYS AS
-                          (discovered_at + INTERVAL '72 hours') STORED,
+    -- DPDP §8: notify DPB within 72 hours (set on INSERT; see POST /compliance/breach)
+    notification_due_at TIMESTAMP WITH TIME ZONE,
     notified_dpb_at     TIMESTAMP WITH TIME ZONE,    -- NULL = not yet notified
     remediation_notes   TEXT,
     created_by          UUID REFERENCES users(id),
