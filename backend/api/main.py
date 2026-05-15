@@ -66,6 +66,9 @@ from core.s3_storage import (
     list_ngo_files,
     delete_file,
 )
+from core.dpdp import require_beneficiary_consent, anonymize_beneficiary_record, extract_consent_given
+from core.rate_limit import check_login_rate_limit
+from core.fcra_guard import assert_fcra_admin_within_cap
 
 # Public endpoints should not require auth; use get_current_user_optional.
 
@@ -824,6 +827,7 @@ def list_beneficiaries(current_user: TokenUser = Depends(require_role("ed", "pro
 
 @app.post("/programs/beneficiaries", tags=["Programs"])
 def create_beneficiary(body: BeneficiaryCreate, current_user: TokenUser = Depends(require_role(*BENEFICIARY_ROLES))):
+    require_beneficiary_consent(body.details)
     with db_conn() as conn:
         if conn is None:
             _seed_memory_beneficiaries(current_user.ngo_id)
@@ -886,6 +890,7 @@ class BeneficiaryBulkImport(BaseModel):
 @app.post("/programs/beneficiaries/bulk", tags=["Programs"])
 def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUser = Depends(require_role(*BENEFICIARY_ROLES))):
     n = 0
+    skipped_consent = 0
     with db_conn() as conn:
         if conn is None:
             _seed_memory_beneficiaries(current_user.ngo_id)
@@ -893,6 +898,9 @@ def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUs
             base = 1000 + len(lst)
             for b in body.beneficiaries[:500]:
                 if not (b.name or "").strip():
+                    continue
+                if not extract_consent_given(b.details):
+                    skipped_consent += 1
                     continue
                 new_id = f"BEN-{base + n}"
                 ben = {
@@ -906,11 +914,14 @@ def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUs
                 }
                 lst.insert(0, ben)
                 n += 1
-            return {"imported": n, "source": "memory"}
+            return {"imported": n, "skipped_consent": skipped_consent, "source": "memory"}
         cur = conn.cursor()
         apply_ngo_session(cur, current_user.ngo_id)
         for b in body.beneficiaries[:500]:
             if not (b.name or "").strip():
+                continue
+            if not extract_consent_given(b.details):
+                skipped_consent += 1
                 continue
             new_id = f"BEN-{int(datetime.now(timezone.utc).timestamp() * 1000)}_{n}"
             cur.execute(
@@ -930,7 +941,7 @@ def bulk_import_beneficiaries(body: BeneficiaryBulkImport, current_user: TokenUs
                 ),
             )
             n += 1
-        return {"imported": n, "source": "db"}
+        return {"imported": n, "skipped_consent": skipped_consent, "source": "db"}
 
 
 @app.put("/programs/beneficiaries/{ben_id}", tags=["Programs"])
@@ -2087,6 +2098,53 @@ def list_donors(current_user: TokenUser = Depends(require_role("ed", "crm", "fun
         return {"donors": out, "source": "db"}
 
 
+@app.get("/crm/donors/{donor_id}", tags=["CRM"])
+def get_donor(donor_id: str, current_user: TokenUser = Depends(require_role("ed", "crm", "fundraising", "finance", "programs"))):
+    """Single-donor fetch — scoped to caller NGO (tenant isolation)."""
+    with db_conn() as conn:
+        if conn is None:
+            _seed_memory_crm(current_user.ngo_id)
+            donor = next(
+                (d for d in DONORS_MEM_BY_NGO.get(current_user.ngo_id, []) if str(d.get("id")) == donor_id),
+                None,
+            )
+            if not donor:
+                raise HTTPException(status_code=404, detail="Donor not found")
+            return {"donor": donor, "source": "memory"}
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id::text, full_name, COALESCE(donor_type, 'Recurring'),
+                   COALESCE(total_lifetime_value, 0)::float,
+                   COALESCE(pan_masked, ''), COALESCE(location_text, ''),
+                   COALESCE(tags, '{}'), COALESCE(email, ''), COALESCE(phone, ''),
+                   COALESCE(meta, '{}'::jsonb)
+            FROM donors
+            WHERE id = %s::uuid AND ngo_id = %s::uuid
+            """,
+            (donor_id, current_user.ngo_id),
+        )
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Donor not found")
+        return {
+            "donor": {
+                "id": r[0],
+                "name": r[1],
+                "type": r[2],
+                "totalGiven": float(r[3] or 0),
+                "initial": (r[1] or "U")[:1].upper(),
+                "pan": r[4] or "",
+                "location": r[5] or "",
+                "tags": list(r[6] or []),
+                "email": (r[7] or "").strip(),
+                "phone": (r[8] or "").strip(),
+                "meta": _parse_jsonb(r[9]),
+            },
+            "source": "db",
+        }
+
+
 @app.get("/crm/donors/{donor_id}/80g/{tx_id}.pdf", tags=["CRM"])
 def get_donor_80g_pdf(
     donor_id: str,
@@ -3124,12 +3182,13 @@ def register_ngo(body: RegisterNgoRequest):
         }
 
 @app.post("/auth/login", response_model=LoginResponse, tags=["Auth"])
-def login(body: LoginRequest):
+def login(body: LoginRequest, request: Request):
     """
     Authenticate a user and return a signed JWT.
     In production: query the `users` table, verify bcrypt hash.
     Dev: uses the DEMO_USERS dict in core/auth.py.
     """
+    check_login_rate_limit(request)
     # Prefer DB users when configured
     with db_conn() as conn:
         if conn is not None:
@@ -4194,6 +4253,38 @@ def _run_field_mis_agent(payload: dict):
         print(f"Field MIS Agent → Beneficiaries: {result.get('beneficiary_count')} | Language: {result.get('detected_language')}")
     except Exception as e:
         print(f"Field MIS Agent Error: {e}")
+
+@app.post("/webhook/field-report/parse", tags=["Programs"])
+def parse_field_report_sync(event: FieldReportTrigger):
+    """
+    Synchronous field-note parse for QA (slang / Hinglish). Does not enqueue background work.
+    """
+    from agents.field_mis_agent import detect_and_translate
+
+    state = {
+        "ngo_id": event.ngo_id or _demo_default_ngo_id(),
+        "event_type": "field.data.submitted",
+        "raw_input": event.report_text,
+        "source_language": "english",
+        "parsed_data": {},
+        "beneficiary_id": None,
+        "is_duplicate": False,
+        "validation_errors": [],
+        "translated_summary": "",
+        "dashboard_update": {},
+        "alert_required": False,
+        "status": "",
+    }
+    out = detect_and_translate(state)
+    parsed = out.get("parsed_data") or {}
+    return {
+        "parsed": parsed,
+        "beneficiary_name": parsed.get("beneficiary_name"),
+        "action": parsed.get("action"),
+        "notes": parsed.get("notes"),
+        "summary": out.get("translated_summary"),
+    }
+
 
 @app.post("/webhook/field-report")
 async def handle_field_report(event: FieldReportTrigger, background_tasks: BackgroundTasks):
@@ -5356,6 +5447,15 @@ class FinanceJournalEntryRequest(BaseModel):
 
 @app.post("/finance/journal-entry", tags=["Finance"])
 def post_finance_journal_entry(body: FinanceJournalEntryRequest, current_user: TokenUser = Depends(require_role("ed", "finance"))):
+    prior_events = list(FINANCE_EVENTS_MEM_BY_NGO.get(current_user.ngo_id, []))
+    assert_fcra_admin_within_cap(
+        fund=body.fund,
+        entry_type=body.entry_type or "Expense",
+        amount=float(body.amount),
+        is_admin_overhead=bool(body.is_admin_overhead),
+        category=body.category,
+        events=prior_events,
+    )
     entry_type = (body.entry_type or "Expense").strip()
     is_income = entry_type.lower() == "income"
     receipt_number: Optional[str] = None
@@ -6574,16 +6674,103 @@ def log_erasure_request(req: ErasureLogRequest, current_user: TokenUser = Depend
         return {"status": "received", "request_id": rid, "deadline": (dl or "")[:10], "message": "Erasure request logged. Must be completed within 30 days.", "source": "db"}
 
 
-@app.post("/compliance/erasure/{request_id}/complete", tags=["Compliance"])
-def complete_erasure(request_id: str, current_user: TokenUser = Depends(get_current_user)):
+def _apply_erasure_to_beneficiaries(ngo_id: str, subject_name: str, subject_email: str) -> int:
+    """Anonymize PII for beneficiaries matching an erasure request; preserve outcome metrics."""
+    name_key = (subject_name or "").strip().lower()
+    email_key = (subject_email or "").strip().lower()
+    n_anonymized = 0
+
+    def matches(ben: Dict[str, Any]) -> bool:
+        if email_key:
+            det = ben.get("details") or {}
+            if isinstance(det, dict) and str(det.get("email", "")).lower() == email_key:
+                return True
+        if name_key and str(ben.get("name", "")).strip().lower() == name_key:
+            return True
+        return False
+
     with db_conn() as conn:
         if conn is None:
-            for r in ERASURE_MEM_BY_NGO.get(current_user.ngo_id, []):
-                if r.get("id") == request_id:
-                    r["status"] = "completed"
-                    r["completed"] = datetime.now(timezone.utc).date().isoformat()
-            return {"ok": True, "source": "memory"}
+            lst = BENEFICIARIES_MEM_BY_NGO.get(ngo_id, [])
+            for i, ben in enumerate(lst):
+                if not matches(ben):
+                    continue
+                patch = anonymize_beneficiary_record(
+                    str(ben.get("name", "")),
+                    str(ben.get("location", "")),
+                    ben.get("details") if isinstance(ben.get("details"), dict) else {},
+                )
+                lst[i] = {**ben, **patch}
+                n_anonymized += 1
+            return n_anonymized
+
         cur = conn.cursor()
+        apply_ngo_session(cur, ngo_id)
+        cur.execute(
+            """
+            SELECT id, name, location, COALESCE(details, '{}'::jsonb)
+            FROM program_beneficiaries
+            WHERE ngo_id = %s
+            """,
+            (ngo_id,),
+        )
+        for row in cur.fetchall():
+            ben_id, name, location, details_raw = row[0], row[1], row[2], row[3]
+            details = _parse_jsonb(details_raw)
+            ben = {"id": ben_id, "name": name, "location": location, "details": details}
+            if not matches(ben):
+                continue
+            patch = anonymize_beneficiary_record(name, location, details)
+            cur.execute(
+                """
+                UPDATE program_beneficiaries
+                SET name = %s, location = %s, aadhaar = false, details = %s::jsonb
+                WHERE id = %s AND ngo_id = %s
+                """,
+                (
+                    patch["name"],
+                    patch["location"],
+                    json.dumps(patch["details"]),
+                    ben_id,
+                    ngo_id,
+                ),
+            )
+            n_anonymized += 1
+    return n_anonymized
+
+
+@app.post("/compliance/erasure/{request_id}/complete", tags=["Compliance"])
+def complete_erasure(request_id: str, current_user: TokenUser = Depends(get_current_user)):
+    subject_name = ""
+    subject_email = ""
+    with db_conn() as conn:
+        if conn is None:
+            req_row = next(
+                (r for r in ERASURE_MEM_BY_NGO.get(current_user.ngo_id, []) if r.get("id") == request_id),
+                None,
+            )
+            if not req_row:
+                raise HTTPException(status_code=404, detail="Erasure request not found.")
+            subject_name = str(req_row.get("name") or req_row.get("subject_name") or "")
+            subject_email = str(req_row.get("email") or req_row.get("subject_email") or "")
+            req_row["status"] = "completed"
+            req_row["completed"] = datetime.now(timezone.utc).date().isoformat()
+            anonymized = _apply_erasure_to_beneficiaries(current_user.ngo_id, subject_name, subject_email)
+            return {"ok": True, "anonymized_beneficiaries": anonymized, "source": "memory"}
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT subject_name, subject_email
+            FROM data_erasure_requests
+            WHERE ngo_id = %s::uuid AND id = %s::uuid
+            """,
+            (current_user.ngo_id, request_id),
+        )
+        found = cur.fetchone()
+        if not found:
+            raise HTTPException(status_code=404, detail="Erasure request not found.")
+        subject_name, subject_email = found[0] or "", found[1] or ""
         cur.execute(
             """
             UPDATE data_erasure_requests
@@ -6594,9 +6781,8 @@ def complete_erasure(request_id: str, current_user: TokenUser = Depends(get_curr
             (current_user.ngo_id, request_id),
         )
         row = cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Erasure request not found.")
-        return {"ok": True, "id": row[0], "source": "db"}
+        anonymized = _apply_erasure_to_beneficiaries(current_user.ngo_id, subject_name, subject_email)
+        return {"ok": True, "id": row[0], "anonymized_beneficiaries": anonymized, "source": "db"}
 
 @app.post("/compliance/breach", tags=["Compliance"])
 def log_breach(req: BreachLogRequest, current_user: TokenUser = Depends(get_current_user)):

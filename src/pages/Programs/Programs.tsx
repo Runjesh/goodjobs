@@ -179,6 +179,7 @@ const Programs: React.FC = () => {
   );
   const [outcomeFor, setOutcomeFor] = useState<{ id: string; name: string; program: string } | null>(null);
   const [enrollCompletion, setEnrollCompletion] = useState<EnrollCompletionSnapshot | null>(null);
+  const [enrollConsentError, setEnrollConsentError] = useState(false);
   const enrollSourceRef = useRef<EnrollSourceContext | undefined>(undefined);
   const { user } = useAuth();
   const { tier: effectiveTierVal, openUpgrade, inTrial } = useTier();
@@ -524,12 +525,28 @@ const Programs: React.FC = () => {
       return;
     }
     try {
+      setEnrollConsentError(false);
       const res = await apiFetch('/programs/beneficiaries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(await readApiError(res));
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        const detail = errJson?.detail;
+        if (
+          res.status === 400
+          && typeof detail === 'object'
+          && detail
+          && (detail as { code?: string }).code === 'dpdp_consent_required'
+        ) {
+          setEnrollConsentError(true);
+          setShowModal(true);
+          toast.error('DPDP consent is required — check the consent box in Section D.');
+          return;
+        }
+        throw new Error(await readApiError(res));
+      }
       const data = await res.json().catch(() => ({}));
       const created = data?.beneficiary;
       if (!created?.id) throw new Error('Server did not return a beneficiary id.');
@@ -1497,6 +1514,7 @@ const Programs: React.FC = () => {
           initialProgram={programs[0]}
           completion={enrollCompletion}
           completionActions={enrollSuccessActions}
+          consentHighlight={enrollConsentError}
           showUploadDocuments={
             enrollCompletion
               ? !!(lastEnrollFormRef.current?.docsSkipped

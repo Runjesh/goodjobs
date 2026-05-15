@@ -408,6 +408,13 @@
   min-height: min(48dvh, 380px);
 }
 .enroll-section.open { border-color: var(--color-primary); }
+.enroll-section--dpdp-error { border-color: #DC2626; box-shadow: 0 0 0 2px #fecaca; }
+.consent-check--error {
+  outline: 2px solid #DC2626;
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+  background: #fef2f2;
+}
 /* Single visible step: hide duplicate accordion header — stepper is the nav */
 .enroll-section-head {
   display: none;

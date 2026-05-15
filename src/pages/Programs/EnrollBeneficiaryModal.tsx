@@ -291,11 +291,13 @@ interface Props {
   completion?: EnrollCompletionSnapshot | null;
   completionActions?: EnrollSuccessActions;
   showUploadDocuments?: boolean;
+  /** Highlight consent section after server rejected missing DPDP consent. */
+  consentHighlight?: boolean;
 }
 
 const EnrollBeneficiaryModal: React.FC<Props> = ({
   programs, existingBeneficiaries, initialProgram, onClose, onSubmit,
-  completion, completionActions, showUploadDocuments = true,
+  completion, completionActions, showUploadDocuments = true, consentHighlight = false,
 }) => {
   const [form, setForm] = useState<EnrollFormData>({
     ...EMPTY_FORM,
@@ -455,12 +457,17 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
     </div>
   );
 
+  useEffect(() => {
+    if (consentHighlight) setOpenSection('D');
+  }, [consentHighlight]);
+
   const renderSection = (s: SectionState, body: React.ReactNode) => {
     const isOpen = openSection === s.key;
     const Icon = s.icon;
+    const dpdpError = consentHighlight && s.key === 'D';
     return (
       <div
-        className={`enroll-section ${isOpen ? 'open' : ''}`}
+        className={`enroll-section ${isOpen ? 'open' : ''} ${dpdpError ? 'enroll-section--dpdp-error' : ''}`}
         key={s.key}
       >
         <button
@@ -740,7 +747,7 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
                 <div className="consent-notice-title">{CONSENT_TEXT[form.consentLanguage].title}</div>
                 <p className="consent-notice-body">{CONSENT_TEXT[form.consentLanguage].body}</p>
               </div>
-              <label className="consent-check">
+              <label className={`consent-check ${consentHighlight ? 'consent-check--error' : ''}`}>
                 <input
                   type="checkbox"
                   checked={form.consentGiven}

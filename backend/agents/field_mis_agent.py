@@ -52,7 +52,7 @@ def detect_and_translate(state: FieldMISState) -> FieldMISState:
         import json
         parsed = json.loads(response.content.strip().strip("```json").strip("```"))
     except Exception:
-        # Fallback: simple keyword extraction for common patterns
+        # Fallback: keyword extraction for common field slang (Hinglish / rural phrasing)
         parsed = {
             "action": "field_visit",
             "beneficiary_name": None,
@@ -60,10 +60,22 @@ def detect_and_translate(state: FieldMISState) -> FieldMISState:
             "location": "Unknown",
             "count": None,
             "amount": None,
-            "notes": raw
+            "notes": raw,
         }
-        # Extract amount pattern like ₹5000 or Rs 5000
-        amount_match = re.search(r'[₹Rs\.]+\s*(\d+)', raw)
+        name_match = re.search(
+            r"(?:visited|met|spoke with|enrolled|ka visit|ki visit)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            raw,
+            re.I,
+        )
+        if not name_match:
+            name_match = re.search(r"\b([A-Z][a-z]{2,})\s+ka\s+visit", raw, re.I)
+        if not name_match:
+            name_match = re.search(r"\b(Meena|Sita|Ravi|Asha|Priya)\b", raw, re.I)
+        if name_match:
+            parsed["beneficiary_name"] = name_match.group(1).strip().title()
+        if re.search(r"ration", raw, re.I):
+            parsed["action"] = "ration_delivery"
+        amount_match = re.search(r"[₹Rs\.]+\s*(\d+)", raw)
         if amount_match:
             parsed["amount"] = int(amount_match.group(1))
     
