@@ -19,13 +19,22 @@ import { apiFetch } from '../../api/client';
 import { computeStage, nextDueMilestone, subscribeLifecycleHydrated, ackLapseRisk, daysSinceLastGift } from '../../utils/donorLifecycle';
 import { beneficiariesStaleOnService, daysSinceLastRecordedService } from '../../utils/beneficiarySignals';
 import { readComplianceReminders } from '../../utils/complianceReminders';
+import {
+  computeRenewalProgress,
+  renewalStepsForDoc,
+  renewalWorkspacePath,
+  formatRenewalNotificationMessage,
+} from '../../utils/complianceRenewal';
 import toast from 'react-hot-toast';
+import { toastSuccessWithNext } from '../../utils/toastNext';
 import GetStartedChecklist from '../../components/Onboarding/GetStartedChecklist';
 import MorningBriefBanner from '../../components/Onboarding/MorningBriefBanner';
 import PrioritiesRibbon, { type BriefPriorityCard } from '../../components/Dashboard/PrioritiesRibbon';
+import DoThisNowLauncher from '../../components/Dashboard/DoThisNowLauncher';
 import TrialDay7Card from '../../components/Onboarding/TrialDay7Card';
 import FirstRunEmptyState from '../../components/Onboarding/FirstRunEmptyState';
 import { STORE_CHANGED_EVENT } from '../../components/System/StoreChangedBridge';
+import { withPriorityActions } from '../../utils/priorityActions';
 import './Dashboard.css';
 
 const BRIEF_CACHE_KEY = 'goodjobs.morning_brief.v1';
@@ -357,6 +366,7 @@ function deriveFromStore(
   complianceDocs: any[],
   csrCards: any[],
   programBudgets: ProgramBudget[],
+  tasks: Task[] = [],
 ): PriorityItem[] {
   const items: PriorityItem[] = [];
   const nowMs = Date.now();
@@ -440,27 +450,28 @@ function deriveFromStore(
 
   for (const d of within14) {
     const daysLeft = Math.ceil((new Date(d.expiry).getTime() - nowMs) / 86_400_000);
-    const dayText = daysLeft < 0
-      ? `expired ${Math.abs(daysLeft)}d ago`
-      : daysLeft === 0 ? 'expires today' : `expires in ${daysLeft}d`;
+    const steps = renewalStepsForDoc(d.name, d.type);
+    const { done, total, pct } = computeRenewalProgress(tasks, String(d.id), steps.length);
     items.push({
       id: `exp-doc-14d-${d.id}`,
-      text: `${d.name} (${d.type}) — ${dayText} — renewal required`,
-      action: 'Renew now',
-      path: `/compliance?focus=${encodeURIComponent(d.id)}&alert=true`,
+      text: formatRenewalNotificationMessage(d.name, daysLeft, pct, done, total),
+      action: pct >= 100 ? 'Upload renewed cert' : 'Open renewal workspace',
+      path: renewalWorkspacePath(String(d.id)),
       level: 'urgent',
       ageDays: daysLeft < 0 ? Math.abs(daysLeft) : 0,
     });
   }
   if (farExpiring.length > 0) {
     const firstExpiring = farExpiring[0];
-    const docTypeSlug = firstExpiring?.type?.toLowerCase().replace(/\s+/g, '-') ?? 'doc';
     const lead = firstExpiring?.name ? `${firstExpiring.name} and ` : '';
+    const steps = renewalStepsForDoc(firstExpiring.name, firstExpiring.type);
+    const { done, total, pct } = computeRenewalProgress(tasks, String(firstExpiring.id), steps.length);
+    const progressSuffix = pct > 0 ? ` · ${pct}% (${done}/${total})` : '';
     items.push({
       id: 'exp-docs-far',
-      text: `${lead}${farExpiring.length} compliance document${farExpiring.length > 1 ? 's' : ''} expiring soon — renewal needed`,
-      action: 'Open Compliance',
-      path: `/compliance?doc=${docTypeSlug}&alert=true`,
+      text: `${lead}${farExpiring.length} compliance document${farExpiring.length > 1 ? 's' : ''} expiring soon — renewal in progress${progressSuffix}`,
+      action: 'Open renewal workspace',
+      path: renewalWorkspacePath(String(firstExpiring.id)),
       level: 'attention',
       ageDays: 14,
     });
@@ -790,7 +801,10 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
       try {
         const res = await apiFetch('/receipts/bulk', { method: 'POST' });
         if (res.ok) {
-          toast.success('Bulk receipts generated!');
+          toastSuccessWithNext('Bulk receipts generated!', {
+            label: 'Open finance',
+            onClick: () => onAction(item.path ?? '/funding'),
+          });
           setActionDone(prev => new Set([...prev, item.id]));
         } else {
           onAction(item.path ?? '/funding');
@@ -842,9 +856,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
               transition={{ delay: idx * 0.04 }}
-              onClick={item.path && !item.actionType ? () => onAction(item.path!) : undefined}
-              style={item.path && !item.actionType ? { cursor: 'pointer' } : undefined}
-              title={item.path && !item.actionType ? `Go to ${item.path}` : undefined}
+              onClick={undefined}
             >
               <span className="priority-item-dot" style={{ background: meta.color }} />
               <span className="priority-item-text">{item.text}</span>
@@ -865,7 +877,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
                 </span>
               )}
 
-              {item.action && !actionDone.has(item.id) && (
+              {(item.action || item.path) && !actionDone.has(item.id) && (
                 <button
                   className={`priority-item-action ${actionBusy.has(item.id) ? 'priority-item-action--busy' : ''}`}
                   onClick={(e) => { e.stopPropagation(); void handleItemAction(item); }}
@@ -873,7 +885,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
                   disabled={actionBusy.has(item.id)}
                 >
                   {actionBusy.has(item.id) ? <RefreshCw size={11} className="spin" /> : null}
-                  {item.action} <ArrowRight size={12} />
+                  {item.action ?? 'Open'} <ArrowRight size={12} />
                 </button>
               )}
               {actionDone.has(item.id) && (
@@ -898,7 +910,7 @@ const PrioritySection: React.FC<SectionProps> = ({ level, items, onAction, onSno
                 </button>
               )}
 
-              {level !== 'urgent' && item.actionType !== 'ack-lapse-risk' && (
+              {item.actionType !== 'ack-lapse-risk' && (
                 <div className="snooze-wrap" ref={snoozeMenuId === item.id ? menuRef : undefined}>
                   <button
                     className="priority-item-snooze"
@@ -1209,11 +1221,13 @@ const Dashboard: React.FC = () => {
 
   const allItems = useMemo(() => {
     void lifecycleTick;
-    const store = deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets);
-    const combined = [...taskItems, ...briefItems, ...store];
-    const base = combined.length === 0 ? getStaticFallback(layoutRole) : combined;
+    const store = withPriorityActions(
+      deriveFromStore(role, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets, sliceTasks),
+    );
+    const combined = withPriorityActions([...taskItems, ...briefItems, ...store]);
+    const base = combined.length === 0 ? withPriorityActions(getStaticFallback(layoutRole)) : combined;
     return filterForPreset(base, layoutRole);
-  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets, lifecycleTick, filterForPreset, role]);
+  }, [taskItems, briefItems, layoutRole, donors, transactions, campaigns, beneficiaries, complianceDocs, csrCards, programBudgets, sliceTasks, lifecycleTick, filterForPreset, role]);
 
   const isSnoozedFn = useCallback((id: string) => !woken.has(id) && isSnoozed(id, snoozed), [snoozed, woken]);
 
@@ -1384,6 +1398,7 @@ const DashboardActiveBody: React.FC<DashboardActiveBodyProps> = ({
           <p>{briefNarrative.split('\n').slice(0, 4).join(' ')}</p>
         </motion.div>
       )}
+      <DoThisNowLauncher />
       <PrioritiesRibbon cards={ribbonCards} loading={briefLoading} onDismiss={onRibbonDismiss} />
 
       {handledByAgents.length > 0 && (

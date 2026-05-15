@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useStore } from '../../store/useStore';
+import EmptyStateCTA from '../ui/EmptyStateCTA';
 
 // ── Field Type Definitions ────────────────────────────────────────────────────
 
@@ -179,9 +180,12 @@ const FormBuilder: React.FC = () => {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {savedForms.length === 0 ? (
-              <div className="card" style={{ padding: '1.25rem', color: 'var(--color-text-tertiary)' }}>
-                No forms yet. Create one with “New Form”.
-              </div>
+              <EmptyStateCTA
+                title="No forms yet"
+                description="Build a field data collection form once — staff can fill it offline and sync when connected."
+                actionLabel="New form"
+                onAction={() => { setFields(DEFAULT_FIELDS); setFormName('New Field Form'); setActiveTab('builder'); }}
+              />
             ) : savedForms.map(form => (
               <div key={form.id} className="card" style={{ padding: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>

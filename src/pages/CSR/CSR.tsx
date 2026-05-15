@@ -16,6 +16,11 @@ import { apiFetch } from '../../api/client';
 import { allowLocalPersistFallback, readApiError } from '../../utils/apiPersist';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import GrantFundingSummary from '../../components/CSR/GrantFundingSummary';
+import {
+  applyGrantStageTransition,
+  buildGrantStageWorkflowDeps,
+} from '../../utils/grantStageWorkflow';
+import { toastGrantLiveSuccess, toastGrantStageSuccess } from '../../utils/workflowSuccess';
 
 const columns = [
   { id: 'prospecting', title: 'Prospecting', class: 'col-prospecting' },
@@ -218,68 +223,27 @@ const CSR: React.FC = () => {
         } catch {
           // best-effort; UI already updated
         }
-        toast.success(`Moved "${card.company}" to ${columns.find(c => c.id === col)?.title}`);
-
-        // MOU → Live: create a compliance record + task so CSR-1 filing doesn't
-        // slip. The compliance doc is staged as "Expiring Soon" (due in 30 days)
-        // so it surfaces immediately in the Compliance HQ expiry list and
-        // triggers the At-Risk Grants Banner on this page.
-        if (card.col === 'mou' && col === 'live') {
-          const now = new Date();
-          // Due date source priority:
-          //  1. card.report_due_date — explicit field set when card is created/edited
-          //  2. earliest non-released tranche for this grant
-          //  3. fallback: now + 90 days
-          const nextTranche = grantTranches
-            .filter(t => String(t.grantId) === String(card.id) && t.status !== 'released')
-            .sort((a, b) => a.expectedDate.localeCompare(b.expectedDate))[0];
-          const dueDateRaw = card.report_due_date
-            || nextTranche?.expectedDate
-            || new Date(now.getTime() + 90 * 86_400_000).toISOString().slice(0, 10);
-          const dueDate = new Date(dueDateRaw);
-          const expiryIso = dueDateRaw.slice(0, 10);
-
-          // 1) Compliance record of type grant_report — surfaces in Compliance HQ
-          //    and AtRiskGrantsBanner. Caller-provided id ensures the subsequent
-          //    complianceGrantLink references the exact same record.
-          const newDocId = `doc-mou-live-${String(card.id)}-${now.getTime()}`;
-          addComplianceDoc({
-            id: newDocId,
-            name: `${card.company} — Grant Report`,
-            type: 'grant_report',
-            status: 'Expiring Soon',
-            expiry: expiryIso,
-          });
-          // 1b) Link the new doc to the grant so all compliance panels can join correctly.
-          addComplianceGrantLink({
-            id: `cgl-mou-live-${String(card.id)}-${now.getTime()}`,
-            grantId: String(card.id),
-            complianceDocId: newDocId,
-            reason: 'Auto-created on MoU → Live transition; grant report filing required',
-          });
-
-          // 2) High-priority task for the finance / ED team
-          const compTask: Task = {
-            id: `mou-live-task-${String(card.id)}-${now.getTime()}`,
-            title: `Submit grant report — ${card.company} grant is now Live`,
-            description: `${card.company} moved from MoU Signed → Project Live. File the grant report and upload the executed MoU to the Compliance Vault by ${expiryIso}.`,
-            priority: 'high',
-            status: 'open',
-            sourceType: 'agent',
-            sourceAgent: 'Pipeline Guardian',
-            relatedEntityType: 'grant',
-            relatedEntityId: String(card.id),
-            dueAt: dueDate.toISOString(),
-            createdAt: now.toISOString(),
-            updatedAt: now.toISOString(),
-          };
-          addTask(compTask);
-          // Toast with deeplink to Compliance HQ
+        const fromCol = card.col;
+        const result = applyGrantStageTransition({
+          card,
+          fromCol,
+          toCol: col,
+          deps: buildGrantStageWorkflowDeps(() => useStore.getState()),
+        });
+        if (result.liveBundleApplied) {
+          toastGrantLiveSuccess(card.id, card.company);
+        } else if (result.tasksCreated > 0) {
+          toastGrantStageSuccess(card.id, columns.find(c => c.id === col)?.title || col);
+        } else {
+          toast.success(`Moved "${card.company}" to ${columns.find(c => c.id === col)?.title}`);
+        }
+        if (result.transition === 'mou→live') {
           toast(
             (t) => (
               <span style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <strong>Grant report record created — due {expiryIso}</strong>
+                <strong>Reporting cadence started</strong>
                 <button
+                  type="button"
                   style={{ background: '#0F766E', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: '0.75rem', alignSelf: 'flex-start' }}
                   onClick={() => { navigate('/compliance?alert=true'); toast.dismiss(t.id); }}
                 >

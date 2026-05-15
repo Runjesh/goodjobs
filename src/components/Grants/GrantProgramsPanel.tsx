@@ -4,6 +4,7 @@ import { Target, Plus, X, ArrowRight, Users, Activity, ClipboardCheck, Trash2 } 
 import toast from 'react-hot-toast';
 import { useStore } from '../../store/useStore';
 import { ModalOverlay } from '../ui/ModalOverlay';
+import EmptyStateCTA from '../ui/EmptyStateCTA';
 import { programIdFromName } from '../../utils/programFinance';
 import {
   selectProgramsForGrant,
@@ -102,9 +103,12 @@ const GrantProgramsPanel: React.FC<Props> = ({ grantId, periodDays = 90 }) => {
       </div>
 
       {myLinks.length === 0 ? (
-        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-tertiary)' }}>
-          No programmes linked yet. Link one to see live beneficiary count, service logs, and report-readiness here.
-        </div>
+        <EmptyStateCTA
+          title="No programmes linked yet"
+          description="Link a programme to see live beneficiary count, service logs, and report-readiness on this grant."
+          actionLabel="Add programme"
+          onAction={() => setShowAdd(true)}
+        />
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {rollups.map((r) => {

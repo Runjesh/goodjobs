@@ -9,8 +9,28 @@ import type { ProgramGrantLink } from '../utils/programGrantLink';
 import type { ComplianceGrantLink } from '../utils/complianceGrant';
 import type { GrantBudgetHead, JournalExpense } from '../utils/grantBudgetHeads';
 import type { VolunteerAssignment } from '../utils/volunteerProgram';
+import type { ReportRecord } from '../data/reportsCatalogue';
+import { notifyStoreChanged } from '../utils/storeNotify';
 
 const TASKS_LS = 'goodjobs.tasks.v1';
+const GRANT_REPORTS_LS = 'goodjobs.grant_reports.v1';
+
+function loadGrantReportsFromLs(): ReportRecord[] {
+  try {
+    const raw = localStorage.getItem(GRANT_REPORTS_LS);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr) ? (arr as ReportRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistGrantReports(reports: ReportRecord[]) {
+  try {
+    localStorage.setItem(GRANT_REPORTS_LS, JSON.stringify(reports));
+  } catch { /* ignore */ }
+}
 
 function loadTasksFromLs(): Task[] {
   try {
@@ -226,6 +246,7 @@ interface AppState {
   grantBudgetHeads: GrantBudgetHead[];
   programGrantLinks: ProgramGrantLink[];
   complianceGrantLinks: ComplianceGrantLink[];
+  grantReports: ReportRecord[];
   pendingTeamMembers: PendingTeamMember[];
   outreachLog: OutreachEntry[];
   programEffort: EffortEntry[];
@@ -291,6 +312,8 @@ interface AppState {
   addProgramGrantLink: (link: ProgramGrantLink) => void;
   removeProgramGrantLink: (id: string) => void;
   addComplianceGrantLink: (link: ComplianceGrantLink) => void;
+  upsertGrantReport: (report: ReportRecord) => void;
+  setGrantReports: (reports: ReportRecord[]) => void;
 
   addPendingTeamMember: (m: PendingTeamMember) => void;
   updatePendingTeamMember: (email: string, role: string) => void;
@@ -368,13 +391,17 @@ export const useStore = create<AppState>((set, get) => ({
   grantBudgetHeads: [],
   programGrantLinks: [],
   complianceGrantLinks: [],
+  grantReports: typeof localStorage !== 'undefined' ? loadGrantReportsFromLs() : [],
   pendingTeamMembers: [],
   outreachLog: [],
   programEffort: [],
   volunteerAssignments: [],
 
   setDonors: (donors) => set(() => ({ donors })),
-  setComplianceDocs: (complianceDocs) => set(() => ({ complianceDocs })),
+  setComplianceDocs: (complianceDocs) => {
+    set(() => ({ complianceDocs }));
+    notifyStoreChanged();
+  },
   setTransactions: (transactions) => set(() => ({ transactions })),
   setCampaigns: (campaigns) => set(() => ({ campaigns })),
   setCsrCards: (csrCards) => set(() => ({ csrCards })),
@@ -446,9 +473,16 @@ export const useStore = create<AppState>((set, get) => ({
     return { transactions: [newTx, ...state.transactions.filter(t => t.id !== newTx.id)], campaigns: updatedCampaigns, donors: updatedDonors };
   }),
 
-  moveCSRCard: (cardId, newCol) => set((state) => ({
-    csrCards: state.csrCards.map(c => (String(c.id) === String(cardId) ? { ...c, col: newCol } : c)),
-  })),
+  moveCSRCard: (cardId, newCol) => set((state) => {
+    const now = new Date().toISOString();
+    return {
+      csrCards: state.csrCards.map(c =>
+        String(c.id) === String(cardId)
+          ? { ...c, col: newCol, stage_entered_at: now, last_activity_at: now }
+          : c,
+      ),
+    };
+  }),
 
   addCSRCard: (card) => set((state) => ({
     csrCards: [...state.csrCards, { ...card, id: Date.now() }]
@@ -500,13 +534,17 @@ export const useStore = create<AppState>((set, get) => ({
     return { complianceDocs: [row, ...state.complianceDocs.filter(d => d.id !== id)] };
   }),
 
-  addTask: (task) => set((state) => {
-    const tasks = [task, ...state.tasks.filter(t => t.id !== task.id)];
-    persistTasks(tasks);
-    return { tasks };
-  }),
+  addTask: (task) => {
+    set((state) => {
+      const tasks = [task, ...state.tasks.filter(t => t.id !== task.id)];
+      persistTasks(tasks);
+      return { tasks };
+    });
+    notifyStoreChanged();
+  },
 
-  upsertTaskByIntent: (incoming) => set((state) => {
+  upsertTaskByIntent: (incoming) => {
+    set((state) => {
     const key = incoming.sourceIntentId;
     let tasks: Task[];
     if (!key) {
@@ -535,7 +573,9 @@ export const useStore = create<AppState>((set, get) => ({
     }
     persistTasks(tasks);
     return { tasks };
-  }),
+    });
+    notifyStoreChanged();
+  },
 
   completeTask: (taskId, at = new Date()) => {
     const state = get();
@@ -564,6 +604,7 @@ export const useStore = create<AppState>((set, get) => ({
       persistTasks(nextTasks);
       return { tasks: nextTasks };
     });
+    notifyStoreChanged();
     return completedSnapshot;
   },
 
@@ -669,6 +710,17 @@ export const useStore = create<AppState>((set, get) => ({
   addComplianceGrantLink: (link) => set((state) => ({
     complianceGrantLinks: [link, ...state.complianceGrantLinks.filter(l => l.id !== link.id)],
   })),
+
+  upsertGrantReport: (report) => set((state) => {
+    const grantReports = [report, ...state.grantReports.filter(r => r.id !== report.id)];
+    persistGrantReports(grantReports);
+    return { grantReports };
+  }),
+
+  setGrantReports: (reports) => set(() => {
+    persistGrantReports(reports);
+    return { grantReports: reports };
+  }),
 
   addPendingTeamMember: (m) => set((state) => {
     const email = m.email.trim().toLowerCase();

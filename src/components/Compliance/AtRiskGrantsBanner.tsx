@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ShieldAlert, ArrowRight } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { selectAtRiskGrants } from '../../utils/complianceGrant';
+import { renewalWorkspacePath } from '../../utils/complianceRenewal';
 
 interface Props {
   /** When set, only show at-risk entries for that grant; used on GrantDetail. */
@@ -71,7 +72,7 @@ const AtRiskGrantsBanner: React.FC<Props> = ({ grantId, hideWhenEmpty = true }) 
                 type="button"
                 className="btn btn-secondary"
                 style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
-                onClick={() => navigate(`/compliance?focus=${encodeURIComponent(it.doc.id)}`)}
+                onClick={() => navigate(renewalWorkspacePath(it.doc.id))}
               >
                 Renew first <ArrowRight size={12} />
               </button>

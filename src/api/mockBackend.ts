@@ -744,7 +744,7 @@ const HANDLERS: Handler[] = [
   },
   {
     test: (p, m) => m === 'POST' && p === '/gen-ai/donor-outreach-draft',
-    handle: async (_p, init) => {
+    handle: (_p, init) => {
       const body = init?.body ? JSON.parse(String(init.body)) : {};
       const name = (body.donor_name || 'Friend').split(' ')[0];
       return jsonResponse({ message: `Namaste ${name}! Thank you for your continued support.`, channel: 'whatsapp' });

@@ -8,6 +8,7 @@ import { listItemEnterDelay } from '../../motion/variants';
 import { useStore } from '../../store/useStore';
 import { isVisibleToday, type Task, type TaskRelatedEntityType, type TaskRecurrence } from '../../utils/tasks';
 import { inboxItemToTask, type InboxItemLike } from '../../utils/inboxToTask';
+import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
 
 /**
  * Tasks page — a view onto the cross-module Tasks slice. Inbox flags fetched
@@ -406,16 +407,14 @@ const Tasks: React.FC = () => {
           ))}
         </div>
       ) : visibleTasks.length === 0 ? (
-        <div style={{
-          padding: '1.5rem', border: '1px solid var(--color-border-light)',
-          borderRadius: 'var(--radius-lg)', background: 'var(--color-bg-card)', textAlign: 'center',
-        }}>
-          <div style={{ fontSize: '2rem', marginBottom: 8 }}>🎉</div>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>All clear — nothing to do right now</div>
-          <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
-            New work will surface here automatically.
-          </div>
-        </div>
+        <EmptyStateCTA
+          title="All clear — nothing to do right now"
+          description="New work from finance, compliance, grants, and programmes will surface here automatically."
+          actionLabel="Go to Today"
+          onAction={() => navigate('/')}
+          secondaryLabel="Open programmes"
+          onSecondary={() => navigate('/programs')}
+        />
       ) : (
         <div className="grid gap-3">
           {visibleTasks.map((t, idx) => (

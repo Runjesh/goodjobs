@@ -18,6 +18,7 @@ import StageBadge from '../../components/Donor/StageBadge';
 import TouchpointTimeline from '../../components/Donor/TouchpointTimeline';
 import DonorImpactPanel from '../../components/Donor/DonorImpactPanel';
 import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
+import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
 import {
   computeStage,
   computeDonorLifecycleStage,
@@ -183,7 +184,7 @@ const CRM: React.FC = () => {
         }
         if (messages.length === 0 && donor) {
           messages.push(
-            { sender: 'Donor', text: `${donor.name} — ${donor.lifecycleStage || 'supporter'} with ₹${(donor.totalGiven ?? 0).toLocaleString('en-IN')} total given.` },
+            { sender: 'Donor', text: `${donor.name} — supporter with ₹${(donor.totalGiven ?? 0).toLocaleString('en-IN')} total given.` },
             { sender: 'GoodJobs', text: 'No logged messages yet — use outreach below to start the thread.' },
           );
         }
@@ -1141,7 +1142,14 @@ const CRM: React.FC = () => {
 
           <div ref={donorListRef} className="donor-list">
             {filteredDonors.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-tertiary)' }}>No donors found.</div>
+              <EmptyStateCTA
+                title="No donors found"
+                description="Add a contact manually or import a CSV to start nurture workflows and receipts."
+                actionLabel="Add donor"
+                onAction={() => setShowAddContact(true)}
+                secondaryLabel="Import CSV"
+                onSecondary={() => setShowCSVImport(true)}
+              />
             ) : (
               <div
                 style={{

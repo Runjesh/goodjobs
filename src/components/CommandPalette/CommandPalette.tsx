@@ -551,7 +551,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
 
           {workflowSuggestions.length > 0 && !confirmDonor && !confirmIntent && (
             <div className="suggestion-group">
-              <motion.div className="suggestion-group-title">Jobs to be done</motion.div>
+              <div className="suggestion-group-title">Jobs to be done</div>
               {workflowSuggestions.map(s => {
                 const Icon = s.icon;
                 return (

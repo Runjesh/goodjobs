@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -17,6 +17,17 @@ import { recordReportDraft } from '../../utils/trial';
 import ContextualUpgradePrompt from '../../components/Billing/ContextualUpgradePrompt';
 import { readToCForProgram } from '../../utils/tocStorage';
 import { programIdFromName } from '../../utils/programFinance';
+import ReportReadinessPanel from '../../components/Reports/ReportReadinessPanel';
+import ReportDraftResult, { type SectionRow } from '../../components/Reports/ReportDraftResult';
+import {
+  computeReportReadiness,
+  draftSectionSources,
+  reportReadinessTaskIntent,
+  type ReportReadinessInput,
+} from '../../utils/reportReadiness';
+import { toastSuccessWithNext } from '../../utils/toastNext';
+import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
+import { notifyStoreChanged } from '../../utils/storeNotify';
 import './Reports.css';
 
 type ReportType = 'funder' | 'impact' | 'donor' | 'board';
@@ -238,9 +249,16 @@ function buildMarkdown(
 }
 
 type MockReport = ReportRecord;
-const MOCK_REPORTS: readonly MockReport[] = REPORTS_CATALOGUE;
 
 const Reports: React.FC = () => {
+  const grantReports = useStore(s => s.grantReports);
+  const allReports = useMemo(() => {
+    const seeded = [...REPORTS_CATALOGUE];
+    for (const r of grantReports) {
+      if (!seeded.some(s => s.id === r.id)) seeded.unshift(r);
+    }
+    return seeded;
+  }, [grantReports]);
   useFocusFromUrl('report');
   const [activeType, setActiveType] = useState<ReportType | 'all'>('all');
   const [draftingReport, setDraftingReport] = useState<string | null>(null);
@@ -249,6 +267,10 @@ const Reports: React.FC = () => {
   const [reportStatuses, setReportStatuses] = useState<Record<string, MockReport['status']>>({});
   // Step 3: ToC warning banner state
   const [tocWarnFor, setTocWarnFor] = useState<{ reportId: string; reportType: ReportType } | null>(null);
+  const [workflowTemplate, setWorkflowTemplate] = useState<ReportType>('funder');
+  const [workflowReportId, setWorkflowReportId] = useState<string | null>(null);
+  const [draftSections, setDraftSections] = useState<SectionRow[] | null>(null);
+  const [refreshingSection, setRefreshingSection] = useState<string | null>(null);
 
   const effectiveStatus = (r: MockReport): MockReport['status'] => reportStatuses[r.id] ?? r.status;
 
@@ -264,7 +286,7 @@ const Reports: React.FC = () => {
     toast.success('Report moved to next stage.');
 
     if (current === 'draft' && nextStatus === 'review') {
-      const report = MOCK_REPORTS.find(r => r.id === id);
+      const report = allReports.find(r => r.id === id);
       const reportTitle = report?.title ?? `Report #${id}`;
       const nowIso = new Date().toISOString();
       const dueFin = new Date(Date.now() + 3 * 86_400_000).toISOString();
@@ -318,12 +340,13 @@ const Reports: React.FC = () => {
   const navigate = useNavigate();
   const { user, can } = useAuth();
   const {
-    donors: _donors,
+    donors,
     transactions,
     beneficiaries,
     beneficiaryOutcomes,
     journalEntries,
     ngoDetails,
+    csrCards,
   } = useStore(s => ({
     donors:              s.donors,
     transactions:        s.transactions,
@@ -331,7 +354,76 @@ const Reports: React.FC = () => {
     beneficiaryOutcomes: s.beneficiaryOutcomes,
     journalEntries:      s.journalEntries,
     ngoDetails:          s.ngoDetails,
+    csrCards:            s.csrCards,
   }));
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('action') !== 'draft') return;
+    const type = p.get('type') as ReportType | null;
+    const reportId = p.get('report');
+    if (type && REPORT_TYPES.some(t => t.id === type)) setWorkflowTemplate(type);
+    if (reportId) setWorkflowReportId(reportId);
+  }, []);
+
+  const workflowReport = useMemo(() => {
+    if (workflowReportId) return allReports.find(r => r.id === workflowReportId) ?? null;
+    return allReports.find(r => r.type === workflowTemplate) ?? null;
+  }, [allReports, workflowReportId, workflowTemplate]);
+
+  const readinessInput: ReportReadinessInput = useMemo(() => ({
+    report: workflowReport ?? {
+      id: 'new',
+      title: REPORT_TYPES.find(t => t.id === workflowTemplate)?.label ?? 'Report',
+      type: workflowTemplate,
+      status: 'draft',
+      date: new Date().toISOString().slice(0, 10),
+    },
+    beneficiaries,
+    beneficiaryOutcomes,
+    transactions,
+    journalEntries,
+    csrCards,
+    donors,
+  }), [workflowReport, workflowTemplate, beneficiaries, beneficiaryOutcomes, transactions, journalEntries, csrCards, donors]);
+
+  const workflowReadiness = useMemo(
+    () => computeReportReadiness(readinessInput),
+    [readinessInput],
+  );
+
+  const createReadinessFollowUpTasks = (report: ReportRecord, readiness = workflowReadiness) => {
+    const now = new Date().toISOString();
+    for (const item of readiness.items.filter(i => !i.met)) {
+      upsertTaskByIntent({
+        id: reportReadinessTaskIntent(report.id, item.id),
+        title: `Report gap: ${item.label}`,
+        description: `Complete before finalising "${report.title}". ${item.fixLabel}.`,
+        priority: 'high',
+        status: 'open',
+        sourceType: 'agent',
+        sourceAgent: 'Reports',
+        sourceIntentId: reportReadinessTaskIntent(report.id, item.id),
+        relatedEntityType: 'compliance',
+        relatedEntityId: report.id,
+        meta: { link: item.fixPath, reportId: report.id },
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    notifyStoreChanged();
+  };
+
+  const buildSectionRows = (report: ReportRecord, markdown?: string): SectionRow[] => {
+    const sources = draftSectionSources(report, readinessInput);
+    const md = markdown ?? '';
+    return sources.map(src => ({
+      id: src.id,
+      title: src.title,
+      source: src,
+      preview: md.slice(0, 180) || `Pulled from ${src.sourceLabel} — refresh after you update source data.`,
+    }));
+  };
   const { tier, limits, usage, openUpgrade } = useTier();
   const [reportUpgradeOpen, setReportUpgradeOpen] = useState(false);
 
@@ -407,7 +499,12 @@ const Reports: React.FC = () => {
     return nodes.length > 0;
   };
 
-  const handleDraftReport = async (type: ReportType, report: ReportRecord | null = null, skipToCCheck = false) => {
+  const handleDraftReport = async (
+    type: ReportType,
+    report: ReportRecord | null = null,
+    skipToCCheck = false,
+    skipReadiness = false,
+  ) => {
     if (!can('reports', 'canEdit')) {
       toast.error('You do not have permission to generate reports.');
       return;
@@ -417,37 +514,60 @@ const Reports: React.FC = () => {
       return;
     }
 
-    // Step 3: ToC warning gate
-    if (!skipToCCheck && !hasToCForReport(report)) {
-      setTocWarnFor({ reportId: report?.id ?? 'new', reportType: type });
+    const target = report ?? workflowReport;
+    const input: ReportReadinessInput = target
+      ? { ...readinessInput, report: target }
+      : readinessInput;
+    const readiness = computeReportReadiness(input);
+    if (!skipReadiness && !readiness.isReady) {
+      toast.error(`Cannot draft yet — ${readiness.readyLabel}. Fix linked data first.`);
       return;
     }
 
-    const draftKey = report?.id ?? type;
+    // Step 3: ToC warning gate
+    if (!skipToCCheck && target && !hasToCForReport(target)) {
+      setTocWarnFor({ reportId: target.id, reportType: type });
+      return;
+    }
+
+    const draftKey = target?.id ?? type;
     setDraftingReport(draftKey);
     let succeeded = false;
+    let markdown = '';
     try {
-      const context = buildDraftContext(report, type);
+      const context = buildDraftContext(target, type);
       const res = await apiFetch('/gen-ai/draft-report', {
         method: 'POST',
-        body: JSON.stringify({ type, role: user?.role, title: report?.title, context }),
+        body: JSON.stringify({ type, role: user?.role, title: target?.title, context }),
       });
       if (!res.ok) throw new Error('Draft failed');
       const data = await res.json();
-      if (data.markdown) {
-        const blob = new Blob([data.markdown], { type: 'text/markdown' });
+      markdown = String(data.markdown ?? '');
+      if (markdown) {
+        const blob = new Blob([markdown], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${(report?.title ?? data.title ?? 'Report').replace(/\s+/g, '_')}.md`;
+        a.download = `${(target?.title ?? data.title ?? 'Report').replace(/\s+/g, '_')}.md`;
         a.click();
         URL.revokeObjectURL(url);
       }
       succeeded = true;
-      if (report) {
-        setDraftReadyIds(prev => new Set(prev).add(report.id));
+      if (target) {
+        setDraftReadyIds(prev => new Set(prev).add(target.id));
+        setDraftSections(buildSectionRows(target, markdown));
+        createReadinessFollowUpTasks(target, readiness);
       }
-      toast.success('AI draft ready — downloading now.');
+      const firstGap = readiness.items.find(i => !i.met);
+      toastSuccessWithNext(
+        'AI draft generated from live programme, finance, and donor data.',
+        {
+          label: firstGap ? firstGap.fixLabel : 'Review draft sections',
+          onClick: () => {
+            if (firstGap) navigate(firstGap.fixPath);
+          },
+        },
+      );
     } catch {
       // The mock backend intercepts all requests in dev, so catch only fires
       // on truly unexpected errors (e.g. JSON parse failure). Do not mark
@@ -483,10 +603,10 @@ const Reports: React.FC = () => {
   };
 
   const filteredReports = activeType === 'all'
-    ? MOCK_REPORTS
-    : MOCK_REPORTS.filter(r => r.type === activeType);
+    ? allReports
+    : allReports.filter(r => r.type === activeType);
 
-  const reportsReadyForDraft = MOCK_REPORTS.filter(r => {
+  const reportsReadyForDraft = allReports.filter(r => {
     const rd = computeDataReadiness(r, beneficiaries, beneficiaryOutcomes, transactions);
     return rd.pct >= 75;
   }).length;
@@ -502,12 +622,100 @@ const Reports: React.FC = () => {
         <div className="reports-header-right">
           <span className="reports-autosave">{autoSaveText}</span>
           {can('reports', 'canEdit') && (
-            <button className="reports-btn-primary" onClick={() => handleDraftReport('funder')}>
-              <Sparkles size={15} /> AI Draft Report
+            <button
+              className="reports-btn-primary"
+              disabled={!workflowReadiness.isReady || !!draftingReport}
+              title={workflowReadiness.isReady ? 'Generate AI draft' : workflowReadiness.readyLabel}
+              onClick={() => handleDraftReport(workflowTemplate, workflowReport)}
+            >
+              <Sparkles size={15} /> {draftingReport ? 'Drafting…' : 'AI Draft'}
             </button>
           )}
         </div>
       </div>
+
+      <section className="reports-workflow card">
+        <h2 className="reports-workflow-title">1. Choose report template</h2>
+        <div className="reports-workflow-templates">
+          {REPORT_TYPES.map(rt => (
+            <button
+              key={rt.id}
+              type="button"
+              className={`reports-workflow-template ${workflowTemplate === rt.id ? 'active' : ''}`}
+              onClick={() => { setWorkflowTemplate(rt.id); setWorkflowReportId(null); setDraftSections(null); }}
+            >
+              <rt.icon size={16} style={{ color: rt.color }} />
+              {rt.label}
+            </button>
+          ))}
+        </div>
+        {allReports.filter(r => r.type === workflowTemplate).length > 0 && (
+          <label className="reports-workflow-select">
+            Linked report record
+            <select
+              className="input"
+              value={workflowReportId ?? workflowReport?.id ?? ''}
+              onChange={e => { setWorkflowReportId(e.target.value || null); setDraftSections(null); }}
+            >
+              {allReports.filter(r => r.type === workflowTemplate).map(r => (
+                <option key={r.id} value={r.id}>{r.title}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <h2 className="reports-workflow-title">2. Data readiness</h2>
+        <ReportReadinessPanel readiness={workflowReadiness} />
+        <h2 className="reports-workflow-title">3. AI drafting</h2>
+        <p className="reports-workflow-hint">
+          {workflowReadiness.isReady
+            ? 'Prerequisites met — generate a draft anchored to live data.'
+            : 'Resolve missing items above before the AI assembles your report.'}
+        </p>
+        {can('reports', 'canEdit') && (
+          <button
+            className="reports-btn-primary"
+            disabled={!workflowReadiness.isReady || !!draftingReport}
+            onClick={() => handleDraftReport(workflowTemplate, workflowReport)}
+          >
+            <Sparkles size={15} /> {draftingReport ? 'Drafting…' : 'Generate AI draft'}
+          </button>
+        )}
+      </section>
+
+      {draftSections && workflowReport && (
+        <ReportDraftResult
+          reportTitle={workflowReport.title}
+          sections={draftSections}
+          refreshingId={refreshingSection}
+          onRefreshSection={async (sectionId) => {
+            setRefreshingSection(sectionId);
+            try {
+              const res = await apiFetch('/gen-ai/draft-report', {
+                method: 'POST',
+                body: JSON.stringify({
+                  type: workflowTemplate,
+                  role: user?.role,
+                  title: workflowReport.title,
+                  context: buildDraftContext(workflowReport, workflowTemplate),
+                  section: sectionId,
+                }),
+              });
+              if (!res.ok) throw new Error('refresh');
+              const data = await res.json();
+              const snippet = String(data.markdown ?? data.section ?? '').slice(0, 280);
+              setDraftSections(prev => (prev ?? []).map(s =>
+                s.id === sectionId ? { ...s, preview: snippet || s.preview } : s,
+              ));
+              toast.success('Section refreshed from latest data.');
+              notifyStoreChanged();
+            } catch {
+              toast.error('Could not refresh section.');
+            } finally {
+              setRefreshingSection(null);
+            }
+          }}
+        />
+      )}
 
       {/* ── Step 3: ToC warning banner ────────────────────────────── */}
       {tocWarnFor && (
@@ -527,8 +735,8 @@ const Reports: React.FC = () => {
             <button
               className="reports-ai-btn reports-ai-btn--primary"
               onClick={() => {
-                const r = MOCK_REPORTS.find(r => r.id === tocWarnFor.reportId) ?? null;
-                handleDraftReport(tocWarnFor.reportType, r, true);
+                const r = allReports.find(r => r.id === tocWarnFor.reportId) ?? null;
+                handleDraftReport(tocWarnFor.reportType, r, true, true);
               }}
             >
               Draft anyway
@@ -544,44 +752,20 @@ const Reports: React.FC = () => {
       )}
 
       {/* ── AI Assembler banner ────────────────────────────────────── */}
-      {can('reports', 'canEdit') && (
-        <div className="reports-ai-banner reports-ai-banner--top">
+      {can('reports', 'canEdit') && reportsReadyForDraft > 0 && (
+        <motion.div className="reports-ai-banner reports-ai-banner--top">
           <div className="reports-ai-icon">
             <Sparkles size={18} />
           </div>
           <div className="reports-ai-content">
-            <div className="reports-ai-title">
-              {reportsReadyForDraft} reports have enough data to auto-draft right now
+          <div className="reports-ai-title">
+              {reportsReadyForDraft} report{reportsReadyForDraft === 1 ? '' : 's'} at 75%+ legacy data score
             </div>
             <div className="reports-ai-desc">
-              The AI agent pre-fills reports from live program data, financials, and M&E records. Review in minutes.
+              Use the readiness workflow above for fix links, follow-up tasks, and section refresh.
             </div>
           </div>
-          <div className="reports-ai-actions">
-            <button
-              className="reports-ai-btn reports-ai-btn--primary"
-              onClick={() => handleDraftReport('funder')}
-              disabled={!!draftingReport}
-            >
-              {draftingReport === 'funder' ? '…' : 'Draft All'}
-            </button>
-            {REPORT_TYPES.map(rt => (
-              <button
-                key={rt.id}
-                className="reports-ai-btn"
-                onClick={() => handleDraftReport(rt.id)}
-                disabled={draftingReport === rt.id}
-              >
-                <span
-                  className="reports-ai-btn-dot"
-                  style={{ background: rt.color }}
-                  aria-hidden="true"
-                />
-                {draftingReport === rt.id ? '…' : rt.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        </motion.div>
       )}
 
       {/* ── Theory of Change anchor ───────────────────────────────── */}
@@ -631,7 +815,7 @@ const Reports: React.FC = () => {
           { key: 'review'    , label: 'In Review', Icon: Clock,        color: '#d97706', bg: '#fef3c7' },
           { key: 'submitted' , label: 'Submitted', Icon: CheckCircle2, color: '#16A34A', bg: '#d1fae5' },
         ] as { key: MockReport['status']; label: string; Icon: React.ElementType; color: string; bg: string }[]).map(lane => {
-          const laneReports = MOCK_REPORTS.filter(r => effectiveStatus(r) === lane.key);
+          const laneReports = allReports.filter(r => effectiveStatus(r) === lane.key);
           const advanceLabel: Record<string, string> = {
             overdue: 'Move to Draft →', draft: 'Send to Review →', review: 'Mark Submitted ✓',
           };
@@ -683,7 +867,7 @@ const Reports: React.FC = () => {
       <div className="reports-type-grid">
         {REPORT_TYPES.map(rt => {
           const Icon = rt.icon;
-          const count = MOCK_REPORTS.filter(r => r.type === rt.id).length;
+          const count = allReports.filter(r => r.type === rt.id).length;
           return (
             <motion.div
               key={rt.id}
@@ -718,16 +902,33 @@ const Reports: React.FC = () => {
           )}
         </div>
 
-        <div className="reports-list">
-          {filteredReports.map((report, i) => {
+        <motion.div className="reports-list">
+          {filteredReports.length === 0 ? (
+            <EmptyStateCTA
+              title="No reports in this view"
+              description="Pick a report type or clear the filter — then check readiness before drafting."
+              actionLabel="Show all reports"
+              onAction={() => setActiveType('all')}
+              secondaryLabel="Open programmes"
+              onSecondary={() => navigate('/programs')}
+            />
+          ) : filteredReports.map((report, i) => {
             const sm = STATUS_META[effectiveStatus(report)];
             const typeInfo = REPORT_TYPES.find(t => t.id === report.type)!;
             const TypeIcon = typeInfo.icon;
             const isDrafting = draftingReport === report.id;
             const isDraftReady = draftReadyIds.has(report.id);
             // Step 2: live readiness bar
-            const readiness = computeDataReadiness(report, beneficiaries, beneficiaryOutcomes, transactions);
-            const rdColor = readiness.pct >= 75 ? '#16A34A' : readiness.pct >= 50 ? '#d97706' : '#DC2626';
+            const readiness = computeReportReadiness({
+              report,
+              beneficiaries,
+              beneficiaryOutcomes,
+              transactions,
+              journalEntries,
+              csrCards,
+              donors,
+            });
+            const rdColor = readiness.isReady ? '#16A34A' : readiness.missingCount <= 2 ? '#d97706' : '#DC2626';
 
             return (
               <motion.div
@@ -754,9 +955,9 @@ const Reports: React.FC = () => {
                   {/* Step 2: 4-segment readiness bar */}
                   <div className="reports-item-readiness">
                     <div className="reports-item-readiness-segments">
-                      {readiness.segments.map(seg => (
+                      {readiness.items.map(seg => (
                         <div
-                          key={seg.label}
+                          key={seg.id}
                           className="reports-item-readiness-seg"
                           style={{ background: seg.met ? rdColor : '#e5e7eb' }}
                           title={`${seg.label}: ${seg.met ? '✓' : '✗'}`}
@@ -764,10 +965,10 @@ const Reports: React.FC = () => {
                       ))}
                     </div>
                     <span className="reports-item-readiness-label" style={{ color: rdColor }}>
-                      {readiness.pct}% data ready
+                      {readiness.readyLabel}
                     </span>
                     <span className="reports-item-readiness-detail">
-                      {readiness.segments.filter(s => s.met).map(s => s.label).join(' · ') || 'No data yet'}
+                      {readiness.items.filter(s => s.met).map(s => s.label).join(' · ') || 'No data yet'}
                     </span>
                   </div>
 
@@ -811,8 +1012,8 @@ const Reports: React.FC = () => {
                   {can('reports', 'canEdit') && (
                     <button
                       className="reports-item-btn"
-                      title="AI Draft"
-                      disabled={isDrafting}
+                      title={readiness.isReady ? 'AI Draft' : readiness.readyLabel}
+                      disabled={isDrafting || !readiness.isReady}
                       onClick={() => handleDraftReport(report.type, report)}
                     >
                       <Sparkles size={14} />
@@ -832,7 +1033,7 @@ const Reports: React.FC = () => {
               </motion.div>
             );
           })}
-        </div>
+        </motion.div>
       </div>
 
       {/* Tier-cap prompt */}

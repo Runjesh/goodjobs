@@ -16,6 +16,8 @@ import { programIdFromName } from '../../utils/programFinance';
 import { ModalOverlay } from '../../components/ui/ModalOverlay';
 import { useStore } from '../../store/useStore';
 import { resolvePersistedJournalEntryId } from '../../utils/journalEntryId';
+import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
+import { appNavigate } from '../../utils/appNavigate';
 
 // ── Pure-JS ZIP creator (STORE/no-compression) ───────────────────────────────
 // Builds a valid ZIP binary in memory without any external library dependency.
@@ -1143,7 +1145,12 @@ const Finance: React.FC = () => {
             {exLoading && exTx.length === 0 ? (
               <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>Loading…</div>
             ) : exTx.length === 0 ? (
-              <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>No exceptions for this threshold.</div>
+              <EmptyStateCTA
+                title="No exceptions for this threshold"
+                description="Bank and Tally imports are fully classified — nothing needs your review right now."
+                actionLabel="Open finance"
+                onAction={() => appNavigate('/funding')}
+              />
             ) : (
               <div
                 ref={exScrollRef}
@@ -1494,7 +1501,12 @@ const Finance: React.FC = () => {
             <span>Action</span>
           </div>
           {grants.length === 0 ? (
-            <div style={{ padding: '1.25rem', color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>No grants yet.</div>
+            <EmptyStateCTA
+              title="No grants yet"
+              description="Add a grant in Money & Grants so utilisation, budget heads, and FCRA tracking stay live."
+              actionLabel="Open grants"
+              onAction={() => appNavigate('/csr')}
+            />
           ) : (
             <div style={{ height: grantsVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
               {grantsVirtualizer.getVirtualItems().map(vr => {

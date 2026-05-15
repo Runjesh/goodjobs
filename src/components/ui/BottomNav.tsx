@@ -8,14 +8,14 @@ import { useAuth } from '../../context/AuthContext';
 
 const PRIMARY_NAV = [
   { path: '/',          icon: Sun,          label: 'Today',    module: 'dashboard' },
-  { path: '/programs',  icon: ClipboardList,label: 'Programs', module: 'programs' },
-  { path: '/funding',   icon: Wallet,       label: 'Funding',  module: 'funding' },
+  { path: '/programs',  icon: ClipboardList,label: 'Beneficiaries', module: 'programs' },
+  { path: '/funding',   icon: Wallet,       label: 'Money',       module: 'funding' },
   { path: '/insights',  icon: BarChart2,    label: 'Insights', module: 'insights' },
 ];
 
 const MORE_ITEMS = [
   { path: '/reports',   icon: FileText,     label: 'Reports',  module: 'reports' },
-  { path: '/agent-hq',  icon: Cpu,          label: 'Copilot',  module: 'agent-hq' },
+  { path: '/agent-hq',  icon: Cpu,          label: 'AI',       module: 'agent-hq' },
   { path: '/settings',  icon: Settings,     label: 'Settings', module: 'settings' },
 ];
 

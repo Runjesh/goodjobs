@@ -2,6 +2,7 @@ import { useStore, type MisReviewIntent } from '../store/useStore';
 import { programIdFromName, type ProgramBudget } from './programFinance';
 import { decideMisReviewOnServer, MIS_RATION_KIT_COST_INR } from './misReviewApi';
 import type { BeneficiaryOutcome } from './outcomes';
+import { toastMisApprovedSuccess } from './workflowSuccess';
 
 function publishOutcomeFromMis(intent: MisReviewIntent, merged: MisReviewIntent['extracted']): void {
   const metric = (merged.metric || '').trim();
@@ -53,6 +54,17 @@ export async function applyMisApproval(
 
   if (status === 'approved' || status === 'edited') {
     publishOutcomeFromMis(intent, merged);
+  }
+
+  if (status === 'approved' || status === 'edited') {
+    const nameKey = (merged.beneficiary || '').toLowerCase().trim();
+    const ben = nameKey
+      ? useStore.getState().beneficiaries.find(b => {
+          const n = b.name.toLowerCase().trim();
+          return n === nameKey || n.includes(nameKey) || nameKey.includes(n);
+        })
+      : undefined;
+    toastMisApprovedSuccess(merged.beneficiary || ben?.name || 'Beneficiary', ben?.id);
   }
 
   if ((status === 'approved' || status === 'edited') && inc > 0 && merged.program) {

@@ -5573,7 +5573,7 @@ def _compliance_renewal_notification_rows(ngo_id: str, cur: Any = None) -> List[
                 continue
         days = (exp_d - today).days
         label = name or doc_type or "Certificate"
-        doc_q = quote(str(doc_type or name or ""), safe="")
+        doc_q = quote(str(doc_id), safe="")
         out.append({
             "id": f"compliance-renewal:{doc_id}",
             "kind": "compliance_doc",

@@ -16,7 +16,16 @@ import {
   persistComplianceReminders,
   pickUntoastedReminders,
 } from '../../utils/complianceReminders';
-import ComplianceRenewalChecklist from '../../components/Compliance/ComplianceRenewalChecklist';
+import ComplianceRenewalWorkspace from '../../components/Compliance/ComplianceRenewalWorkspace';
+import {
+  resolveComplianceDocFromQuery,
+  deriveRenewalState,
+  renewalStepsForDoc,
+  RENEWAL_STATE_LABELS,
+} from '../../utils/complianceRenewal';
+import { toastComplianceUploadSuccess } from '../../utils/workflowSuccess';
+import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
+import '../../components/Compliance/ComplianceRenewalWorkspace.css';
 
 const PAGE_TABS = [
   { id: 'vault',  label: '📁 Registration Vault' },
@@ -58,12 +67,9 @@ const Compliance: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('alert') !== 'true') return;
-    const doc = params.get('doc');
-    if (!doc || complianceDocs.length === 0) return;
-    const needle = doc.toLowerCase();
-    const match = complianceDocs.find(d =>
-      d.name.toLowerCase().includes(needle) || d.type.toLowerCase().includes(needle),
-    );
+    const docParam = params.get('doc');
+    if (!docParam || complianceDocs.length === 0) return;
+    const match = resolveComplianceDocFromQuery(complianceDocs, docParam);
     if (match) setRenewalDoc(match);
   }, [complianceDocs]);
 
@@ -301,8 +307,23 @@ const Compliance: React.FC = () => {
         }),
       });
       if (!metaRes.ok) throw new Error('metadata failed');
-
-      toast.success('Uploaded to Compliance Vault.');
+      const metaJson = await metaRes.json().catch(() => ({}));
+      await refreshRegistrationDocs();
+      const docName = docForm.name || selectedFile.name;
+      const uploaded =
+        useStore.getState().complianceDocs.find(d => d.id === String(metaJson?.document?.id ?? metaJson?.id ?? '')) ||
+        useStore.getState().complianceDocs.find(d => d.name === docName);
+      toastComplianceUploadSuccess(
+        uploaded ?? {
+          id: String(metaJson?.document?.id ?? metaJson?.id ?? `doc-${Date.now()}`),
+          name: docName,
+          type: docForm.type,
+          status: docForm.status,
+          expiry: docForm.expiry,
+          uploadedAt: new Date().toISOString().slice(0, 10),
+        },
+        useStore.getState().complianceDocs,
+      );
       setDocForm({
         name: '',
         type: 'Tax Exemption',
@@ -603,7 +624,7 @@ const Compliance: React.FC = () => {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(120px,1.4fr) minmax(88px,1fr) minmax(88px,0.9fr) minmax(72px,0.75fr) minmax(100px,0.9fr)',
+              gridTemplateColumns: 'minmax(120px,1.3fr) minmax(80px,0.9fr) minmax(72px,0.7fr) minmax(88px,0.95fr) minmax(72px,0.7fr) minmax(108px,1fr)',
               gap: '0.5rem',
               padding: '0.6rem 0.75rem',
               fontSize: '0.68rem',
@@ -621,11 +642,17 @@ const Compliance: React.FC = () => {
             <span>Document</span>
             <span>Type</span>
             <span>Status</span>
+            <span>Renewal</span>
             <span>Expiry</span>
             <span>Action</span>
           </div>
           {complianceDocs.length === 0 ? (
-            <div style={{ padding: '1.25rem', color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>No registration documents.</div>
+            <EmptyStateCTA
+              title="No registration documents"
+              description="Upload statutory certificates so renewals, grant risk, and receipts stay accurate."
+              actionLabel="Upload document"
+              onAction={() => setShowDocModal(true)}
+            />
           ) : (
             <div style={{ height: regDocVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
               {regDocVirtualizer.getVirtualItems().map(vr => {
@@ -647,7 +674,7 @@ const Compliance: React.FC = () => {
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: 'minmax(120px,1.4fr) minmax(88px,1fr) minmax(88px,0.9fr) minmax(72px,0.75fr) minmax(100px,0.9fr)',
+                        gridTemplateColumns: 'minmax(120px,1.3fr) minmax(80px,0.9fr) minmax(72px,0.7fr) minmax(88px,0.95fr) minmax(72px,0.7fr) minmax(108px,1fr)',
                         gap: '0.5rem',
                         padding: '0.65rem 0.75rem',
                         alignItems: 'center',
@@ -687,8 +714,29 @@ const Compliance: React.FC = () => {
                           {doc.status}
                         </span>
                       </span>
+                      <span style={{ fontSize: '0.72rem' }}>
+                        {(() => {
+                          const steps = renewalStepsForDoc(doc.name, doc.type);
+                          const state = deriveRenewalState(doc, allTasks, steps.length);
+                          return (
+                            <span className="renewal-state-pill" title="Renewal pipeline">
+                              {RENEWAL_STATE_LABELS[state]}
+                            </span>
+                          );
+                        })()}
+                      </span>
                       <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>{doc.expiry}</span>
                       <span style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        {(doc.status === 'Expiring Soon' || doc.status === 'Expired') && (
+                          <button
+                            className="btn btn-primary"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.72rem' }}
+                            onClick={() => setRenewalDoc(doc)}
+                            title="Open renewal workspace"
+                          >
+                            <RefreshCw size={12} /> Renew
+                          </button>
+                        )}
                         {(() => {
                           const openTaskCount = allTasks.filter(t =>
                             t.relatedEntityType === 'compliance' &&
@@ -768,7 +816,12 @@ const Compliance: React.FC = () => {
           {vaultLoading ? (
             <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>Loading…</div>
           ) : vaultFiles.length === 0 ? (
-            <div style={{ padding: '1rem', color: 'var(--color-text-tertiary)' }}>No files yet. Upload one above.</div>
+            <EmptyStateCTA
+              title="No vault files yet"
+              description="Upload a PDF to store it in your NGO cloud vault and link it to compliance records."
+              actionLabel="Upload document"
+              onAction={() => setShowDocModal(true)}
+            />
           ) : (
             <div style={{ height: vaultRowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
               {vaultRowVirtualizer.getVirtualItems().map(vr => {
@@ -1039,16 +1092,17 @@ const Compliance: React.FC = () => {
       )}
 
       {renewalDoc && (
-        <ComplianceRenewalChecklist
-          docId={String(renewalDoc.id)}
-          docName={renewalDoc.name}
-          docType={renewalDoc.type}
-          daysUntilExpiry={
-            renewalDoc.expiry
-              ? Math.ceil((new Date(renewalDoc.expiry).getTime() - Date.now()) / 86_400_000)
-              : undefined
-          }
-          onClose={() => setRenewalDoc(null)}
+        <ComplianceRenewalWorkspace
+          doc={renewalDoc}
+          onClose={() => {
+            setRenewalDoc(null);
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('alert') === 'true') {
+              params.delete('alert');
+              const q = params.toString();
+              window.history.replaceState({}, '', q ? `/compliance?${q}` : '/compliance');
+            }
+          }}
         />
       )}
     </div>

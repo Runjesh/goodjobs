@@ -1,0 +1,36 @@
+.empty-state-cta {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-subtle, #f8fafc);
+}
+
+.empty-state-cta-icon {
+  margin: 0 auto 0.5rem;
+  color: var(--color-text-tertiary);
+}
+
+.empty-state-cta-title {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-text-primary);
+}
+
+.empty-state-cta-desc {
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  max-width: 36ch;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.45;
+}
+
+.empty-state-cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}

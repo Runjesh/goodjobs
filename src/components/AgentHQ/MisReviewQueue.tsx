@@ -14,7 +14,6 @@ const MisReviewRow: React.FC<{ intent: MisReviewIntent }> = ({ intent }) => {
     setBusy(true);
     try {
       await applyMisApproval(intent, 'approved');
-      toast.success('Approved — counted in dashboard & budget.');
     } finally {
       setBusy(false);
     }
@@ -33,7 +32,7 @@ const MisReviewRow: React.FC<{ intent: MisReviewIntent }> = ({ intent }) => {
     try {
       await applyMisApproval(intent, 'edited', draft);
       setEditing(false);
-      toast.success('Edited & approved.');
+      /* toast from applyMisApproval */
     } finally {
       setBusy(false);
     }

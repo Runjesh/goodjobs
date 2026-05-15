@@ -32,16 +32,17 @@ import { apiFetch } from '../../api/client';
 import { useStore, type ComplianceDocument, type Donor } from '../../store/useStore';
 import { getPageVariants } from '../../motion/variants';
 import { setLifecycleScope, hydrateDonorLifecycles } from '../../utils/donorLifecycle';
+import { registerAppNavigate } from '../../utils/appNavigate';
 import './Layout.css';
 
 // ── Navigation Config ────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   { path: '/',          icon: Sun,          label: 'Today',            module: 'dashboard',  section: 'workspace' },
-  { path: '/programs',  icon: ClipboardList,label: 'Programs',         module: 'programs',   section: 'workspace' },
-  { path: '/funding',   icon: Wallet,       label: 'Funding',          module: 'funding',    section: 'workspace' },
+  { path: '/programs',  icon: ClipboardList,label: 'Beneficiaries & MIS', module: 'programs',   section: 'workspace' },
+  { path: '/funding',   icon: Wallet,       label: 'Money & Grants',      module: 'funding',    section: 'workspace' },
   { path: '/insights',  icon: BarChart2,    label: 'Insights',         module: 'insights',   section: 'workspace' },
   { path: '/reports',   icon: FileText,     label: 'Reports',          module: 'reports',    section: 'workspace' },
-  { path: '/agent-hq',  icon: Cpu,          label: 'GoodJobs Copilot', module: 'agent-hq',   section: 'tools', accent: '#7C3AED' },
+  { path: '/agent-hq',  icon: Cpu,          label: 'AI Assistant',     module: 'agent-hq',   section: 'tools', accent: '#7C3AED' },
   { path: '/settings',  icon: Settings,     label: 'Settings',         module: 'settings',   section: 'system'  },
 ];
 
@@ -195,6 +196,10 @@ const Layout: React.FC = () => {
   const reducedMotion  = useReducedMotion();
   const pageVariants   = useMemo(() => getPageVariants(!!reducedMotion), [reducedMotion]);
   const meta           = user ? ROLE_META[user.role] : null;
+
+  useEffect(() => {
+    registerAppNavigate(navigate);
+  }, [navigate]);
 
   // Close sidebar & more on route change
   useEffect(() => {

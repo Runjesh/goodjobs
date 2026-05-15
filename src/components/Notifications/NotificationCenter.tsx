@@ -5,6 +5,13 @@ import toast from 'react-hot-toast';
 import './NotificationCenter.css';
 import { apiFetch } from '../../api/client';
 import { notificationTasksHref } from '../../utils/inboxLinks';
+import { useStore } from '../../store/useStore';
+import {
+  computeRenewalProgress,
+  renewalStepsForDoc,
+  formatRenewalNotificationMessage,
+  daysUntilExpiry,
+} from '../../utils/complianceRenewal';
 
 interface Notification {
   id: string;
@@ -35,6 +42,8 @@ interface Props {
 const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const complianceDocs = useStore(s => s.complianceDocs);
+  const tasks = useStore(s => s.tasks);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -59,6 +68,17 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const resolveRoute = (n: Notification): string =>
     n.action_route || notificationTasksHref(n);
+
+  const renewalMessage = (n: Notification): string => {
+    if (!n.id.startsWith('compliance-renewal:')) return n.message;
+    const docId = n.id.slice('compliance-renewal:'.length);
+    const doc = complianceDocs.find(d => d.id === docId);
+    if (!doc) return n.message;
+    const steps = renewalStepsForDoc(doc.name, doc.type);
+    const { done, total, pct } = computeRenewalProgress(tasks, docId, steps.length);
+    const days = daysUntilExpiry(doc.expiry) ?? 0;
+    return formatRenewalNotificationMessage(doc.name, days, pct, done, total);
+  };
 
   const snooze = async (id: string, ms: number) => {
     const hours = ms / (60 * 60 * 1000);
@@ -175,7 +195,7 @@ const NotificationCenter: React.FC<Props> = ({ isOpen, onClose }) => {
                     <h4>{n.title}</h4>
                     <span className="notif-time">{n.time}</span>
                   </div>
-                  <p>{n.message}</p>
+                  <p>{renewalMessage(n)}</p>
                   <div
                     className="notif-item-actions"
                     style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}

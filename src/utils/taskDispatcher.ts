@@ -54,10 +54,13 @@ export function dispatchOnComplete(
         d.id === action.docId
           ? {
               ...d,
-              status: 'Valid',
               details: {
                 ...(d.details ?? {}),
                 lastReviewedAt: now.toISOString(),
+                renewalState:
+                  (d.details?.renewalState as string) === 'renewed'
+                    ? 'renewed'
+                    : 'under_review',
               },
             }
           : d,

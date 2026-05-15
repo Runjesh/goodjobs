@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ShieldAlert, ArrowRight, User, ListChecks } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { selectAtRiskGrants } from '../../utils/complianceGrant';
+import { renewalWorkspacePath } from '../../utils/complianceRenewal';
 
 const RENEWAL_STEPS: Record<string, string[]> = {
   'Donor Deduction': [
@@ -86,7 +87,7 @@ const ComplianceCascadeQueue: React.FC = () => {
                   type="button"
                   className="btn btn-primary"
                   style={{ padding: '0.3rem 0.7rem', fontSize: '0.75rem', flexShrink: 0 }}
-                  onClick={() => navigate(`/compliance?focus=${encodeURIComponent(it.doc.id)}`)}
+                  onClick={() => navigate(renewalWorkspacePath(it.doc.id))}
                 >
                   Renew first <ArrowRight size={12} />
                 </button>

@@ -4,6 +4,7 @@ import { Wallet, Plus, Trash2, AlertTriangle, ArrowRight, X } from 'lucide-react
 import toast from 'react-hot-toast';
 import { useStore } from '../../store/useStore';
 import { ModalOverlay } from '../ui/ModalOverlay';
+import EmptyStateCTA from '../ui/EmptyStateCTA';
 import {
   selectGrantUtilisation,
   budgetSanity,
@@ -157,9 +158,12 @@ const GrantBudgetHeadsPanel: React.FC<Props> = ({ grantId, grantTotal }) => {
       </div>
 
       {myHeads.length === 0 ? (
-        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-tertiary)' }}>
-          No heads yet. Add the categories the funder approved (e.g. Programme delivery, M&E, Admin) so Finance expenses can be tagged.
-        </div>
+        <EmptyStateCTA
+          title="No budget heads yet"
+          description="Add the categories the funder approved (e.g. Programme delivery, M&E, Admin) so Finance expenses can be tagged."
+          actionLabel="Add budget head"
+          onAction={() => setShowAdd(true)}
+        />
       ) : (
         <>
           {/* Totals row */}

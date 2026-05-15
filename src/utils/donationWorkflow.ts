@@ -1,13 +1,12 @@
-import toast from 'react-hot-toast';
 import { apiFetch } from '../api/client';
 import { useStore } from '../store/useStore';
 import {
-  donationCompletionHeadline,
   markDonationThanked,
   onDonationSaved,
   type DonationCompletionSnapshot,
   type DonationWorkflowInput,
 } from './donationCompletion';
+import { toastDonationSuccess } from './workflowSuccess';
 
 export async function finishDonationWorkflow(
   input: DonationWorkflowInput,
@@ -24,7 +23,7 @@ export async function finishDonationWorkflow(
     addOutreachEntry: state.addOutreachEntry,
   });
 
-  toast.success(donationCompletionHeadline(snap), { duration: 4500 });
+  toastDonationSuccess(snap);
 
   if (input.source === 'fundraising') {
     try {

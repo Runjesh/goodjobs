@@ -121,7 +121,7 @@ describe('dispatchOnComplete', () => {
     expect(parsed['D-99']?.thankyou?.doneAt).toBeDefined();
   });
 
-  it('compliance_review flips doc to Valid and stamps lastReviewedAt', () => {
+  it('compliance_review stamps lastReviewedAt and advances renewal pipeline', () => {
     const calls: any[] = [];
     const res = dispatchOnComplete(
       { type: 'compliance_review', docId: 'doc-2' },
@@ -132,8 +132,9 @@ describe('dispatchOnComplete', () => {
       },
     );
     expect(res.ok).toBe(true);
-    expect(calls[0][0].status).toBe('Valid');
+    expect(calls[0][0].status).toBe('Expiring Soon');
     expect(calls[0][0].details.lastReviewedAt).toBeTruthy();
+    expect(calls[0][0].details.renewalState).toBe('under_review');
   });
 
   it('grant_stage_advance moves CSR card column', () => {
@@ -175,7 +176,7 @@ describe('dispatchOnComplete', () => {
     expect(res.ok).toBe(false);
   });
 
-  it('completeTask wires the dispatcher: marks compliance doc reviewed via the store', () => {
+  it('completeTask wires the dispatcher: marks compliance renewal step reviewed via the store', () => {
     act(() => {
       useStore.setState({
         tasks: [],
@@ -189,7 +190,9 @@ describe('dispatchOnComplete', () => {
     act(() => useStore.getState().addTask(t));
     act(() => { useStore.getState().completeTask('t-doc'); });
     const doc = useStore.getState().complianceDocs.find(d => d.id === 'doc-9');
-    expect(doc?.status).toBe('Valid');
+    expect(doc?.status).toBe('Expiring Soon');
+    expect(doc?.details?.renewalState).toBe('under_review');
+    expect(doc?.details?.lastReviewedAt).toBeTruthy();
   });
 });
 

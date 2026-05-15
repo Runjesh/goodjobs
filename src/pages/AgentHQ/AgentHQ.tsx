@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Bot, CheckCircle, ShieldAlert, Activity, Cpu, XCircle, Check, Eye,
@@ -571,6 +572,7 @@ const RISK_CHIPS: { value: string; label: string; color: string }[] = [
 ];
 
 const AgentHQ: React.FC = () => {
+  const navigate = useNavigate();
   const { limits: tierLims, openUpgrade: openTierUpgrade } = useTier();
   const agentsEnabled = tierLims.aiAgents;
   const [aiUpgradeOpen, setAiUpgradeOpen] = useState(false);
@@ -1157,7 +1159,11 @@ const AgentHQ: React.FC = () => {
                     <IntentCard
                       key={intent.id}
                       intent={applyEdits(intent)}
-                      onApprove={() => toast('Navigate to Compliance HQ to upload the renewed certificate.', { icon: '📋' })}
+                      onApprove={() => {
+                        const docId = intent.id.replace(/^compliance-expiry-intent-/, '');
+                        navigate(`/compliance?alert=true&doc=${encodeURIComponent(docId)}`);
+                        toast('Renewal workspace opened — checklist syncs to Tasks.', { icon: '📋' });
+                      }}
                       onReject={() => toast('Reminder dismissed for this session — doc still requires renewal.', { icon: '⚠️' })}
                       onEdit={(i, c) => handleEditIntent(i, c)}
                       editCount={editCounts[intent.id] ?? 0}

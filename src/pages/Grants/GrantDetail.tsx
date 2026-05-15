@@ -7,6 +7,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { toastGrantLiveSuccess, toastGrantStageSuccess } from '../../utils/workflowSuccess';
 import { useStore } from '../../store/useStore';
 import './GrantDetail.css';
 import GrantTrancheCard from '../../components/Grants/GrantTrancheCard';
@@ -22,6 +23,12 @@ import {
   type ParserRow,
 } from '../../utils/grantParserProjection';
 import RecordTasksPanel from '../../components/Common/RecordTasksPanel';
+import GrantHealthStrip from '../../components/Grants/GrantHealthStrip';
+import { computeGrantHealthMetrics } from '../../utils/grantHealthMetrics';
+import {
+  applyGrantStageTransition,
+  buildGrantStageWorkflowDeps,
+} from '../../utils/grantStageWorkflow';
 
 type LifecycleStage = 'pipeline' | 'applied' | 'awarded' | 'active' | 'closed';
 
@@ -176,12 +183,28 @@ const CLOSURE_STEPS = [
 const fmtINR = (v: number) => v >= 1e7 ? `₹${(v/1e7).toFixed(2)}Cr` : `₹${(v/1e5).toFixed(1)}L`;
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
+const COL_TITLES: Record<string, string> = {
+  prospecting: 'Prospecting',
+  pitch: 'Pitch Sent',
+  diligence: 'Due Diligence',
+  mou: 'MoU Signed',
+  live: 'Project Live',
+  closed: 'Closed',
+};
+
 const GrantDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { csrCards, updateCSRCard } = useStore();
+  const { csrCards, updateCSRCard, moveCSRCard } = useStore();
   const grantBudgetHeads = useStore(s => s.grantBudgetHeads);
   const journalEntries   = useStore(s => s.journalEntries);
+  const complianceGrantLinks = useStore(s => s.complianceGrantLinks);
+  const complianceDocs = useStore(s => s.complianceDocs);
+  const programGrantLinks = useStore(s => s.programGrantLinks);
+  const beneficiaries = useStore(s => s.beneficiaries);
+  const beneficiaryOutcomes = useStore(s => s.beneficiaryOutcomes);
+  const customPrograms = useStore(s => s.customPrograms);
+  const grantReports = useStore(s => s.grantReports);
 
   const card = useMemo(() => csrCards.find(c => String(c.id) === String(id)), [csrCards, id]);
 
@@ -418,18 +441,64 @@ const GrantDetail: React.FC = () => {
     );
   }
 
+  const healthMetrics = useMemo(() => {
+    if (!card) return null;
+    return computeGrantHealthMetrics({
+      grantId: String(card.id),
+      card,
+      nextReportDue: state.nextReportDue,
+      grantBudgetHeads,
+      journalEntries,
+      complianceLinks: complianceGrantLinks,
+      complianceDocs,
+      programGrantLinks,
+      beneficiaries,
+      customPrograms,
+      beneficiaryOutcomes,
+    });
+  }, [
+    card, state.nextReportDue, grantBudgetHeads, journalEntries,
+    complianceGrantLinks, complianceDocs, programGrantLinks,
+    beneficiaries, customPrograms, beneficiaryOutcomes,
+  ]);
+
+  const reportStubId = grantReports.find(r => r.id === `rpt-grant-${card?.id}`)?.id;
+
+  const runStageTransition = (fromCol: string, toCol: string) => {
+    if (!card || fromCol === toCol) return;
+    moveCSRCard(card.id, toCol);
+    const result = applyGrantStageTransition({
+      card,
+      fromCol,
+      toCol,
+      deps: buildGrantStageWorkflowDeps(() => useStore.getState()),
+    });
+    if (result.liveBundleApplied) {
+      toastGrantLiveSuccess(card.id, card.company);
+    } else if (result.tasksCreated > 0) {
+      toastGrantStageSuccess(card.id, COL_TITLES[toCol] || toCol);
+    }
+    return result;
+  };
+
   const advance = () => {
     if (stage === 'closed') return;
-    // From Active → enter closure mode (UI only); col stays 'live' until checklist complete
     if (baseStage === 'active') {
       setState(s => ({ ...s, closingMode: true }));
       toast.success('Closure checklist started — complete all 6 steps to close.', { icon: '📋' });
       return;
     }
-    const next = STAGES[stageIdx + 1].id;
-    const newCol = stageToCol(next, card.col);
-    updateCSRCard(card.id, { col: newCol });
-    toast.success(`Grant moved to ${STAGES[stageIdx + 1].label}`, { icon: '✓' });
+    const fromCol = card.col;
+    let toCol = card.col;
+    if (card.col === 'prospecting') toCol = 'pitch';
+    else if (card.col === 'pitch') toCol = 'diligence';
+    else if (card.col === 'diligence') toCol = 'mou';
+    else if (card.col === 'mou') toCol = 'live';
+    else {
+      const next = STAGES[stageIdx + 1].id;
+      toCol = stageToCol(next, card.col);
+    }
+    runStageTransition(fromCol, toCol);
   };
 
   const closeGrant = () => {
@@ -535,31 +604,26 @@ const GrantDetail: React.FC = () => {
         })}
       </div>
 
-      {/* ── Summary strip ───────────────────────────── */}
-      <div className="grant-summary-strip">
-        <div className="grant-summary-cell">
-          <span className="grant-summary-key">Funder</span>
-          <span className="grant-summary-value">{card.company}</span>
-        </div>
-        <div className="grant-summary-cell">
-          <span className="grant-summary-key">Amount</span>
-          <span className="grant-summary-value">{fmtINR(card.amount || 0)}</span>
-        </div>
-        <div className="grant-summary-cell">
-          <span className="grant-summary-key">Owner</span>
-          <span className="grant-summary-value">{card.agent}</span>
-        </div>
-        <div className="grant-summary-cell">
-          <span className="grant-summary-key">Last touch</span>
-          <span className="grant-summary-value">{card.date || '—'}</span>
-        </div>
-        {(stage === 'active' || stage === 'closed') && (
-          <div className="grant-summary-cell">
-            <span className="grant-summary-key">Next report</span>
-            <span className="grant-summary-value">{fmtDate(state.nextReportDue)}</span>
-          </div>
-        )}
-      </div>
+      {healthMetrics && (
+        <GrantHealthStrip
+          metrics={healthMetrics}
+          onRecordSpend={() => navigate(`/finance?grantId=${encodeURIComponent(String(card.id))}`)}
+          onUpdateProgress={() => {
+            if (baseStage !== 'active' && card.col !== 'live') {
+              toast('Advance the grant to Live to update programme progress.', { icon: 'ℹ️' });
+              return;
+            }
+            setActiveActiveTab('deliverables');
+            setTimeout(() => {
+              document.getElementById('grant-execution-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 50);
+          }}
+          onDraftReport={() => {
+            const rid = reportStubId || `rpt-grant-${card.id}`;
+            navigate(`/reports?report=${encodeURIComponent(rid)}&type=funder`);
+          }}
+        />
+      )}
 
       {/* Programme ↔ grant live link — surfaces every programme this
           grant funds with live beneficiary count, service-log count
@@ -744,7 +808,16 @@ const GrantDetail: React.FC = () => {
             <span className="grant-parser-foot-note">
               <ShieldCheck size={13} /> Finance review · Approve all critical items, then activate to begin reminders.
             </span>
-            <button className="btn btn-primary" onClick={advance}>Activate grant <ArrowRight size={14} /></button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                if (card.col === 'mou') runStageTransition('mou', 'live');
+                else advance();
+              }}
+            >
+              Activate grant <ArrowRight size={14} />
+            </button>
           </div>
         </motion.div>
       )}
@@ -753,7 +826,7 @@ const GrantDetail: React.FC = () => {
         <motion.div className="grant-panel" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>
           <GrantTrancheCard grantId={String(card.id)} />
           <GrantBudgetHeadsPanel grantId={String(card.id)} grantTotal={Number(card.amount) || 0} />
-          <div className="grant-subtabs" role="tablist">
+          <div id="grant-execution-tabs" className="grant-subtabs" role="tablist">
             <button role="tab" className={`grant-subtab ${activeActiveTab === 'deliverables' ? 'active' : ''}`} onClick={() => setActiveActiveTab('deliverables')}>
               <Target size={13} /> Deliverables
             </button>

@@ -27,6 +27,8 @@ import MisReviewQueue from '../../components/AgentHQ/MisReviewQueue';
 import { waIntakeRowsToMisIntents } from '../../utils/waIntakeToMis';
 import { createMisReviewOnServer, syncMisReviewsFromServer } from '../../utils/misReviewApi';
 import { applyMisApproval } from '../../utils/applyMisApproval';
+import { toastEnrollSuccess } from '../../utils/workflowSuccess';
+import EmptyStateCTA from '../../components/ui/EmptyStateCTA';
 import EnrollCompletionDrawer from '../../components/Programs/EnrollCompletionDrawer';
 import {
   applyPostEnrollWorkflow,
@@ -440,7 +442,7 @@ const Programs: React.FC = () => {
     });
     setShowModal(false);
     setEnrollCompletion(snap);
-    toast.success(`${f.name.trim()} enrolled — choose your next step →`, { duration: 3500 });
+    toastEnrollSuccess(f.name.trim(), beneficiaryId);
   };
 
   const handleSectionedEnroll = async (f: EnrollFormData) => {
@@ -1117,9 +1119,9 @@ const Programs: React.FC = () => {
                             }]);
                             if (Object.keys(patch).length > 1 || patch.details) {
                               updateBeneficiary(match.id, patch);
-                              toast.success(`MIS approved and timeline updated for ${match.name}.`);
+                              /* success toast from applyMisApproval */
                             } else {
-                              toast.success(`MIS submission confirmed for ${match.name}.`);
+                              /* success toast from applyMisApproval */
                             }
                           } else {
                             enrollSourceRef.current = {
@@ -1233,7 +1235,14 @@ const Programs: React.FC = () => {
             </div>
             <div className="card-body" style={{ paddingBottom: '0.75rem' }}>
               {beneficiaries.length === 0 ? (
-                <div style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem', padding: '0.5rem 0' }}>No beneficiaries yet — enroll or import CSV.</div>
+                <EmptyStateCTA
+                  title="No beneficiaries yet"
+                  description="Enroll someone from the field or import a CSV to start tracking outcomes and MIS."
+                  actionLabel="Enroll beneficiary"
+                  onAction={() => setShowModal(true)}
+                  secondaryLabel="Import CSV"
+                  onSecondary={() => benFileRef.current?.click()}
+                />
               ) : (
                 <div
                   ref={benScrollRef}

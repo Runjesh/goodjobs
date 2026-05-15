@@ -221,6 +221,56 @@
   font-weight: 600;
 }
 
+/* ── Grant health strip (Workflow 3) ───────────────────────────── */
+.grant-health-strip {
+  padding: 1rem 1.25rem;
+  background: var(--color-bg-card, #fff);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg, 12px);
+  margin-bottom: 1.25rem;
+}
+.grant-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.grant-health-cell {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-soft, #f8fafc);
+}
+.grant-health-cell--ok { border-color: #bbf7d0; background: #f0fdf4; }
+.grant-health-cell--warn { border-color: #fde68a; background: #fffbeb; }
+.grant-health-cell--miss { border-color: #fecaca; background: #fef2f2; }
+.grant-health-cell-icon { color: #0F766E; margin-top: 2px; flex-shrink: 0; }
+.grant-health-cell-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+}
+.grant-health-cell-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+.grant-health-cell-sub {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+.grant-health-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 /* ── Panel ──────────────────────────────────────────────────────── */
 .grant-panel {
   padding: 1.5rem;
