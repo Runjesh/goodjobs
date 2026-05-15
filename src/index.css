@@ -881,6 +881,14 @@ select.input-field {
   padding: 0;
 }
 
+/* Enroll beneficiary: fixed shell height so the scrollable form region is never 0px tall */
+.modal-card.enroll-modal {
+  height: min(92dvh, 820px);
+  max-height: min(92dvh, 820px);
+  overflow: hidden;
+  overflow-y: hidden;
+}
+
 @media (max-width: 767px) {
   .modal-overlay { align-items: flex-end; padding: 0; }
   .modal-card {

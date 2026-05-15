@@ -286,6 +286,8 @@
 .enroll-modal {
   max-width: 640px;
   width: 100%;
+  /* Fixed height so flex child .enroll-sections gets space (max-height alone collapses flex: 1 1 0). */
+  height: min(92dvh, 820px);
   max-height: min(92dvh, 820px);
   display: flex;
   flex-direction: column;
@@ -299,6 +301,7 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
   padding: 1.25rem 1.25rem 0;
 }
 .enroll-header {
@@ -382,8 +385,8 @@
   justify-content: center;
 }
 .enroll-sections {
-  flex: 1 1 0;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: min(52dvh, 420px);
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
@@ -396,28 +399,18 @@
   gap: 0.5rem;
 }
 .enroll-section {
-  border: 1px solid var(--color-border-light);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-card);
   overflow: hidden;
-}
-.enroll-section.open { border-color: var(--color-border); }
-.enroll-section-head {
-  width: 100%;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0.75rem 0.875rem;
-  background: var(--color-bg-card);
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
+  flex-direction: column;
+  min-height: min(48dvh, 380px);
 }
-.enroll-section-head:hover { background: var(--color-bg-main); }
-.enroll-section.open .enroll-section-head {
-  background: var(--color-bg-main);
-  border-bottom: 1px solid var(--color-border-light);
+.enroll-section.open { border-color: var(--color-primary); }
+/* Single visible step: hide duplicate accordion header — stepper is the nav */
+.enroll-section-head {
+  display: none;
 }
 .enroll-section-icon {
   display: inline-flex;
@@ -472,12 +465,14 @@
 }
 .enroll-section.open .enroll-section-chev { transform: rotate(180deg); }
 .enroll-section-body {
+  flex: 1 1 auto;
   padding: 0.875rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   background: var(--color-bg-card);
-  max-height: min(52dvh, 480px);
+  min-height: min(44dvh, 360px);
+  max-height: none;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;

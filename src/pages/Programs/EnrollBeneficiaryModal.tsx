@@ -298,15 +298,10 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
   const [householdQuery, setHouseholdQuery] = useState('');
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
   const [showDupModal, setShowDupModal] = useState(false);
-  const sectionsScrollRef = useRef<HTMLDivElement>(null);
-  const sectionRefs = useRef<Partial<Record<'A' | 'B' | 'C' | 'D' | 'E', HTMLDivElement | null>>>({});
+  const panelScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const el = sectionRefs.current[openSection];
-    if (!el || !sectionsScrollRef.current) return;
-    requestAnimationFrame(() => {
-      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    });
+    panelScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   }, [openSection]);
 
   const setF = <K extends keyof EnrollFormData>(k: K, v: EnrollFormData[K]) =>
@@ -458,14 +453,13 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
     const Icon = s.icon;
     return (
       <div
-        ref={el => { sectionRefs.current[s.key] = el; }}
         className={`enroll-section ${isOpen ? 'open' : ''}`}
         key={s.key}
       >
         <button
           type="button"
           className="enroll-section-head"
-          onClick={() => setOpenSection(isOpen ? ('' as any) : s.key)}
+          onClick={() => setOpenSection(s.key)}
           aria-expanded={isOpen}
         >
           <span className={`enroll-section-icon ${s.complete ? 'done' : ''}`}>
@@ -478,7 +472,7 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
           </span>
           <ChevronDown size={16} className="enroll-section-chev" />
         </button>
-        {isOpen && <div className="enroll-section-body">{body}</div>}
+        <div className="enroll-section-body">{body}</div>
       </div>
     );
   };
@@ -495,9 +489,9 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
         <div className="enroll-modal__inner">
           {Header}
 
-          <div className="enroll-sections" ref={sectionsScrollRef}>
+          <div className="enroll-sections" ref={panelScrollRef}>
           {/* SECTION A — BASIC INFO */}
-          {renderSection(sections[0], (
+          {openSection === 'A' && renderSection(sections[0], (
             <div className="form-stack">
               <FormField id="enroll-name" label="Full name" required>
                 <input
@@ -567,7 +561,7 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
           ))}
 
           {/* SECTION B — PROGRAM */}
-          {renderSection(sections[1], (
+          {openSection === 'B' && renderSection(sections[1], (
             <>
               <div className="grid-2">
                 <div className="input-group">
@@ -645,7 +639,7 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
           ))}
 
           {/* SECTION C — HOUSEHOLD */}
-          {renderSection(sections[2], (
+          {openSection === 'C' && renderSection(sections[2], (
             <>
               <div className="input-group">
                 <label className="input-label">
@@ -712,7 +706,7 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
           ))}
 
           {/* SECTION D — CONSENT (DPDP) */}
-          {renderSection(sections[3], (
+          {openSection === 'D' && renderSection(sections[3], (
             <>
               <div className="consent-lang-row">
                 <span className="consent-lang-label"><Globe size={12} /> Language</span>
@@ -756,7 +750,7 @@ const EnrollBeneficiaryModal: React.FC<Props> = ({
           ))}
 
           {/* SECTION E — DOCUMENTS */}
-          {renderSection(sections[4], (
+          {openSection === 'E' && renderSection(sections[4], (
             <>
               <p className="docs-help">Upload now if available, or skip and the record will be flagged "incomplete" for follow-up.</p>
               <div className="doc-row">
