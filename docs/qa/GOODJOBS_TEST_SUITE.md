@@ -2,6 +2,8 @@
 
 This document is the canonical catalog for **negative paths, invalid states, silent failures, and PWA behavior**. It complements happy-path demos by defining **reproducible** cases with steps, expectations, and edge conditions.
 
+**Stable ID checklist (importable):** [MANUAL_TEST_CATALOG.md](./MANUAL_TEST_CATALOG.md) and [`MANUAL_TEST_CATALOG.tsv`](./MANUAL_TEST_CATALOG.tsv) — full regression matrix (AUTH-*, DASH-*, … REL-*).
+
 **References (external):** [PWA testing — testRigor](https://testrigor.com/blog/what-is-progressive-web-app-testing/), [SaaS testing checklist — QAwerk](https://qawerk.com/blog/saas-testing-checklist/), [Effective test case templates — TestRail](https://www.testrail.com/blog/effective-test-cases-templates/), [PWA testing with Edge — MotoCMS](https://www.motocms.com/blog/en/mastering-progressive-web-app-pwa-testing-with-microsoft-edge-online/)
 
 ---

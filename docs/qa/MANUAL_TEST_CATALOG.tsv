@@ -1,0 +1,516 @@
+section_num	section_title	test_id	description
+1	Auth, roles, onboarding	AUTH-001	Login with valid ED credentials.
+1	Auth, roles, onboarding	AUTH-002	Login with valid Finance credentials.
+1	Auth, roles, onboarding	AUTH-003	Login with valid Programs credentials.
+1	Auth, roles, onboarding	AUTH-004	Login with valid Field credentials.
+1	Auth, roles, onboarding	AUTH-005	Login with valid Board credentials.
+1	Auth, roles, onboarding	AUTH-006	Login with invalid password returns error.
+1	Auth, roles, onboarding	AUTH-007	Login with unknown email returns error.
+1	Auth, roles, onboarding	AUTH-008	Login with empty email shows validation.
+1	Auth, roles, onboarding	AUTH-009	Login with empty password shows validation.
+1	Auth, roles, onboarding	AUTH-010	Login with malformed email shows validation.
+1	Auth, roles, onboarding	AUTH-011	Login button disabled while request is in progress.
+1	Auth, roles, onboarding	AUTH-012	Multiple rapid login attempts trigger rate limit.
+1	Auth, roles, onboarding	AUTH-013	Rate-limited login shows correct retry message.
+1	Auth, roles, onboarding	AUTH-014	Successful login stores session and redirects to correct landing page.
+1	Auth, roles, onboarding	AUTH-015	Refresh browser keeps active session.
+1	Auth, roles, onboarding	AUTH-016	Expired token redirects to login.
+1	Auth, roles, onboarding	AUTH-017	Revoked session logs user out on next protected action.
+1	Auth, roles, onboarding	AUTH-018	Logout clears session and returns to login page.
+1	Auth, roles, onboarding	AUTH-019	Browser back button after logout does not reveal protected screen.
+1	Auth, roles, onboarding	AUTH-020	Protected route without login redirects to login.
+1	Auth, roles, onboarding	AUTH-021	Direct URL to protected route after login works for authorized role.
+1	Auth, roles, onboarding	AUTH-022	Direct URL to protected route for unauthorized role shows Access Restricted.
+1	Auth, roles, onboarding	AUTH-023	Access Restricted page shows module-specific copy.
+1	Auth, roles, onboarding	AUTH-024	Unauthorized route does not flash protected data before denial.
+1	Auth, roles, onboarding	AUTH-025	Demo login for each demo user works.
+1	Auth, roles, onboarding	AUTH-026	Demo login skips onboarding wizard.
+1	Auth, roles, onboarding	AUTH-027	New signup creates account successfully.
+1	Auth, roles, onboarding	AUTH-028	Signup with existing email is rejected.
+1	Auth, roles, onboarding	AUTH-029	Signup with weak password is rejected.
+1	Auth, roles, onboarding	AUTH-030	Signup password confirmation mismatch is rejected.
+1	Auth, roles, onboarding	AUTH-031	Signup with missing required fields is rejected.
+1	Auth, roles, onboarding	AUTH-032	Successful signup redirects to onboarding wizard.
+1	Auth, roles, onboarding	AUTH-033	Onboarding wizard persists step progress on refresh.
+1	Auth, roles, onboarding	AUTH-034	Onboarding wizard resumes after logout/login.
+1	Auth, roles, onboarding	AUTH-035	Completing wizard sets needsWizard=false.
+1	Auth, roles, onboarding	AUTH-036	Role-based welcome modal appears on first run only.
+1	Auth, roles, onboarding	AUTH-037	Dismissing welcome modal stores state correctly.
+1	Auth, roles, onboarding	AUTH-038	Welcome modal does not reappear once acknowledged.
+1	Auth, roles, onboarding	AUTH-039	Trial start date is set correctly for new org.
+1	Auth, roles, onboarding	AUTH-040	Trial countdown shows correct remaining days.
+1	Auth, roles, onboarding	AUTH-041	Upgrade prompt appears during trial as expected.
+1	Auth, roles, onboarding	AUTH-042	Past-due state shows correct billing restriction prompt.
+1	Auth, roles, onboarding	AUTH-043	Starter to Growth mock checkout succeeds.
+1	Auth, roles, onboarding	AUTH-044	Billing state updates after successful upgrade.
+1	Auth, roles, onboarding	AUTH-045	User cannot bypass role restrictions by editing frontend state.
+1	Auth, roles, onboarding	AUTH-046	Role permissions update correctly after admin role change.
+1	Auth, roles, onboarding	AUTH-047	Session persists across page reloads but not across logout.
+1	Auth, roles, onboarding	AUTH-048	Concurrent sessions on two browsers behave correctly after revoke.
+2	Today dashboard	DASH-001	Dashboard loads without blank screen for ED.
+2	Today dashboard	DASH-002	Dashboard loads without blank screen for Finance.
+2	Today dashboard	DASH-003	Dashboard loads without blank screen for Programs.
+2	Today dashboard	DASH-004	Dashboard loads without blank screen for Field.
+2	Today dashboard	DASH-005	Dashboard loads without blank screen for Board.
+2	Today dashboard	DASH-006	Role-aware widgets are different by role.
+2	Today dashboard	DASH-007	Greeting changes by time of day.
+2	Today dashboard	DASH-008	Morning brief is visible when data exists.
+2	Today dashboard	DASH-009	Morning brief empty state is handled gracefully.
+2	Today dashboard	DASH-010	Morning brief refreshes after cron/manual trigger.
+2	Today dashboard	DASH-011	Priority actions link to correct deep destination.
+2	Today dashboard	DASH-012	Compliance renewal nudge appears for at-risk documents.
+2	Today dashboard	DASH-013	Compliance renewal nudge opens exact renewal workspace.
+2	Today dashboard	DASH-014	Donor impact snippet renders when CRM data exists.
+2	Today dashboard	DASH-015	Donor impact snippet hidden or empty-state when no CRM data exists.
+2	Today dashboard	DASH-016	Global refresh updates dashboard after donation creation.
+2	Today dashboard	DASH-017	Global refresh updates dashboard after compliance update.
+2	Today dashboard	DASH-018	Global refresh updates dashboard after beneficiary enrollment.
+2	Today dashboard	DASH-019	Notification bell shows unread count correctly.
+2	Today dashboard	DASH-020	Notification dismiss removes item from list.
+2	Today dashboard	DASH-021	Notification snooze hides item for selected duration.
+2	Today dashboard	DASH-022	Snoozed notification returns after snooze expiry.
+2	Today dashboard	DASH-023	Command bar opens from header.
+2	Today dashboard	DASH-024	Command bar accepts free-text intention.
+2	Today dashboard	DASH-025	Dashboard widgets do not expose unauthorized data.
+2	Today dashboard	DASH-026	Dashboard handles slow API with skeleton/loading state.
+2	Today dashboard	DASH-027	Dashboard handles API failure with retry state.
+3	Unified inbox /tasks	TASK-001	Tasks page loads normally.
+3	Unified inbox /tasks	TASK-002	Tasks page loads with mixed task types.
+3	Unified inbox /tasks	TASK-003	Deep link /tasks?focus=id opens correct task.
+3	Unified inbox /tasks	TASK-004	Invalid focus id does not white-screen.
+3	Unified inbox /tasks	TASK-005	Completing a manual task updates status.
+3	Unified inbox /tasks	TASK-006	Completing an agent task updates status.
+3	Unified inbox /tasks	TASK-007	Completing a compliance task advances related workflow.
+3	Unified inbox /tasks	TASK-008	Completing a grant task updates grant workflow.
+3	Unified inbox /tasks	TASK-009	Snoozing task for 24h works.
+3	Unified inbox /tasks	TASK-010	Dismissing task removes it from active queue.
+3	Unified inbox /tasks	TASK-011	Entity link from task opens correct grant.
+3	Unified inbox /tasks	TASK-012	Entity link from task opens correct donor.
+3	Unified inbox /tasks	TASK-013	Entity link from task opens correct compliance document.
+3	Unified inbox /tasks	TASK-014	Task list preserves filters after refresh.
+3	Unified inbox /tasks	TASK-015	Task sorting behaves correctly.
+3	Unified inbox /tasks	TASK-016	Task state updates are reflected in dashboard counts.
+3	Unified inbox /tasks	TASK-017	Unauthorized user cannot open task linked to restricted entity.
+3	Unified inbox /tasks	TASK-018	Deleted linked entity does not break task rendering.
+3	Unified inbox /tasks	TASK-019	Task completion works under slow network.
+3	Unified inbox /tasks	TASK-020	Duplicate task prevention works for same event trigger.
+4	Programs and beneficiaries	PROG-001	Beneficiary roster loads existing data.
+4	Programs and beneficiaries	PROG-002	Beneficiary search returns correct matches.
+4	Programs and beneficiaries	PROG-003	Beneficiary filters by program work.
+4	Programs and beneficiaries	PROG-004	Beneficiary filters by location work.
+4	Programs and beneficiaries	PROG-005	Beneficiary filters by status work.
+4	Programs and beneficiaries	PROG-006	Create beneficiary with all required fields succeeds.
+4	Programs and beneficiaries	PROG-007	Create beneficiary without DPDP consent is rejected.
+4	Programs and beneficiaries	PROG-008	Create beneficiary with DPDP consent succeeds.
+4	Programs and beneficiaries	PROG-009	Consent section highlights correctly on validation failure.
+4	Programs and beneficiaries	PROG-010	Consent text/version is stored correctly.
+4	Programs and beneficiaries	PROG-011	Duplicate beneficiary detection works if enabled.
+4	Programs and beneficiaries	PROG-012	Enroll modal remains open and shows success state after create.
+4	Programs and beneficiaries	PROG-013	Closing success modal does not create duplicate record.
+4	Programs and beneficiaries	PROG-014	Edit beneficiary updates record correctly.
+4	Programs and beneficiaries	PROG-015	Delete/archive beneficiary behaves correctly.
+4	Programs and beneficiaries	PROG-016	Family size boundary values are validated.
+4	Programs and beneficiaries	PROG-017	Invalid age/date of birth is rejected.
+4	Programs and beneficiaries	PROG-018	Missing mandatory fields are rejected.
+4	Programs and beneficiaries	PROG-019	Long text inputs are handled safely.
+4	Programs and beneficiaries	PROG-020	Special characters in names are saved correctly.
+4	Programs and beneficiaries	PROG-021	Offline enrollment queues entry in IndexedDB.
+4	Programs and beneficiaries	PROG-022	Multiple offline enrollments queue correctly.
+4	Programs and beneficiaries	PROG-023	Queued offline entries sync when app comes online.
+4	Programs and beneficiaries	PROG-024	Sync conflict handling works if record changed on server.
+4	Programs and beneficiaries	PROG-025	Failed sync shows retry state.
+4	Programs and beneficiaries	PROG-026	Programs page syncs queued entries on mount.
+4	Programs and beneficiaries	PROG-027	Theory of Change builder saves locally.
+4	Programs and beneficiaries	PROG-028	Theory of Change builder restores saved draft.
+4	Programs and beneficiaries	PROG-029	Program linked to grant shows correct rollups.
+4	Programs and beneficiaries	PROG-030	Beneficiary counts roll up correctly into grant detail.
+4	Programs and beneficiaries	PROG-031	Outcome counts roll up correctly into grant detail.
+4	Programs and beneficiaries	PROG-032	Hinglish field note parse returns structured response.
+4	Programs and beneficiaries	PROG-033	Slang/abbreviated field note parse still works.
+4	Programs and beneficiaries	PROG-034	Empty field note parse is rejected.
+4	Programs and beneficiaries	PROG-035	Unsupported media/input format is rejected gracefully.
+4	Programs and beneficiaries	PROG-036	DPDP erasure anonymizes beneficiary PII.
+4	Programs and beneficiaries	PROG-037	DPDP erasure preserves anonymized metrics.
+4	Programs and beneficiaries	PROG-038	Erased beneficiary no longer appears with original identity.
+4	Programs and beneficiaries	PROG-039	Field role can access only allowed program actions.
+4	Programs and beneficiaries	PROG-040	Unauthorized role cannot edit restricted program data.
+5	Funding workspace	FUND-001	Funding workspace loads grant summary cards.
+5	Funding workspace	FUND-002	Funding workspace shows overview metrics accurately.
+5	Funding workspace	FUND-003	Clicking live grant opens correct grant detail page.
+5	Funding workspace	FUND-004	Clicking CSR board opens CSR pipeline.
+5	Funding workspace	FUND-005	Finance tags/links from funding workspace navigate correctly.
+5	Funding workspace	FUND-006	Field role is denied access to funding workspace.
+5	Funding workspace	FUND-007	Board role sees permitted read-only funding view if intended.
+5	Funding workspace	FUND-008	Empty funding workspace shows appropriate empty state.
+5	Funding workspace	FUND-009	Funding workspace handles large grant list without UI breakage.
+6	CSR pipeline and grant detail	CSR-001	CSR board loads all expected columns.
+6	CSR pipeline and grant detail	CSR-002	Prospecting card creation succeeds.
+6	CSR pipeline and grant detail	CSR-003	Card edit updates title, company, amount, and metadata.
+6	CSR pipeline and grant detail	CSR-004	Card delete/archive behaves correctly.
+6	CSR pipeline and grant detail	CSR-005	Dragging card between columns updates state.
+6	CSR pipeline and grant detail	CSR-006	Card position persists after reload.
+6	CSR pipeline and grant detail	CSR-007	Invalid stage transition is prevented if rules exist.
+6	CSR pipeline and grant detail	CSR-008	Stage move creates expected workflow tasks.
+6	CSR pipeline and grant detail	CSR-009	Moving card to live creates live grant bundle.
+6	CSR pipeline and grant detail	CSR-010	Presigned document upload from CSR card succeeds.
+6	CSR pipeline and grant detail	CSR-011	Unsupported document type is rejected.
+6	CSR pipeline and grant detail	CSR-012	Oversized document upload is rejected.
+6	CSR pipeline and grant detail	CSR-013	Expired presigned upload URL shows retry flow.
+6	CSR pipeline and grant detail	CSR-014	Grant detail page loads without crash.
+6	CSR pipeline and grant detail	CSR-015	Grant detail renders stage stepper correctly.
+6	CSR pipeline and grant detail	CSR-016	Grant parser preview renders extracted rows.
+6	CSR pipeline and grant detail	CSR-017	Approving parser rows merges into grant state.
+6	CSR pipeline and grant detail	CSR-018	Rejecting parser rows leaves existing data unchanged.
+6	CSR pipeline and grant detail	CSR-019	Local storage cache restores latest grant state.
+6	CSR pipeline and grant detail	CSR-020	Server state overrides stale local cache appropriately.
+6	CSR pipeline and grant detail	CSR-021	Deliverables tab loads and saves correctly.
+6	CSR pipeline and grant detail	CSR-022	Budget tab loads and saves correctly.
+6	CSR pipeline and grant detail	CSR-023	Reports tab loads and saves correctly.
+6	CSR pipeline and grant detail	CSR-024	Grant health strip shows budget utilization accurately.
+6	CSR pipeline and grant detail	CSR-025	Grant health strip shows report due status accurately.
+6	CSR pipeline and grant detail	CSR-026	Grant health strip shows compliance status accurately.
+6	CSR pipeline and grant detail	CSR-027	Grant health strip shows beneficiary count accurately.
+6	CSR pipeline and grant detail	CSR-028	Grant health strip shows outcomes accurately.
+6	CSR pipeline and grant detail	CSR-029	Budget head creation succeeds.
+6	CSR pipeline and grant detail	CSR-030	Budget head edit succeeds.
+6	CSR pipeline and grant detail	CSR-031	Budget head delete behaves safely when used by transactions.
+6	CSR pipeline and grant detail	CSR-032	Tranche release is allowed when utilization threshold met.
+6	CSR pipeline and grant detail	CSR-033	Tranche release is blocked when utilization threshold not met.
+6	CSR pipeline and grant detail	CSR-034	Program linked to grant appears in programs panel.
+6	CSR pipeline and grant detail	CSR-035	Unlinking program updates grant rollups correctly.
+6	CSR pipeline and grant detail	CSR-036	Grant-scoped task creation succeeds.
+6	CSR pipeline and grant detail	CSR-037	Grant-scoped task completion updates grant screen correctly.
+6	CSR pipeline and grant detail	CSR-038	Begin Closure starts closure workflow.
+6	CSR pipeline and grant detail	CSR-039	Close button hidden before closure starts.
+6	CSR pipeline and grant detail	CSR-040	Close button disabled until all 6 checklist items complete.
+6	CSR pipeline and grant detail	CSR-041	Checklist item 2 is disabled until item 1 if ordered logic exists.
+6	CSR pipeline and grant detail	CSR-042	Partial checklist does not allow closure.
+6	CSR pipeline and grant detail	CSR-043	Column move to closed alone does not close grant.
+6	CSR pipeline and grant detail	CSR-044	Completing all 6 closure items enables Mark Closed.
+6	CSR pipeline and grant detail	CSR-045	Mark Closed persists after reload.
+6	CSR pipeline and grant detail	CSR-046	Closed grant state persists across sessions.
+6	CSR pipeline and grant detail	CSR-047	Closed grant cannot be edited if lock rules exist.
+6	CSR pipeline and grant detail	CSR-048	Multi-tab editing does not corrupt grant state.
+6	CSR pipeline and grant detail	CSR-049	Unauthorized role cannot edit grant data.
+6	CSR pipeline and grant detail	CSR-050	Read-only roles can view but not mutate grant details.
+7	Finance	FIN-001	Finance page loads for finance user.
+7	Finance	FIN-002	Finance page is blocked for field user.
+7	Finance	FIN-003	Create expense journal entry succeeds.
+7	Finance	FIN-004	Create income journal entry succeeds.
+7	Finance	FIN-005	Required field validation works on journal entry.
+7	Finance	FIN-006	Invalid date validation works.
+7	Finance	FIN-007	Negative amount validation behaves correctly.
+7	Finance	FIN-008	Zero amount validation behaves correctly.
+7	Finance	FIN-009	Large amount boundary is handled correctly.
+7	Finance	FIN-010	Journal tagging to grant head succeeds.
+7	Finance	FIN-011	Journal tagging to invalid grant head is rejected.
+7	Finance	FIN-012	Grant budget utilization updates after tagged expense.
+7	Finance	FIN-013	Untagging expense updates utilization downward.
+7	Finance	FIN-014	Editing tagged expense recalculates utilization correctly.
+7	Finance	FIN-015	FCRA admin expense under 20% is accepted.
+7	Finance	FIN-016	FCRA admin expense at exact 20% is handled correctly.
+7	Finance	FIN-017	FCRA admin expense above 20% is rejected.
+7	Finance	FIN-018	Error message for FCRA cap is clear and actionable.
+7	Finance	FIN-019	Non-FCRA expense is not blocked by FCRA cap logic.
+7	Finance	FIN-020	Field role API POST to finance journal is rejected.
+7	Finance	FIN-021	Unauthorized role cannot view finance analytics.
+7	Finance	FIN-022	Finance-side grant CRUD works if enabled for finance role.
+7	Finance	FIN-023	Finance export to Tally XML succeeds.
+7	Finance	FIN-024	Exported Tally XML format is valid.
+7	Finance	FIN-025	Export reflects selected date range.
+7	Finance	FIN-026	Export excludes unauthorized org data.
+7	Finance	FIN-027	Revenue forecast visible only to allowed roles.
+7	Finance	FIN-028	Revenue forecast calculations use current finance data.
+7	Finance	FIN-029	Failed save shows error and does not create duplicate entry.
+7	Finance	FIN-030	Double-click on save does not create duplicate transaction.
+8	Fundraising and CRM	CRM-001	CRM page loads donor list.
+8	Fundraising and CRM	CRM-002	Add donor manually succeeds.
+8	Fundraising and CRM	CRM-003	Edit donor details succeeds.
+8	Fundraising and CRM	CRM-004	Donor deletion/archive behaves correctly.
+8	Fundraising and CRM	CRM-005	Donor segmentation filters work.
+8	Fundraising and CRM	CRM-006	Search donor by name works.
+8	Fundraising and CRM	CRM-007	Search donor by email/phone works.
+8	Fundraising and CRM	CRM-008	Donor stage changes persist.
+8	Fundraising and CRM	CRM-009	Touchpoint creation succeeds.
+8	Fundraising and CRM	CRM-010	Next action creation succeeds.
+8	Fundraising and CRM	CRM-011	AI insight panel renders when comms history exists.
+8	Fundraising and CRM	CRM-012	AI insight panel handles no-history case gracefully.
+8	Fundraising and CRM	CRM-013	Fundraising campaigns list loads.
+8	Fundraising and CRM	CRM-014	Create campaign succeeds.
+8	Fundraising and CRM	CRM-015	Edit campaign target succeeds.
+8	Fundraising and CRM	CRM-016	Campaign progress updates after donation.
+8	Fundraising and CRM	CRM-017	Public donate page loads without login.
+8	Fundraising and CRM	CRM-018	Public donation with valid details succeeds.
+8	Fundraising and CRM	CRM-019	Public donation with missing fields is rejected.
+8	Fundraising and CRM	CRM-020	Public donation with invalid amount is rejected.
+8	Fundraising and CRM	CRM-021	Public donation with invalid email is rejected.
+8	Fundraising and CRM	CRM-022	Public donation with payment failure shows retry path.
+8	Fundraising and CRM	CRM-023	Successful public donation creates donor record.
+8	Fundraising and CRM	CRM-024	Successful public donation creates finance transaction.
+8	Fundraising and CRM	CRM-025	Successful public donation triggers 80G receipt endpoint.
+8	Fundraising and CRM	CRM-026	80G PDF generates correctly.
+8	Fundraising and CRM	CRM-027	Donation duplicate-submit prevention works.
+8	Fundraising and CRM	CRM-028	Donation success refreshes dashboard counts.
+8	Fundraising and CRM	CRM-029	Donation success refreshes CRM views.
+8	Fundraising and CRM	CRM-030	Tenant isolation prevents NGO A from reading NGO B donor.
+8	Fundraising and CRM	CRM-031	Tenant isolation prevents NGO A from editing NGO B donor.
+8	Fundraising and CRM	CRM-032	Donor impact metrics roll up correctly from programs.
+8	Fundraising and CRM	CRM-033	WhatsApp outreach template creation succeeds.
+8	Fundraising and CRM	CRM-034	WhatsApp send action logs outbound activity.
+8	Fundraising and CRM	CRM-035	WhatsApp webhook delivery status updates correctly.
+8	Fundraising and CRM	CRM-036	Failed WhatsApp delivery is marked correctly.
+8	Fundraising and CRM	CRM-037	Opted-out donor is excluded from outreach if rule exists.
+9	Compliance	COMP-001	Compliance vault loads documents.
+9	Compliance	COMP-002	Upload compliance PDF succeeds.
+9	Compliance	COMP-003	Upload unsupported file type is rejected.
+9	Compliance	COMP-004	Upload oversized file is rejected.
+9	Compliance	COMP-005	Uploaded document appears in vault list.
+9	Compliance	COMP-006	Download document succeeds.
+9	Compliance	COMP-007	Download handles expired link gracefully.
+9	Compliance	COMP-008	Edit document metadata succeeds.
+9	Compliance	COMP-009	Delete/archive document behaves correctly.
+9	Compliance	COMP-010	Expiry date tracking marks document at-risk correctly.
+9	Compliance	COMP-011	Expiry reminder creates notification.
+9	Compliance	COMP-012	Expiry reminder creates task when configured.
+9	Compliance	COMP-013	Renewal workspace opens from banner.
+9	Compliance	COMP-014	Renewal workspace step progression works.
+9	Compliance	COMP-015	Completing renewal step updates status.
+9	Compliance	COMP-016	Completing all renewal steps marks doc renewed.
+9	Compliance	COMP-017	Renewal completion clears related at-risk banner.
+9	Compliance	COMP-018	Renewal completion resolves related task.
+9	Compliance	COMP-019	Linking document to grant marks grant at risk on expiry.
+9	Compliance	COMP-020	Unlinking document removes grant risk status when appropriate.
+9	Compliance	COMP-021	Multiple grants linked to one document update correctly.
+9	Compliance	COMP-022	Compliance blocked-grant logic is enforced.
+9	Compliance	COMP-023	Compliance document list supports filtering/search.
+9	Compliance	COMP-024	Storage fallback works in memory/demo mode.
+9	Compliance	COMP-025	Unauthorized role cannot upload restricted compliance docs.
+9	Compliance	COMP-026	Audit trail records document upload/update/renewal actions.
+10	Reports and insights	REP-001	Reports page loads report catalogue.
+10	Reports and insights	REP-002	Open specific report from reports page succeeds.
+10	Reports and insights	REP-003	Open report from grant detail CTA succeeds.
+10	Reports and insights	REP-004	Report readiness score calculates correctly.
+10	Reports and insights	REP-005	Missing data shows readiness CTA.
+10	Reports and insights	REP-006	Readiness CTA links directly to missing grant/program section.
+10	Reports and insights	REP-007	Narrative draft generation works with complete data.
+10	Reports and insights	REP-008	Narrative draft generation handles incomplete data gracefully.
+10	Reports and insights	REP-009	PDF report generation succeeds.
+10	Reports and insights	REP-010	Generated PDF contains correct report data.
+10	Reports and insights	REP-011	Export respects current filters/scope.
+10	Reports and insights	REP-012	Insights page loads KPIs.
+10	Reports and insights	REP-013	Programs role sees program-relevant insights only.
+10	Reports and insights	REP-014	Board role sees board-appropriate read-heavy dashboards.
+10	Reports and insights	REP-015	Finance-restricted metrics are hidden from programs role.
+10	Reports and insights	REP-016	Empty insights state is handled gracefully.
+10	Reports and insights	REP-017	Large datasets do not break chart rendering.
+10	Reports and insights	REP-018	Report links respect role permissions.
+11	Agent HQ and copilot	AGT-001	Agent HQ page loads for authorized user.
+11	Agent HQ and copilot	AGT-002	Field role is denied access to Agent HQ.
+11	Agent HQ and copilot	AGT-003	Intent entered in header command bar creates queued item.
+11	Agent HQ and copilot	AGT-004	Natural-language donor creation intent parses correctly.
+11	Agent HQ and copilot	AGT-005	Natural-language grant move intent parses correctly.
+11	Agent HQ and copilot	AGT-006	Natural-language report generation intent parses correctly.
+11	Agent HQ and copilot	AGT-007	Ambiguous intent asks for clarification if required.
+11	Agent HQ and copilot	AGT-008	Invalid intent fails gracefully.
+11	Agent HQ and copilot	AGT-009	ED can approve queued agent action.
+11	Agent HQ and copilot	AGT-010	Approving agent action executes workflow successfully.
+11	Agent HQ and copilot	AGT-011	Rejecting agent action keeps system unchanged.
+11	Agent HQ and copilot	AGT-012	Agent execution status updates from queued to running to done.
+11	Agent HQ and copilot	AGT-013	Failed agent action logs error state.
+11	Agent HQ and copilot	AGT-014	Audit trail records who approved and what executed.
+11	Agent HQ and copilot	AGT-015	Command palette opens with keyboard shortcut.
+11	Agent HQ and copilot	AGT-016	Slash shortcuts route to intended modules.
+11	Agent HQ and copilot	AGT-017	Queue filters by status work.
+11	Agent HQ and copilot	AGT-018	Queue filters by agent type work.
+11	Agent HQ and copilot	AGT-019	Duplicate approval click does not execute action twice.
+11	Agent HQ and copilot	AGT-020	Unauthorized user cannot approve queued actions.
+12	Volunteers	VOL-001	Volunteers page loads roster.
+12	Volunteers	VOL-002	Add volunteer succeeds.
+12	Volunteers	VOL-003	Edit volunteer succeeds.
+12	Volunteers	VOL-004	Delete/archive volunteer behaves correctly.
+12	Volunteers	VOL-005	Skills field saves and filters correctly.
+12	Volunteers	VOL-006	Verification status updates correctly.
+12	Volunteers	VOL-007	Create shift succeeds.
+12	Volunteers	VOL-008	Assign volunteer to program succeeds.
+12	Volunteers	VOL-009	Volunteer hours log updates totals correctly.
+12	Volunteers	VOL-010	Check-in flow succeeds.
+12	Volunteers	VOL-011	Check-out flow succeeds.
+12	Volunteers	VOL-012	Double-booking volunteer on overlapping shifts is blocked.
+12	Volunteers	VOL-013	Non-overlapping shifts are allowed.
+12	Volunteers	VOL-014	Shift edit revalidates conflict rules.
+12	Volunteers	VOL-015	Volunteer list search/filter works.
+12	Volunteers	VOL-016	Unauthorized role cannot modify volunteer assignments if restricted.
+13	Settings and system	SYS-001	Settings page loads for authorized user.
+13	Settings and system	SYS-002	Org profile edit saves correctly.
+13	Settings and system	SYS-003	Team invite creation succeeds.
+13	Settings and system	SYS-004	Duplicate invite handling works.
+13	Settings and system	SYS-005	Invite acceptance flow works.
+13	Settings and system	SYS-006	Invite revoke/removal works.
+13	Settings and system	SYS-007	Role update for team member persists correctly.
+13	Settings and system	SYS-008	AI key save succeeds.
+13	Settings and system	SYS-009	AI key delete succeeds.
+13	Settings and system	SYS-010	Plans tab opens from /settings?tab=plans.
+13	Settings and system	SYS-011	Billing tab alias routes correctly.
+13	Settings and system	SYS-012	Plans comparison modal opens.
+13	Settings and system	SYS-013	Trial banner shows during active trial.
+13	Settings and system	SYS-014	Past-due banner shows in past-due state.
+13	Settings and system	SYS-015	Upgrade prompts appear in correct states.
+13	Settings and system	SYS-016	WhatsApp portal settings save correctly.
+13	Settings and system	SYS-017	Language selector changes UI to English.
+13	Settings and system	SYS-018	Language selector changes UI to Hindi.
+13	Settings and system	SYS-019	Language selector changes UI to Tamil.
+13	Settings and system	SYS-020	Missing translation keys fall back gracefully.
+13	Settings and system	SYS-021	Dark mode toggle switches theme without reload.
+13	Settings and system	SYS-022	Theme persists during session/navigation.
+13	Settings and system	SYS-023	Demo mode pill appears only in demo/dev states.
+13	Settings and system	SYS-024	Store-changed bridge triggers refresh after settings changes.
+13	Settings and system	SYS-025	PWA install prompt behaves correctly where supported.
+13	Settings and system	SYS-026	PWA offline shell loads when network is unavailable.
+13	Settings and system	SYS-027	Reconnect after offline restores live data sync.
+13	Settings and system	SYS-028	Service worker update flow refreshes safely.
+13	Settings and system	SYS-029	Cache does not serve stale protected data after logout.
+14	Cross-cutting platform behavior	XPLAT-001	Error boundary catches render crash.
+14	Cross-cutting platform behavior	XPLAT-002	Error boundary shows Try Again UI.
+14	Cross-cutting platform behavior	XPLAT-003	Try Again reloads affected screen successfully.
+14	Cross-cutting platform behavior	XPLAT-004	Success toast appears after save action.
+14	Cross-cutting platform behavior	XPLAT-005	Error toast appears after failed action.
+14	Cross-cutting platform behavior	XPLAT-006	Toasts do not stack infinitely.
+14	Cross-cutting platform behavior	XPLAT-007	Global entity search returns grants.
+14	Cross-cutting platform behavior	XPLAT-008	Global entity search returns donors.
+14	Cross-cutting platform behavior	XPLAT-009	Global entity search returns beneficiaries.
+14	Cross-cutting platform behavior	XPLAT-010	Entity search result routes to correct page.
+14	Cross-cutting platform behavior	XPLAT-011	Workflow success CTA opens created entity.
+14	Cross-cutting platform behavior	XPLAT-012	Browser refresh on deep-linked route works.
+14	Cross-cutting platform behavior	XPLAT-013	Large list pagination or infinite scroll works.
+14	Cross-cutting platform behavior	XPLAT-014	Empty states render correctly on all major modules.
+14	Cross-cutting platform behavior	XPLAT-015	Loading skeletons show during slow network.
+14	Cross-cutting platform behavior	XPLAT-016	Retry actions work after transient API failures.
+14	Cross-cutting platform behavior	XPLAT-017	No white-screen on any known route.
+14	Cross-cutting platform behavior	XPLAT-018	Browser back/forward navigation preserves app state correctly.
+15	RBAC matrix	RBAC-001	ED can access all sidebar modules intended for ED.
+15	RBAC matrix	RBAC-002	Finance can access finance and allowed related modules only.
+15	RBAC matrix	RBAC-003	Programs can access programs and allowed related modules only.
+15	RBAC matrix	RBAC-004	Field can access programs-only routes as intended.
+15	RBAC matrix	RBAC-005	Board can access read-heavy dashboards only.
+15	RBAC matrix	RBAC-006	Field denied from finance route.
+15	RBAC matrix	RBAC-007	Field denied from funding route.
+15	RBAC matrix	RBAC-008	Field denied from agent-hq route.
+15	RBAC matrix	RBAC-009	Programs denied from finance mutations.
+15	RBAC matrix	RBAC-010	Board denied from edit actions.
+15	RBAC matrix	RBAC-011	Hidden navigation items do not appear for unauthorized roles.
+15	RBAC matrix	RBAC-012	Direct URL to unauthorized module shows denial.
+15	RBAC matrix	RBAC-013	Unauthorized API call returns 403/404 as designed.
+15	RBAC matrix	RBAC-014	Export actions are only visible to roles with export rights.
+15	RBAC matrix	RBAC-015	Agent approval actions visible only to roles with approval rights.
+15	RBAC matrix	RBAC-016	Role change mid-session updates permissions correctly on refresh/re-login.
+16	Security, privacy, tenancy, compliance	SEC-001	JWT cannot be reused after logout if revocation enabled.
+16	Security, privacy, tenancy, compliance	SEC-002	Protected API without token is rejected.
+16	Security, privacy, tenancy, compliance	SEC-003	Protected API with tampered token is rejected.
+16	Security, privacy, tenancy, compliance	SEC-004	Protected API with expired token is rejected.
+16	Security, privacy, tenancy, compliance	SEC-005	SQL injection strings in search fields do not break queries.
+16	Security, privacy, tenancy, compliance	SEC-006	XSS payload in text inputs is escaped safely.
+16	Security, privacy, tenancy, compliance	SEC-007	HTML/script pasted into notes is sanitized.
+16	Security, privacy, tenancy, compliance	SEC-008	File upload rejects malicious extensions.
+16	Security, privacy, tenancy, compliance	SEC-009	Presigned URLs are time-limited and scoped.
+16	Security, privacy, tenancy, compliance	SEC-010	Cross-tenant donor read is blocked.
+16	Security, privacy, tenancy, compliance	SEC-011	Cross-tenant donor update is blocked.
+16	Security, privacy, tenancy, compliance	SEC-012	Cross-tenant grant read is blocked.
+16	Security, privacy, tenancy, compliance	SEC-013	Cross-tenant beneficiary read is blocked.
+16	Security, privacy, tenancy, compliance	SEC-014	Cross-tenant compliance doc read is blocked.
+16	Security, privacy, tenancy, compliance	SEC-015	DPDP consent is mandatory before beneficiary creation.
+16	Security, privacy, tenancy, compliance	SEC-016	DPDP consent evidence/audit trail is stored.
+16	Security, privacy, tenancy, compliance	SEC-017	DPDP erasure request logs who performed erasure.
+16	Security, privacy, tenancy, compliance	SEC-018	PII is removed from erased record views and exports.
+16	Security, privacy, tenancy, compliance	SEC-019	Anonymized metrics remain after erasure.
+16	Security, privacy, tenancy, compliance	SEC-020	Login rate limit cannot be bypassed by burst attempts easily.
+16	Security, privacy, tenancy, compliance	SEC-021	Sensitive fields are not exposed in frontend logs.
+16	Security, privacy, tenancy, compliance	SEC-022	Error responses do not leak internal stack traces.
+16	Security, privacy, tenancy, compliance	SEC-023	Access Restricted page does not reveal confidential module details.
+16	Security, privacy, tenancy, compliance	SEC-024	Production hosting region is ap-south-1 if required policy is enforced.
+16	Security, privacy, tenancy, compliance	SEC-025	Consent audit trail is exportable/reviewable if required.
+17	Black-box and boundary cases	BB-001	Minimum valid password length accepted.
+17	Black-box and boundary cases	BB-002	One character below minimum password length rejected.
+17	Black-box and boundary cases	BB-003	Maximum password length accepted or handled safely.
+17	Black-box and boundary cases	BB-004	Very long NGO name is stored/displayed safely.
+17	Black-box and boundary cases	BB-005	Very long donor name is stored/displayed safely.
+17	Black-box and boundary cases	BB-006	Very long beneficiary note is stored/displayed safely.
+17	Black-box and boundary cases	BB-007	Zero donation amount rejected.
+17	Black-box and boundary cases	BB-008	Negative donation amount rejected.
+17	Black-box and boundary cases	BB-009	Extremely high donation amount handled correctly.
+17	Black-box and boundary cases	BB-010	FCRA ratio at 19.99% accepted.
+17	Black-box and boundary cases	BB-011	FCRA ratio at 20.00% handled correctly.
+17	Black-box and boundary cases	BB-012	FCRA ratio at 20.01% rejected.
+17	Black-box and boundary cases	BB-013	Trial on day 29 shows correct banner.
+17	Black-box and boundary cases	BB-014	Trial on day 30 shows correct banner.
+17	Black-box and boundary cases	BB-015	Trial on day 31 moves to expired/prompt state.
+17	Black-box and boundary cases	BB-016	Expiry reminders at 30 days trigger correctly.
+17	Black-box and boundary cases	BB-017	Expiry reminders at 1 day trigger correctly.
+17	Black-box and boundary cases	BB-018	Leap year/date boundary handled correctly.
+17	Black-box and boundary cases	BB-019	Time-zone-sensitive morning brief appears based on IST timing.
+17	Black-box and boundary cases	BB-020	Unicode names in Hindi/Tamil save and render correctly.
+17	Black-box and boundary cases	BB-021	Mobile number formatting with spaces/dashes is normalized if expected.
+17	Black-box and boundary cases	BB-022	Duplicate browser submit does not create duplicate records.
+17	Black-box and boundary cases	BB-023	Refresh during wizard does not corrupt onboarding state.
+17	Black-box and boundary cases	BB-024	Browser back during multi-step modal behaves safely.
+17	Black-box and boundary cases	BB-025	Deleted linked entity in task/grant/report does not crash page.
+17	Black-box and boundary cases	BB-026	Empty lists, single-item lists, and very large lists all render correctly.
+18	API and integration behavior	API-001	API returns correct status codes for success cases.
+18	API and integration behavior	API-002	API returns correct status codes for validation errors.
+18	API and integration behavior	API-003	API returns correct status codes for unauthorized requests.
+18	API and integration behavior	API-004	API returns correct response shape expected by frontend.
+18	API and integration behavior	API-005	Memory/demo mode works without Postgres where intended.
+18	API and integration behavior	API-006	Optional Postgres mode works when available.
+18	API and integration behavior	API-007	Vite frontend and backend startup integration works for E2E.
+18	API and integration behavior	API-008	Webhook delivery with valid payload succeeds.
+18	API and integration behavior	API-009	Webhook with invalid signature/payload is rejected if validation exists.
+18	API and integration behavior	API-010	Webhook retries do not create duplicate records.
+18	API and integration behavior	API-011	Razorpay mock flow works when live key absent.
+18	API and integration behavior	API-012	Real-key/live integration path handles success callback correctly.
+18	API and integration behavior	API-013	Real-key/live integration path handles failure callback correctly.
+18	API and integration behavior	API-014	Cron-triggered jobs do not duplicate work on re-run.
+18	API and integration behavior	API-015	Parallel API calls do not create race-condition duplicates.
+19	Performance and resilience	PERF-001	Login response remains usable under normal load.
+19	Performance and resilience	PERF-002	Dashboard first load remains usable with realistic data volume.
+19	Performance and resilience	PERF-003	Large beneficiary roster remains scrollable/searchable.
+19	Performance and resilience	PERF-004	Large donor list remains usable.
+19	Performance and resilience	PERF-005	Large grant list remains usable.
+19	Performance and resilience	PERF-006	Large compliance vault remains usable.
+19	Performance and resilience	PERF-007	Offline queue with many pending items syncs reliably.
+19	Performance and resilience	PERF-008	Slow network shows loaders, not blank screens.
+19	Performance and resilience	PERF-009	API timeout surfaces clear retry message.
+19	Performance and resilience	PERF-010	Repeated refresh events do not create infinite rerender loops.
+19	Performance and resilience	PERF-011	Memory usage remains stable after long admin session.
+19	Performance and resilience	PERF-012	File upload failure/retry works without page reload.
+19	Performance and resilience	PERF-013	Concurrent edits do not silently overwrite critical data.
+19	Performance and resilience	PERF-014	Background refresh does not reset unsaved form state.
+20	Accessibility and usability	A11Y-001	Full keyboard navigation works on login.
+20	Accessibility and usability	A11Y-002	Full keyboard navigation works on dashboard.
+20	Accessibility and usability	A11Y-003	Full keyboard navigation works on forms/modals.
+20	Accessibility and usability	A11Y-004	Focus trap works inside modal dialogs.
+20	Accessibility and usability	A11Y-005	Escape closes modal where expected.
+20	Accessibility and usability	A11Y-006	Screen-reader labels exist for important controls.
+20	Accessibility and usability	A11Y-007	Error messages are announced/accessibly associated with fields.
+20	Accessibility and usability	A11Y-008	Color-only status indicators also have text/icon meaning.
+20	Accessibility and usability	A11Y-009	Contrast is sufficient in light mode.
+20	Accessibility and usability	A11Y-010	Contrast is sufficient in dark mode.
+20	Accessibility and usability	A11Y-011	Table/list rows are readable on mobile.
+20	Accessibility and usability	A11Y-012	Language switching does not break layout.
+20	Accessibility and usability	A11Y-013	Hindi text does not overflow buttons/cards.
+20	Accessibility and usability	A11Y-014	Tamil text does not overflow buttons/cards.
+20	Accessibility and usability	A11Y-015	Touch targets are usable on mobile screens.
+20	Accessibility and usability	A11Y-016	PWA offline banner is readable and dismissible.
+21	Manual-only release checks	REL-001	Full role matrix across every sidebar module.
+21	Manual-only release checks	REL-002	CSR document upload using real storage environment.
+21	Manual-only release checks	REL-003	WhatsApp MIS end-to-end webhook to beneficiary/program update.
+21	Manual-only release checks	REL-004	Morning brief cron at actual scheduled time.
+21	Manual-only release checks	REL-005	Board brief flow with required config/keys.
+21	Manual-only release checks	REL-006	Razorpay webhook with real callback behavior.
+21	Manual-only release checks	REL-007	PWA install on Android and desktop Chrome.
+21	Manual-only release checks	REL-008	PWA offline shell, reconnect, and service worker update.
+21	Manual-only release checks	REL-009	Multi-device grant state sync between browser A and B.
+21	Manual-only release checks	REL-010	Production DPDP checks including consent audit and hosting-region verification.
+21	Manual-only release checks	REL-011	No flash of unauthorized data on any route.
+21	Manual-only release checks	REL-012	Critical user journeys pass on latest Chrome.
+21	Manual-only release checks	REL-013	Critical user journeys pass on mobile browser.
+21	Manual-only release checks	REL-014	Critical user journeys pass with low-bandwidth network simulation.
+21	Manual-only release checks	REL-015	No blocker, critical, or high-severity bug remains open for release.
