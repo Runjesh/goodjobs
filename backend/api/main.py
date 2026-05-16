@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import uuid
 
 from agents.donor_nurture_agent import donor_nurture_app
@@ -67,6 +68,7 @@ from core.s3_storage import (
     delete_file,
 )
 from core.dpdp import require_beneficiary_consent, anonymize_beneficiary_record, extract_consent_given
+from core.google_token import verify_google_credential
 from core.rate_limit import check_login_rate_limit
 from core.fcra_guard import assert_fcra_admin_within_cap
 
@@ -3027,6 +3029,14 @@ class LoginResponse(BaseModel):
     ngo_name: str
     expires_in_hours: int = 24
 
+class GoogleAuthRequest(BaseModel):
+    credential: str
+    mode: str = "login"  # login | signup
+    ngo_name: Optional[str] = None
+    ngo_slug: Optional[str] = None
+    full_name: Optional[str] = None
+
+
 class RegisterNgoRequest(BaseModel):
     ngo_name: str
     ngo_slug: str
@@ -3245,6 +3255,178 @@ def login(body: LoginRequest, request: Request):
         ngo_id=user["ngo_id"],
         ngo_name=user["ngo_name"],
     )
+
+
+def _login_row_to_response(body_email: str, row: tuple) -> LoginResponse:
+    user_id, full_name, role, ngo_id, ngo_name = row[0], row[1], row[2], row[3], row[4]
+    token = create_access_token(
+        user_id=user_id,
+        email=body_email,
+        role=role,
+        ngo_id=ngo_id,
+        ngo_name=ngo_name,
+    )
+    return LoginResponse(
+        access_token=token,
+        user_id=user_id,
+        name=full_name,
+        email=body_email,
+        role=role,
+        ngo_id=ngo_id,
+        ngo_name=ngo_name,
+    )
+
+
+@app.post("/auth/google", response_model=LoginResponse, tags=["Auth"])
+def auth_google(body: GoogleAuthRequest, request: Request):
+    """
+    Sign in or register with a Google ID token (Sign-In with Google).
+    Set GOOGLE_CLIENT_ID (server) to the same OAuth client as VITE_GOOGLE_CLIENT_ID (build).
+    """
+    try:
+        idinfo = verify_google_credential(body.credential)
+    except ValueError as e:
+        if str(e) == "missing_google_client_id":
+            raise HTTPException(
+                status_code=501,
+                detail="Google sign-in is not configured. Set GOOGLE_CLIENT_ID on the API.",
+            ) from e
+        raise HTTPException(status_code=401, detail="Invalid Google credential.") from e
+    except Exception as e:  # noqa: BLE001 — library raises various errors
+        raise HTTPException(status_code=401, detail="Invalid Google credential.") from e
+
+    if not idinfo.get("email_verified"):
+        raise HTTPException(status_code=400, detail="Google email is not verified.")
+
+    email = str(idinfo.get("email") or "").lower().strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Google account has no email.")
+
+    mode = (body.mode or "login").lower().strip()
+    display_name = (body.full_name or idinfo.get("name") or email.split("@")[0]).strip()
+
+    if mode == "login":
+        check_login_rate_limit(request)
+        with db_conn() as conn:
+            if conn is not None:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT u.id::text, u.full_name, u.role::text, n.id::text, n.name
+                    FROM users u
+                    JOIN ngos n ON n.id = u.ngo_id
+                    WHERE u.email = %s AND u.is_active = true
+                    """,
+                    (email,),
+                )
+                row = cur.fetchone()
+                if row:
+                    return _login_row_to_response(email, row)
+        if email in DEMO_USERS:
+            u = DEMO_USERS[email]
+            token = create_access_token(
+                user_id=u["user_id"],
+                email=email,
+                role=u["role"],
+                ngo_id=u["ngo_id"],
+                ngo_name=u["ngo_name"],
+            )
+            return LoginResponse(
+                access_token=token,
+                user_id=u["user_id"],
+                name=u["name"],
+                email=email,
+                role=u["role"],
+                ngo_id=u["ngo_id"],
+                ngo_name=u["ngo_name"],
+            )
+        raise HTTPException(
+            status_code=404,
+            detail="No GoodJobs account for this Google email. Complete sign-up first.",
+        )
+
+    # signup
+    if not body.ngo_name or not (body.ngo_slug or "").strip():
+        raise HTTPException(status_code=400, detail="Organisation name and slug are required for Google sign-up.")
+    ngo_slug = body.ngo_slug.strip()
+    ngo_name = body.ngo_name.strip()
+    role = "ed"
+    random_pw = secrets.token_urlsafe(32)
+
+    with db_conn() as conn:
+        if conn is None:
+            if email in DEMO_USERS:
+                raise HTTPException(status_code=409, detail="Email already registered (demo mode).")
+            ngo_id = f"ngo_{ngo_slug}"
+            user_id = f"user_{int(datetime.now(timezone.utc).timestamp())}"
+            DEMO_USERS[email] = {
+                "user_id": user_id,
+                "name": display_name,
+                "password": random_pw,
+                "role": role,
+                "ngo_id": ngo_id,
+                "ngo_name": ngo_name,
+            }
+            token = create_access_token(
+                user_id=user_id,
+                email=email,
+                role=role,
+                ngo_id=ngo_id,
+                ngo_name=ngo_name,
+            )
+            return LoginResponse(
+                access_token=token,
+                user_id=user_id,
+                name=display_name,
+                email=email,
+                role=role,
+                ngo_id=ngo_id,
+                ngo_name=ngo_name,
+            )
+
+        cur = conn.cursor()
+        cur.execute("SELECT id::text FROM users WHERE email = %s", (email,))
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="This email is already registered. Sign in instead.")
+
+        cur.execute(
+            """
+            INSERT INTO ngos (name, slug, tier, is_active)
+            VALUES (%s, %s, 'standard', true)
+            RETURNING id::text, name
+            """,
+            (ngo_name, ngo_slug),
+        )
+        ngo_id, ngo_name_db = cur.fetchone()
+        pw_hash = hashlib.sha256((random_pw + os.getenv("JWT_SECRET", "dev")).encode()).hexdigest()
+
+        cur.execute(
+            """
+            INSERT INTO users (ngo_id, email, password_hash, full_name, role, is_active)
+            VALUES (%s::uuid, %s, %s, %s, %s::user_role, true)
+            RETURNING id::text, full_name, role
+            """,
+            (ngo_id, email, pw_hash, display_name, role),
+        )
+        user_id, full_name_db, role_db = cur.fetchone()
+
+        token = create_access_token(
+            user_id=user_id,
+            email=email,
+            role=role_db,
+            ngo_id=ngo_id,
+            ngo_name=ngo_name_db,
+        )
+        return LoginResponse(
+            access_token=token,
+            user_id=user_id,
+            name=full_name_db,
+            email=email,
+            role=role_db,
+            ngo_id=ngo_id,
+            ngo_name=ngo_name_db,
+        )
+
 
 @app.post("/auth/refresh", tags=["Auth"])
 def refresh_token(current_user: TokenUser = Depends(get_current_user)):

@@ -97,8 +97,9 @@ If the frontend URL only serves HTML/JS, **`POST …/auth/login` on that host wi
    so CORS allows `fetch` from the UI. If unset, the API defaults to `localhost:5173` and `https://goodjobs.co.in`.
 
 2. **Frontend build** (variables in Railway **before** `npm run build` / Docker build):
-   - **Required for split deploy:** `VITE_API_BASE_URL=https://<your-fastapi-service>.up.railway.app` (no trailing slash).
+   - **Required for split deploy:** `VITE_API_BASE_URL=https://<your-fastapi-service>.up.railway.app` (no trailing slash). You can list **comma-separated fallbacks** (wrong static URL first, API second) and the SPA will probe until it gets JSON.
    - **Monolith only:** if FastAPI truly serves the SPA from the **same** host, set `VITE_USE_SAME_ORIGIN_API=true` and omit `VITE_API_BASE_URL`.
+   - **Sign in with Google (optional):** same **Web client ID** in `VITE_GOOGLE_CLIENT_ID` (frontend build) and `GOOGLE_CLIENT_ID` (API runtime). In [Google Cloud Console](https://console.cloud.google.com/), create an OAuth 2.0 Client ID (Web application), add **Authorized JavaScript origins** (your SPA URL) and **Authorized redirect URIs** is not required for GIS button flow. Without these vars, email/password auth still works.
    - **Hotfix without rebuild:** in the browser console,  
      `localStorage.setItem('goodjobs_api_base','https://<your-fastapi-service>.up.railway.app'); location.reload()`  
      (then fix the build env and redeploy).

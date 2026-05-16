@@ -9,6 +9,8 @@ import { useAuth, ROLE_META } from '../../context/AuthContext';
 import { apiFetch, expectsRealBackend } from '../../api/client';
 import { makeFreshTrial } from '../../utils/trial';
 import { clearWizardState } from '../../utils/wizard';
+import { GoogleSignInButton } from '../../components/Auth/GoogleSignInButton';
+import { decodeGoogleCredentialPayload, getGoogleClientId } from '../../lib/googleIdentity';
 import './Auth.css';
 import './Signup.css';
 
@@ -46,6 +48,7 @@ const Signup: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [googleCredential, setGoogleCredential] = useState<string | null>(null);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const handleResend = () => {
@@ -69,25 +72,12 @@ const Signup: React.FC = () => {
     };
   }, []);
 
-  // ── Mock OAuth: pre-fills the form, doesn't bypass verification ─────────
-  const handleGoogleOAuth = () => {
-    setForm({
-      ngoName: 'Asha Foundation',
-      fullName: 'Anjali Mehta',
-      email: 'anjali@ashafoundation.org',
-      password: 'DemoPass123!',
-      phone: '+91 98200 12345',
-      causeArea: 'Education',
-      teamSize: '6–15 people',
-    });
-    toast.success('Pulled details from Google account', { icon: '🔐' });
-  };
-
+  // ── Google Sign-In: pre-fills form; full account is created on verify ─────────
   const isFormValid =
     form.ngoName.trim() &&
     form.fullName.trim() &&
     /\S+@\S+\.\S+/.test(form.email) &&
-    form.password.length >= 8 &&
+    (googleCredential || form.password.length >= 8) &&
     form.causeArea &&
     form.teamSize;
 
@@ -140,6 +130,48 @@ const Signup: React.FC = () => {
     };
 
     try {
+      if (googleCredential) {
+        const res = await apiFetch('/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          noMockFallback: expectsRealBackend(),
+          body: JSON.stringify({
+            credential: googleCredential,
+            mode: 'signup',
+            ngo_name: form.ngoName.trim(),
+            ngo_slug: ngoSlug,
+            full_name: form.fullName.trim(),
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json() as {
+            access_token?: string;
+            user_id?: string;
+            ngo_id?: string;
+            ngo_name?: string;
+          };
+          if (data.access_token && data.user_id && data.ngo_id) {
+            finishSignup(
+              data.user_id,
+              data.ngo_id,
+              data.access_token,
+              data.ngo_name ?? form.ngoName.trim(),
+            );
+            setVerifyBusy(false);
+            setTimeout(() => navigate('/onboarding', { replace: true }), 800);
+            return;
+          }
+        }
+        const errBody = await res.json().catch(() => ({})) as { detail?: string };
+        toast.error(
+          typeof errBody.detail === 'string'
+            ? errBody.detail
+            : 'Could not create your account with Google. Try email or sign in.',
+        );
+        setVerifyBusy(false);
+        return;
+      }
+
       const res = await apiFetch('/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -239,12 +271,39 @@ const Signup: React.FC = () => {
                 <p>Tell us about your NGO. You'll be running in 5 minutes.</p>
               </div>
 
-              <button type="button" className="signup-google-btn" onClick={handleGoogleOAuth}>
-                <span className="signup-google-icon">G</span>
-                Continue with Google
-              </button>
-
-              <div className="auth-divider"><span>or use email</span></div>
+              {getGoogleClientId() ? (
+                <>
+                  <GoogleSignInButton
+                    className="signup-google-slot"
+                    onCredential={(resp) => {
+                      if (!resp.credential) return;
+                      setGoogleCredential(resp.credential);
+                      const p = decodeGoogleCredentialPayload(resp.credential);
+                      if (p?.email || p?.name) {
+                        setForm((f) => ({
+                          ...f,
+                          email: p.email ?? f.email,
+                          fullName: p.name ?? f.fullName,
+                        }));
+                      }
+                      toast.success('Google account linked — add your NGO details below.', { icon: '🔐' });
+                    }}
+                  />
+                  {googleCredential && (
+                    <p className="signup-google-hint">
+                      Using Google for this account — password not required.{' '}
+                      <button
+                        type="button"
+                        className="signup-google-clear"
+                        onClick={() => { setGoogleCredential(null); }}
+                      >
+                        Clear
+                      </button>
+                    </p>
+                  )}
+                  <div className="auth-divider"><span>or use email</span></div>
+                </>
+              ) : null}
 
               <form onSubmit={handleSubmitForm} className="signup-form">
                 <div className="signup-row">
@@ -278,16 +337,18 @@ const Signup: React.FC = () => {
                 </div>
 
                 <div className="input-group">
-                  <label className="input-label" htmlFor="su-password">Password *</label>
+                  <label className="input-label" htmlFor="su-password">
+                    Password *{googleCredential ? ' (optional with Google)' : ''}
+                  </label>
                   <input
                     id="su-password"
                     type="password"
                     className="input-field"
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    placeholder="At least 8 characters"
-                    required
-                    minLength={8}
+                    placeholder={googleCredential ? 'Not needed when using Google' : 'At least 8 characters'}
+                    required={!googleCredential}
+                    minLength={googleCredential ? 0 : 8}
                     autoComplete="new-password"
                   />
                 </div>
@@ -354,7 +415,7 @@ const Signup: React.FC = () => {
                   {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend verification email'}
                 </button>
               </p>
-              <button className="signup-verify-back" onClick={() => setStage('form')}>
+              <button className="signup-verify-back" onClick={() => { setGoogleCredential(null); setStage('form'); }}>
                 ← Back to edit details
               </button>
             </div>

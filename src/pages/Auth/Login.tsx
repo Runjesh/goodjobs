@@ -6,6 +6,8 @@ import { useAuth, ROLE_META, type UserRole } from '../../context/AuthContext';
 import { makeFreshTrial, loadOrgBilling } from '../../utils/trial';
 import { apiFetch, expectsRealBackend } from '../../api/client';
 import { readApiError } from '../../utils/apiPersist';
+import { GoogleSignInButton } from '../../components/Auth/GoogleSignInButton';
+import { getGoogleClientId } from '../../lib/googleIdentity';
 import './Auth.css';
 
 // ── Social proof lines ────────────────────────────────────────────────────────
@@ -95,6 +97,48 @@ const Login: React.FC = () => {
     }
     const acc = demoAccounts.find(a => a.role === roleId)!;
     doLogin(roleId, acc, null);
+  };
+
+  const handleGoogleCredential = async (cred: { credential: string }) => {
+    if (!getGoogleClientId()) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch('/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: cred.credential, mode: 'login' }),
+      });
+      if (res.ok) {
+        const data = await res.json() as {
+          role: UserRole;
+          email: string;
+          name?: string;
+          access_token: string;
+          ngo_id?: string;
+          ngo_name?: string;
+        };
+        const roleId = data.role;
+        const meta = ROLE_META[roleId];
+        login({
+          id: `user_${roleId}`,
+          email: data.email,
+          name: data.name || data.email.split('@')[0],
+          role: roleId,
+          ngoId: data.ngo_id || 'ngo_001',
+          ngoName: data.ngo_name || 'India NGO Trust',
+          token: data.access_token,
+          avatar: meta.icon,
+        });
+        toast.success(`Welcome! Signed in as ${meta.label}`, { icon: meta.icon, duration: 3000 });
+        setTimeout(() => navigate('/'), 300);
+        return;
+      }
+      toast.error(await readApiError(res));
+    } catch {
+      toast.error('Google sign-in failed. Try email or check your connection.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -264,6 +308,15 @@ const Login: React.FC = () => {
             ) : (
               /* ── Sign in mode ───────────────────────────────────── */
               <>
+                {getGoogleClientId() && (
+                  <>
+                    <GoogleSignInButton
+                      className="auth-google-slot"
+                      onCredential={(resp) => { void handleGoogleCredential(resp); }}
+                    />
+                    <div className="auth-divider"><span>or email</span></div>
+                  </>
+                )}
                 <form onSubmit={handleLogin} className="auth-form">
                   <div className="input-group" style={{ marginBottom: '1rem' }}>
                     <label className="input-label" htmlFor="login-email">Work Email</label>
